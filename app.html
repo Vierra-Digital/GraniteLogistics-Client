@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0a1622" />
+<title>Granite Logistics — Operations Platform</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div id="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <a class="brand" href="index.html" title="Back to site">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="26" height="26"><path d="M16 2 29 9.5v13L16 30 3 22.5v-13Z" fill="none" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/><path d="M11 13h10M11 17h10M16 13v8" stroke="#2f9bd6" stroke-width="2.2" stroke-linecap="round"/></svg>
+      </div>
+      <div class="brand-text">
+        <strong>GRANITE LOGISTICS</strong>
+        <span>Operations Platform</span>
+      </div>
+    </a>
+
+    <nav class="nav">
+      <button class="nav-item active" data-view="overview"><span class="ico">▦</span> Executive Overview</button>
+      <button class="nav-item" data-view="ingest"><span class="ico">⇄</span> Order Ingest <em class="badge-api">API</em></button>
+      <button class="nav-item" data-view="runner"><span class="ico">▣</span> Runner Dashboard</button>
+      <button class="nav-item" data-view="batch"><span class="ico">⊞</span> Batch &amp; Lane Routing</button>
+      <button class="nav-item" data-view="driver"><span class="ico">◎</span> Driver Scan</button>
+      <button class="nav-item" data-view="tracking"><span class="ico">⊶</span> Chain of Custody</button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <button id="run-demo" class="btn-demo">▶ Run Live Demo</button>
+      <div class="env-pill"><span class="dot"></span> Sandbox / Demo Data</div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <h1 id="view-title">Executive Overview</h1>
+        <p id="view-sub" class="muted">Real-time visibility from auction win to delivery confirmation.</p>
+      </div>
+      <div class="topbar-right">
+        <div class="integration-chip" title="Simulated connection">
+          <span class="dot ok"></span> Shopify
+        </div>
+        <div class="integration-chip" title="Simulated connection">
+          <span class="dot ok"></span> UPS API
+        </div>
+        <div class="integration-chip" title="Simulated connection">
+          <span class="dot ok"></span> FedEx API
+        </div>
+      </div>
+    </header>
+
+    <div class="view-wrap">
+      <!-- ============ OVERVIEW ============ -->
+      <section class="view active" id="view-overview">
+        <div class="kpi-row" id="kpi-row"></div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head">
+              <h2>Pipeline</h2>
+              <span class="muted">Live chain-of-custody stages</span>
+            </div>
+            <div class="funnel" id="funnel"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h2>Carrier Mix</h2>
+              <span class="muted">Active outbound by carrier</span>
+            </div>
+            <div id="carrier-mix" class="carrier-mix"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>Active Shipments</h2>
+            <span class="muted">Click a row for full chain of custody</span>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="overview-table"></table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ INGEST ============ -->
+      <section class="view" id="view-ingest">
+        <p class="lead">Orders flow in automatically from each client's commerce backend — no manual re-entry. Below is a live view of inbound connectors.</p>
+        <div class="connectors" id="connectors"></div>
+        <div class="card">
+          <div class="card-head">
+            <h2>Inbound Order Stream</h2>
+            <button class="btn" id="pull-orders">⇣ Pull New Orders</button>
+          </div>
+          <div id="ingest-feed" class="ingest-feed"></div>
+        </div>
+      </section>
+
+      <!-- ============ RUNNER ============ -->
+      <section class="view" id="view-runner">
+        <p class="lead">Daily pickup list for store runners. Capture a condition photo and generate the Code&nbsp;128 tracking label before the item leaves the facility.</p>
+        <div class="card">
+          <div class="card-head"><h2>Today's Pickups</h2><span class="muted" id="runner-count"></span></div>
+          <div id="runner-list" class="pickup-list"></div>
+        </div>
+      </section>
+
+      <!-- ============ BATCH ============ -->
+      <section class="view" id="view-batch">
+        <p class="lead">Group picked-up items into a carrier manifest, assign them to a physical dock lane, and hand off a clean digital manifest.</p>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head"><h2>Staged Items</h2><span class="muted">Select items to batch</span></div>
+            <div id="stage-list" class="stage-list"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>Build Manifest</h2></div>
+            <div class="manifest-builder">
+              <label>Carrier
+                <select id="batch-carrier">
+                  <option value="UPS">UPS — Enterprise</option>
+                  <option value="FedEx">FedEx — Enterprise</option>
+                  <option value="Dayton Freight">Dayton Freight</option>
+                  <option value="Pitt Ohio">Pitt Ohio</option>
+                </select>
+              </label>
+              <label>Dock Lane
+                <select id="batch-lane">
+                  <option>Lane 1</option><option>Lane 2</option><option>Lane 3</option><option>Lane 4</option>
+                </select>
+              </label>
+              <div class="manifest-selected" id="manifest-selected">No items selected.</div>
+              <button class="btn primary" id="commit-batch" disabled>Generate Manifest &amp; Stage</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ DRIVER ============ -->
+      <section class="view" id="view-driver">
+        <p class="lead">Drivers scan the Code&nbsp;128 label to pull destination details instantly — no paper manifests.</p>
+        <div class="grid-2">
+          <div class="card scan-card">
+            <div class="card-head"><h2>Scan Label</h2></div>
+            <div class="scanner">
+              <div class="scan-window"><div class="scan-line"></div><span>◎ Camera viewfinder</span></div>
+              <label class="muted small">Simulate a scan</label>
+              <select id="scan-select"></select>
+              <button class="btn primary" id="do-scan">Scan Barcode</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>Package Details</h2></div>
+            <div id="scan-result" class="scan-result"><p class="muted">Scan a label to retrieve package details.</p></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ TRACKING ============ -->
+      <section class="view" id="view-tracking">
+        <p class="lead">End-to-end, tamper-evident chain of custody for every package — the answer to "where is my package?"</p>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head"><h2>All Packages</h2></div>
+            <div id="tracking-list" class="tracking-list"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2 id="coc-title">Chain of Custody</h2></div>
+            <div id="coc-detail"><p class="muted">Select a package to view its full journey.</p></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<!-- Modal -->
+<div class="modal-backdrop" id="modal-backdrop">
+  <div class="modal" id="modal"></div>
+</div>
+
+<!-- Toasts -->
+<div class="toast-stack" id="toasts"></div>
+
+<script src="barcode.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

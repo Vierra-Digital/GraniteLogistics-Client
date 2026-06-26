@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0a1622" />
+<title>Granite Logistics — Freight, Fulfillment &amp; Last-Mile</title>
+<meta name="description" content="Granite Logistics is the API-first logistics platform: pull orders from your store, print carrier-ready labels, and keep a tamper-evident chain of custody from dock to doorstep." />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="landing.css" />
+</head>
+<body>
+
+<!-- Header -->
+<header class="site-header">
+  <a class="wordmark" href="index.html">
+    <span class="mark" aria-hidden="true">
+      <svg viewBox="0 0 32 32" width="30" height="30"><path d="M16 1.5 30 9.25v15.5L16 32.5 2 24.75V9.25Z" fill="#13263a" stroke="#2f9bd6" stroke-width="2" stroke-linejoin="round"/><path d="M10 13h12M10 17h12M16 12.5v9" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
+    </span>
+    <span class="wm-text">GRANITE<strong>LOGISTICS</strong></span>
+  </a>
+  <nav class="site-nav">
+    <a href="#network">Network</a>
+    <a href="#track">Track</a>
+    <a href="app.html">Platform</a>
+    <a class="phone" href="tel:+19375550118">(937) 555-0118</a>
+  </nav>
+  <a class="btn-ghost" href="app.html">Launch Platform</a>
+</header>
+
+<!-- Hero (single section) -->
+<main class="hero" id="network">
+  <div class="hero-grid-bg" aria-hidden="true"></div>
+  <svg class="hero-route" viewBox="0 0 600 400" aria-hidden="true" preserveAspectRatio="xMidYMid slice">
+    <path d="M40 330 C 180 300, 220 120, 360 120 S 540 60, 580 70" fill="none" stroke="#2f9bd6" stroke-width="2" stroke-dasharray="6 8" opacity="0.4"/>
+    <circle cx="40" cy="330" r="6" fill="#2f9bd6"/>
+    <circle cx="580" cy="70" r="6" fill="#fff"/>
+  </svg>
+
+  <div class="hero-inner">
+    <!-- Copy -->
+    <div class="hero-copy">
+      <p class="eyebrow"><span class="tick"></span> FREIGHT &middot; FULFILLMENT &middot; LAST-MILE</p>
+      <h1>From the dock<br>to the doorstep.<br><span class="accent">Tracked. Photographed. Proven.</span></h1>
+      <p class="sub">
+        Granite Logistics is the API-first platform that pulls orders straight from your store,
+        prints carrier-ready labels, and holds a tamper-evident record at every handoff —
+        so you always know exactly where it is and what condition it's in.
+      </p>
+
+      <div class="cta-row">
+        <button id="install-btn" class="btn-primary">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Install the App
+        </button>
+        <a class="btn-outline" href="app.html">Open the Platform &rarr;</a>
+      </div>
+      <p class="install-hint" id="install-hint">Installs to your phone or desktop &middot; works offline &middot; no app store required.</p>
+
+      <!-- Tracking -->
+      <form class="track-bar" id="track-form">
+        <label for="track-input">Track a shipment</label>
+        <div class="track-row">
+          <input id="track-input" type="text" inputmode="text" placeholder="Tracking #  ·  e.g. GL-1042" autocomplete="off" />
+          <button type="submit">Track &rarr;</button>
+        </div>
+      </form>
+
+      <!-- Stats -->
+      <ul class="stats">
+        <li><b>1.2M+</b><span>Packages moved</span></li>
+        <li><b>99.4%</b><span>On-time delivery</span></li>
+        <li><b>48</b><span>States served</span></li>
+        <li><b>4</b><span>National carriers</span></li>
+      </ul>
+    </div>
+
+    <!-- Shipping label visual -->
+    <div class="hero-visual" aria-hidden="true">
+      <div class="label-paper">
+        <div class="lp-head">
+          <span class="lp-brand"><span class="lp-hex"></span> GRANITE LOGISTICS</span>
+          <span class="lp-priority">PRIORITY</span>
+        </div>
+        <div class="lp-addr">
+          <div><b>FROM</b><span>Granite DC &mdash; Dock B<br>2200 Industrial Pkwy<br>Dayton, OH 45402</span></div>
+          <div><b>SHIP TO</b><span>E. Castellano<br>4471 Lakeshore Dr<br>Cincinnati, OH 45202</span></div>
+        </div>
+        <div class="lp-meta">
+          <span>CARRIER <b>UPS GROUND</b></span>
+          <span>LANE <b>2 / DOCK B</b></span>
+          <span>WT <b>14.2 LB</b></span>
+        </div>
+        <div class="lp-barcode" id="hero-barcode"></div>
+        <div class="lp-track">GL10428861US</div>
+        <div class="lp-stamp">CONDITION<br>VERIFIED</div>
+      </div>
+      <div class="lp-shadow"></div>
+    </div>
+  </div>
+
+  <!-- Credential strip -->
+  <div class="cred-strip" id="track">
+    <span>API-FIRST INTEGRATION</span>
+    <span>TLS 1.3 ENCRYPTED</span>
+    <span>SOC 2 ROADMAP</span>
+    <span>UPS &middot; FEDEX CERTIFIED LABELS</span>
+    <span>SMARTWAY-READY</span>
+  </div>
+</main>
+
+<!-- Footer -->
+<footer class="site-footer">
+  <span>&copy; <span id="year">2026</span> Granite Logistics LLC &middot; Dayton, Ohio</span>
+  <span class="foot-contact"><a href="tel:+19375550118">(937) 555-0118</a> &middot; <a href="mailto:ops@granitelogistics.co">ops@granitelogistics.co</a></span>
+</footer>
+
+<div class="toast-stack" id="toasts"></div>
+
+<script src="barcode.js"></script>
+<script src="landing.js"></script>
+</body>
+</html>
