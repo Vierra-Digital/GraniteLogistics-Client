@@ -325,18 +325,31 @@
           </div>
         </div>
         <div class="card">
-          <div class="card-head"><h2>Cloud Sync</h2><span class="muted">Share data across devices via the backend API</span></div>
+          <div class="card-head"><h2>Cloud Sync</h2><span class="muted">Share data across devices</span></div>
           <div class="grid-2">
             <div class="order-form">
-              <div class="ff"><label>Server URL <span class="muted small">(blank = this server)</span></label><input id="cloud-url" placeholder="https://your-host.example.com" /></div>
-              <div class="ff"><label>API key</label><input id="cloud-key" placeholder="granite-dev-key" /></div>
+              <div class="ff"><label>Provider</label>
+                <select id="cloud-provider">
+                  <option value="granite">Granite API (Node server)</option>
+                  <option value="supabase">Supabase</option>
+                </select>
+              </div>
+              <div id="grp-granite">
+                <div class="ff"><label>Server URL <span class="muted small">(blank = this server)</span></label><input id="cloud-url" placeholder="https://your-host.example.com" /></div>
+                <div class="ff"><label>API key (tenant)</label><input id="cloud-key" placeholder="granite-dev-key" /></div>
+              </div>
+              <div id="grp-supabase" style="display:none">
+                <div class="ff"><label>Supabase Project URL</label><input id="cloud-sburl" placeholder="https://xxxx.supabase.co" /></div>
+                <div class="ff"><label>Supabase anon key</label><input id="cloud-sbanon" placeholder="eyJhbGciOi…" /></div>
+                <div class="ff"><label>Workspace / tenant</label><input id="cloud-tenant" placeholder="default" /></div>
+              </div>
             </div>
             <div class="import-box">
               <button class="btn primary" id="cloud-push">↑ Push to cloud</button>
               <button class="btn" id="cloud-pull">↓ Pull from cloud</button>
               <label class="chk"><input type="checkbox" id="cloud-auto" /> Auto-sync (push on change · pull on load)</label>
               <div id="cloud-status" class="muted small"></div>
-              <p class="muted small">Pushes/pulls the full workspace to the Granite API so another device can load the same data. The key maps to a tenant (e.g. <code>acme-key</code>) — each tenant's data is isolated.</p>
+              <p class="muted small"><b>Supabase:</b> run <code>supabase/schema.sql</code> in your project, then paste the Project URL + anon key. Each workspace/tenant is its own row — works on Netlify with no server.</p>
             </div>
           </div>
         </div>

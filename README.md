@@ -120,10 +120,22 @@ API (all but health require header `x-api-key`):
 `granite-dev-key`→default, `acme-key`→acme, `globex-key`→globex; override with
 `GL_TENANTS='{"key":"tenant"}'`). State persists per tenant under `server/data/`.
 
-In the platform, **Settings → Cloud Sync**: set the server URL (blank = same origin)
-and key (= tenant), then **Push** / **Pull** — or enable **Auto-sync** (debounced push
-on change, pull on load) for hands-off multi-device sync. **Order Ingest → API &
-Webhooks** has a live curl example and a one-click inbound-order simulation.
+In the platform, **Settings → Cloud Sync**: pick a **provider**, then **Push** / **Pull**
+— or enable **Auto-sync** (debounced push on change, pull on load).
+
+### Run free on Netlify + Supabase (no server)
+The app can sync straight to Supabase from the browser, so the whole thing is static:
+1. **Supabase** → create a free project; SQL Editor → run `supabase/schema.sql`.
+2. **Netlify** → deploy this repo (drag-drop the folder, or connect the repo; `netlify.toml`
+   needs no build step).
+3. In the deployed app: **Settings → Cloud Sync → Provider: Supabase**, paste your
+   **Project URL** + **anon key**, set a **workspace** name, and Push / enable Auto-sync.
+
+Security note: the anon key is public, so the default schema lets anyone with it + the
+workspace name read/write that row — fine for a pilot (use a non-guessable workspace
+name); harden with Supabase Auth + RLS (commented in `schema.sql`) for production.
+The bundled Node server (and `POST /api/orders` webhooks) is the alternative provider
+for self-hosting.
 
 GitHub Pages is static-only, so it serves the PWA; for live cloud sync, host
 `server/server.js` on any Node host (Render, Railway, Fly, a VM) and point the

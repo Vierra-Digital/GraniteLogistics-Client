@@ -553,6 +553,7 @@
   // API-first demo: push current state, POST an order to the webhook, pull it back.
   function simulateWebhook() {
     var c = cloudCfg(), base = c.url || "";
+    if (c.provider === "supabase") { toast("Webhook ingest needs the Node/Edge backend. On Supabase, orders sync via Cloud Sync.", "ok"); return; }
     var st = $("#webhook-status");
     var item = pick(ITEMS), city = pick(CITIES);
     var order = { name: pick(FIRST) + " " + pick(LAST), item: item[0], value: item[1], address: (100 + rng(8900)) + " " + pick(STREETS), city: city[0], state: city[1], zip: city[2], source: "Shopify (webhook)" };
@@ -828,24 +829,68 @@
     set("name", c.name); set("address", c.address); set("phone", c.phone); set("email", c.email);
     set("carrier", s.defaultCarrier); set("lane", s.defaultLane);
     var cl = s.cloud || {};
-    var cu = $("#cloud-url"); if (cu) cu.value = cl.url || "";
-    var ck = $("#cloud-key"); if (ck) ck.value = cl.key || "granite-dev-key";
+    var setv = function (id, v) { var el = $(id); if (el) el.value = v; };
+    var cp = $("#cloud-provider"); if (cp) cp.value = cl.provider || "granite";
+    setv("#cloud-url", cl.url || ""); setv("#cloud-key", cl.key || "granite-dev-key");
+    setv("#cloud-sburl", cl.sbUrl || ""); setv("#cloud-sbanon", cl.sbAnon || ""); setv("#cloud-tenant", cl.tenant || "default");
     var ca = $("#cloud-auto"); if (ca) ca.checked = !!cl.autoSync;
+    syncProviderUI();
   }
 
-  // ---- Cloud sync (talks to the backend API) ----
+  // ---- Cloud sync (provider: Granite API server OR Supabase REST) ----
   function cloudCfg() {
     var c = state.settings.cloud || {};
-    return { url: (c.url || "").trim().replace(/\/$/, ""), key: (c.key || "granite-dev-key").trim() };
+    return {
+      provider: c.provider || "granite",
+      url: (c.url || "").trim().replace(/\/$/, ""),
+      key: (c.key || "granite-dev-key").trim(),
+      sbUrl: (c.sbUrl || "").trim().replace(/\/$/, ""),
+      sbAnon: (c.sbAnon || "").trim(),
+      tenant: (c.tenant || "default").trim() || "default",
+      autoSync: !!c.autoSync
+    };
   }
   function saveCloudInputs() {
+    var v = function (id, d) { var el = $(id); return (el ? (el.value || "") : "").trim() || d; };
     state.settings.cloud = {
-      url: (($("#cloud-url") || {}).value || "").trim(),
-      key: (($("#cloud-key") || {}).value || "").trim() || "granite-dev-key",
+      provider: (($("#cloud-provider") || {}).value) || "granite",
+      url: v("#cloud-url", ""), key: v("#cloud-key", "granite-dev-key"),
+      sbUrl: v("#cloud-sburl", ""), sbAnon: v("#cloud-sbanon", ""), tenant: v("#cloud-tenant", "default"),
       autoSync: !!(($("#cloud-auto") || {}).checked)
     };
     save();
   }
+  function fullState() { return { packages: state.packages, manifests: state.manifests, loadUnits: state.loadUnits, events: state.events, settings: state.settings }; }
+  function applyPulled(s) {
+    if (!s || !Array.isArray(s.packages)) return false;
+    state.packages = s.packages; state.manifests = s.manifests || []; state.loadUnits = s.loadUnits || []; state.events = s.events || [];
+    save(); return true;
+  }
+  // Returns a Promise resolving to {count}; rejects on error.
+  function pushState() {
+    var c = cloudCfg();
+    if (c.provider === "supabase") {
+      return fetch(c.sbUrl + "/rest/v1/workspaces", {
+        method: "POST",
+        headers: { apikey: c.sbAnon, Authorization: "Bearer " + c.sbAnon, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify({ tenant: c.tenant, data: fullState(), updated_at: new Date().toISOString() })
+      }).then(function (r) { if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); }); return { count: state.packages.length }; });
+    }
+    return fetch(c.url + "/api/state", { method: "PUT", headers: { "Content-Type": "application/json", "x-api-key": c.key }, body: JSON.stringify(fullState()) })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || r.status); return { count: j.packages }; }); });
+  }
+  // Returns a Promise resolving to a state object (or null if none).
+  function pullState() {
+    var c = cloudCfg();
+    if (c.provider === "supabase") {
+      return fetch(c.sbUrl + "/rest/v1/workspaces?select=data&tenant=eq." + encodeURIComponent(c.tenant), { headers: { apikey: c.sbAnon, Authorization: "Bearer " + c.sbAnon } })
+        .then(function (r) { if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); }); return r.json(); })
+        .then(function (rows) { return (rows && rows[0]) ? rows[0].data : null; });
+    }
+    return fetch(c.url + "/api/state", { headers: { "x-api-key": c.key } })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); });
+  }
+
   // Auto-sync: debounced push on change, pull-or-seed on load.
   var autoPushTimer = null, syncing = false;
   function scheduleAutoPush() {
@@ -854,49 +899,34 @@
     clearTimeout(autoPushTimer);
     autoPushTimer = setTimeout(autoPush, 1500);
   }
-  function autoPush() {
-    var c = cloudCfg();
-    fetch(c.url + "/api/state", { method: "PUT", headers: { "Content-Type": "application/json", "x-api-key": c.key }, body: JSON.stringify({ packages: state.packages, manifests: state.manifests, loadUnits: state.loadUnits, events: state.events, settings: state.settings }) })
-      .then(function (r) { if (r.ok) cloudStatus("✓ Auto-synced · " + new Date().toLocaleTimeString()); }).catch(function () { });
-  }
+  function autoPush() { pushState().then(function () { cloudStatus("✓ Auto-synced · " + new Date().toLocaleTimeString()); }).catch(function () { }); }
   function bootSync() {
-    var cl = state.settings && state.settings.cloud;
-    if (!cl || !cl.autoSync) return;
-    var c = cloudCfg(); syncing = true;
-    fetch(c.url + "/api/state", { headers: { "x-api-key": c.key } })
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (s) {
-        if (s && Array.isArray(s.packages) && s.packages.length) {
-          state.packages = s.packages; state.manifests = s.manifests || []; state.loadUnits = s.loadUnits || []; state.events = s.events || [];
-          save(); applyRole(); go(allowedViews()[0]); toast("Synced from cloud", "api");
-        } else { autoPush(); }
-        syncing = false;
-      }).catch(function () { syncing = false; });
+    if (!(state.settings && state.settings.cloud && state.settings.cloud.autoSync)) return;
+    syncing = true;
+    pullState().then(function (s) {
+      if (s && Array.isArray(s.packages) && s.packages.length) { applyPulled(s); applyRole(); go(allowedViews()[0]); toast("Synced from cloud", "api"); }
+      else { autoPush(); }
+      syncing = false;
+    }).catch(function () { syncing = false; });
   }
   function cloudStatus(msg) { var el = $("#cloud-status"); if (el) el.textContent = msg; }
   function cloudPush() {
-    saveCloudInputs(); var c = cloudCfg(); cloudStatus("Pushing…");
-    fetch(c.url + "/api/state", {
-      method: "PUT", headers: { "Content-Type": "application/json", "x-api-key": c.key },
-      body: JSON.stringify({ packages: state.packages, manifests: state.manifests, loadUnits: state.loadUnits, events: state.events, settings: state.settings })
-    }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
-      .then(function (o) {
-        if (o.ok) { cloudStatus("✓ Pushed " + o.j.packages + " packages · " + new Date().toLocaleTimeString()); toast("Pushed to cloud", "api"); }
-        else { cloudStatus("Error: " + (o.j.error || "failed")); toast("Push failed", "ok"); }
-      }).catch(function () { cloudStatus("✕ Cloud unreachable — check the server URL."); toast("Cloud unreachable", "ok"); });
+    saveCloudInputs(); cloudStatus("Pushing…");
+    pushState().then(function (o) { cloudStatus("✓ Pushed " + o.count + " packages · " + new Date().toLocaleTimeString()); toast("Pushed to cloud", "api"); })
+      .catch(function (e) { cloudStatus("✕ Push failed — " + (e.message || "unreachable")); toast("Push failed", "ok"); });
   }
   function cloudPull() {
-    saveCloudInputs(); var c = cloudCfg(); cloudStatus("Pulling…");
-    fetch(c.url + "/api/state", { headers: { "x-api-key": c.key } })
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
-      .then(function (o) {
-        if (o.ok && Array.isArray(o.j.packages)) {
-          state.packages = o.j.packages; state.manifests = o.j.manifests || []; state.loadUnits = o.j.loadUnits || []; state.events = o.j.events || [];
-          save(); cocSelected = null; trackQuery = "";
-          cloudStatus("✓ Pulled " + o.j.packages.length + " packages · " + new Date().toLocaleTimeString());
-          toast("Pulled from cloud", "api"); applyRole(); go(allowedViews()[0]);
-        } else { cloudStatus("Error: " + (o.j.error || "failed")); toast("Pull failed", "ok"); }
-      }).catch(function () { cloudStatus("✕ Cloud unreachable — check the server URL."); toast("Cloud unreachable", "ok"); });
+    saveCloudInputs(); cloudStatus("Pulling…");
+    pullState().then(function (s) {
+      if (applyPulled(s)) { cocSelected = null; trackQuery = ""; cloudStatus("✓ Pulled " + state.packages.length + " packages · " + new Date().toLocaleTimeString()); toast("Pulled from cloud", "api"); applyRole(); go(allowedViews()[0]); }
+      else { cloudStatus("No data found for this workspace yet — push first."); }
+    }).catch(function (e) { cloudStatus("✕ Pull failed — " + (e.message || "unreachable")); toast("Pull failed", "ok"); });
+  }
+  function syncProviderUI() {
+    var p = (($("#cloud-provider") || {}).value) || "granite";
+    var g = $("#grp-granite"), s = $("#grp-supabase");
+    if (g) g.style.display = p === "supabase" ? "none" : "";
+    if (s) s.style.display = p === "supabase" ? "" : "none";
   }
 
   // ---- Operational logistics: ZIP pre-sort, palletization, transmission ----
@@ -1539,6 +1569,7 @@
   var cloudPushBtn = $("#cloud-push"); if (cloudPushBtn) cloudPushBtn.addEventListener("click", cloudPush);
   var cloudPullBtn = $("#cloud-pull"); if (cloudPullBtn) cloudPullBtn.addEventListener("click", cloudPull);
   var cloudAuto = $("#cloud-auto"); if (cloudAuto) cloudAuto.addEventListener("change", function () { saveCloudInputs(); toast(this.checked ? "Auto-sync on" : "Auto-sync off", "ok"); });
+  var cloudProvider = $("#cloud-provider"); if (cloudProvider) cloudProvider.addEventListener("change", function () { syncProviderUI(); saveCloudInputs(); });
 
   var backupBtn = $("#backup-json");
   if (backupBtn) backupBtn.addEventListener("click", function () {
