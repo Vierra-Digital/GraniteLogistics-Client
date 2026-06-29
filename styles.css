@@ -328,6 +328,8 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .import-drop:hover{border-color:var(--blue);background:#eef6fb}
 .import-drop .id-ico{font-size:1.8rem;color:var(--blue)}
 .import-drop b{font-size:.95rem}
+.chk{display:flex;align-items:center;gap:8px;font-size:.85rem;color:var(--slate-700);cursor:pointer}
+.chk input{width:16px;height:16px;accent-color:var(--blue)}
 
 /* Search */
 .search-input{padding:8px 12px;border:1px solid var(--line);border-radius:20px;font-size:.85rem;min-width:220px;background:#fff;font-family:inherit}

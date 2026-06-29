@@ -334,8 +334,9 @@
             <div class="import-box">
               <button class="btn primary" id="cloud-push">↑ Push to cloud</button>
               <button class="btn" id="cloud-pull">↓ Pull from cloud</button>
+              <label class="chk"><input type="checkbox" id="cloud-auto" /> Auto-sync (push on change · pull on load)</label>
               <div id="cloud-status" class="muted small"></div>
-              <p class="muted small">Pushes/pulls the full workspace to the Granite API so another device can load the same data.</p>
+              <p class="muted small">Pushes/pulls the full workspace to the Granite API so another device can load the same data. The key maps to a tenant (e.g. <code>acme-key</code>) — each tenant's data is isolated.</p>
             </div>
           </div>
         </div>

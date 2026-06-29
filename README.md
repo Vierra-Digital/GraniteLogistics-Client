@@ -109,11 +109,21 @@ node server/server.js     # serves the app AND the API on http://localhost:8080
 # API key defaults to "granite-dev-key" (override with GL_API_KEY=...)
 ```
 
-API: `GET /api/health` (open) · `GET/PUT /api/state` · `GET /api/packages`
-(all but health require header `x-api-key`). State persists to `server/data.json`.
+API (all but health require header `x-api-key`):
+- `GET /api/health` — open status (reports tenant count)
+- `GET / PUT /api/state` — read / replace the caller's workspace
+- `GET /api/packages` — list packages
+- `POST /api/orders` — **API-first ingest** (single or `{orders:[...]}`); supports an
+  optional `x-signature` HMAC-SHA256 of the body (secret = `GL_WEBHOOK_SECRET`)
+
+**Multi-tenant:** each API key maps to an isolated tenant (default keys:
+`granite-dev-key`→default, `acme-key`→acme, `globex-key`→globex; override with
+`GL_TENANTS='{"key":"tenant"}'`). State persists per tenant under `server/data/`.
 
 In the platform, **Settings → Cloud Sync**: set the server URL (blank = same origin)
-and key, then **Push** / **Pull** to move the full workspace between devices.
+and key (= tenant), then **Push** / **Pull** — or enable **Auto-sync** (debounced push
+on change, pull on load) for hands-off multi-device sync. **Order Ingest → API &
+Webhooks** has a live curl example and a one-click inbound-order simulation.
 
 GitHub Pages is static-only, so it serves the PWA; for live cloud sync, host
 `server/server.js` on any Node host (Render, Railway, Fly, a VM) and point the

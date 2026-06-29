@@ -225,13 +225,14 @@
     return {
       company: { name: "Granite Logistics", address: "2200 Industrial Pkwy, Dayton, OH 45402", phone: "(937) 555-0118", email: "ops@granitelogistics.co" },
       defaultCarrier: "UPS", defaultLane: "Lane 1", role: "Admin", roleChosen: false, theme: "light",
-      cloud: { url: "", key: "granite-dev-key" }
+      cloud: { url: "", key: "granite-dev-key", autoSync: false }
     };
   }
   var state = { packages: [], manifests: [], loadUnits: [], events: [], settings: defaultSettings() };
   function companyName() { return (state.settings && state.settings.company && state.settings.company.name) || "Granite Logistics"; }
   function save() {
     try { localStorage.setItem(STORE_KEY, JSON.stringify({ packages: state.packages, manifests: state.manifests, loadUnits: state.loadUnits, events: state.events, settings: state.settings, seq: seq })); } catch (e) { /* quota / private mode */ }
+    if (typeof scheduleAutoPush === "function") scheduleAutoPush();
   }
   // Derive manifest records by grouping packages that share a batchId.
   function rebuildManifests() {
@@ -829,6 +830,7 @@
     var cl = s.cloud || {};
     var cu = $("#cloud-url"); if (cu) cu.value = cl.url || "";
     var ck = $("#cloud-key"); if (ck) ck.value = cl.key || "granite-dev-key";
+    var ca = $("#cloud-auto"); if (ca) ca.checked = !!cl.autoSync;
   }
 
   // ---- Cloud sync (talks to the backend API) ----
@@ -837,8 +839,39 @@
     return { url: (c.url || "").trim().replace(/\/$/, ""), key: (c.key || "granite-dev-key").trim() };
   }
   function saveCloudInputs() {
-    state.settings.cloud = { url: (($("#cloud-url") || {}).value || "").trim(), key: (($("#cloud-key") || {}).value || "").trim() || "granite-dev-key" };
+    state.settings.cloud = {
+      url: (($("#cloud-url") || {}).value || "").trim(),
+      key: (($("#cloud-key") || {}).value || "").trim() || "granite-dev-key",
+      autoSync: !!(($("#cloud-auto") || {}).checked)
+    };
     save();
+  }
+  // Auto-sync: debounced push on change, pull-or-seed on load.
+  var autoPushTimer = null, syncing = false;
+  function scheduleAutoPush() {
+    var cl = state.settings && state.settings.cloud;
+    if (!cl || !cl.autoSync || syncing) return;
+    clearTimeout(autoPushTimer);
+    autoPushTimer = setTimeout(autoPush, 1500);
+  }
+  function autoPush() {
+    var c = cloudCfg();
+    fetch(c.url + "/api/state", { method: "PUT", headers: { "Content-Type": "application/json", "x-api-key": c.key }, body: JSON.stringify({ packages: state.packages, manifests: state.manifests, loadUnits: state.loadUnits, events: state.events, settings: state.settings }) })
+      .then(function (r) { if (r.ok) cloudStatus("✓ Auto-synced · " + new Date().toLocaleTimeString()); }).catch(function () { });
+  }
+  function bootSync() {
+    var cl = state.settings && state.settings.cloud;
+    if (!cl || !cl.autoSync) return;
+    var c = cloudCfg(); syncing = true;
+    fetch(c.url + "/api/state", { headers: { "x-api-key": c.key } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (s) {
+        if (s && Array.isArray(s.packages) && s.packages.length) {
+          state.packages = s.packages; state.manifests = s.manifests || []; state.loadUnits = s.loadUnits || []; state.events = s.events || [];
+          save(); applyRole(); go(allowedViews()[0]); toast("Synced from cloud", "api");
+        } else { autoPush(); }
+        syncing = false;
+      }).catch(function () { syncing = false; });
   }
   function cloudStatus(msg) { var el = $("#cloud-status"); if (el) el.textContent = msg; }
   function cloudPush() {
@@ -1505,6 +1538,7 @@
 
   var cloudPushBtn = $("#cloud-push"); if (cloudPushBtn) cloudPushBtn.addEventListener("click", cloudPush);
   var cloudPullBtn = $("#cloud-pull"); if (cloudPullBtn) cloudPullBtn.addEventListener("click", cloudPull);
+  var cloudAuto = $("#cloud-auto"); if (cloudAuto) cloudAuto.addEventListener("change", function () { saveCloudInputs(); toast(this.checked ? "Auto-sync on" : "Auto-sync off", "ok"); });
 
   var backupBtn = $("#backup-json");
   if (backupBtn) backupBtn.addEventListener("click", function () {
@@ -1609,6 +1643,7 @@
   applyRole();
   renderNotifs();
   if (!state.settings.roleChosen) openGate(); // first entry → pick a workspace
+  bootSync(); // pull latest if auto-sync is on
   window.addEventListener("hashchange", applyHash);
 
   // QA / debugging hook (harmless in a demo)
