@@ -99,6 +99,26 @@ These work for real, no backend required:
   exceptions and SLA breaches surface in an **Alerts** panel, on the customer
   tracking page, and in the Reports on-time rate.
 
+## Backend & cloud sync (optional)
+
+The app runs fully standalone (localStorage). To share data across devices, there's
+a **zero-dependency Node backend** (`server/server.js`, no npm install):
+
+```bash
+node server/server.js     # serves the app AND the API on http://localhost:8080
+# API key defaults to "granite-dev-key" (override with GL_API_KEY=...)
+```
+
+API: `GET /api/health` (open) · `GET/PUT /api/state` · `GET /api/packages`
+(all but health require header `x-api-key`). State persists to `server/data.json`.
+
+In the platform, **Settings → Cloud Sync**: set the server URL (blank = same origin)
+and key, then **Push** / **Pull** to move the full workspace between devices.
+
+GitHub Pages is static-only, so it serves the PWA; for live cloud sync, host
+`server/server.js` on any Node host (Render, Railway, Fly, a VM) and point the
+Cloud Sync URL at it.
+
 ## Files
 
 - `index.html` + `landing.css` + `landing.js` — public hero landing + PWA install
