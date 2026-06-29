@@ -1,0 +1,13 @@
+{
+  "name": "granite-logistics-server",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Granite Logistics backend, label rendering, and Netlify Functions",
+  "scripts": {
+    "start": "node server/server.js"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^0.10.1",
+    "puppeteer": "^23.6.0"
+  }
+}

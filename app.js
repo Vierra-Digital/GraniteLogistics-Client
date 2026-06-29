@@ -639,10 +639,17 @@
       '<div class="muted small">' + p.customer.address + ', ' + p.customer.city + ', ' + p.customer.state + ' ' + p.customer.zip + '</div>' +
       '<div style="margin:12px 0">' + Code128.toSVG(p.barcode, { height: 80, moduleWidth: 2 }) + '</div>' +
       '<div class="lbl-key">' + p.barcode + '</div></div>' +
-      '<div style="margin-top:16px;text-align:center"><button class="btn primary" id="print-label">🖨 Print Label</button></div>'
+      '<div style="margin-top:16px;text-align:center;display:flex;gap:8px;justify-content:center">' +
+      '<button class="btn primary" id="print-label">🖨 Print</button>' +
+      '<button class="btn" id="pdf-label">📄 PDF (server)</button></div>'
     );
     var pb = $("#print-label");
     if (pb) pb.addEventListener("click", function () { printLabel(p); });
+    var pdfb = $("#pdf-label");
+    if (pdfb) pdfb.addEventListener("click", function () {
+      var c = cloudCfg(), base = c.url || location.origin;
+      window.open(base + "/api/label/" + encodeURIComponent(p.id) + "?key=" + encodeURIComponent(c.key), "_blank");
+    });
   }
   // Real printing: render a clean label into #print-root and invoke the browser print dialog.
   function printLabel(p) {
@@ -715,11 +722,13 @@
         '<div class="ri-sub">' + manifestPkgs(m).length + ' packages · ' + m.lane + ' · ' + fmtTime(m.ts) + '</div></div>' +
         '<div class="head-actions"><button class="btn sm" data-mprint="' + m.id + '">🖨 Print</button>' +
         '<button class="btn sm" data-mcsv="' + m.id + '">↓ CSV</button>' +
+        '<button class="btn sm" data-mlabels="' + m.id + '">🏷 Labels PDF</button>' +
         '<button class="btn sm" data-mxmit="' + m.id + '">⇈ Transmit</button></div></div>';
     }).join("");
     $$("#manifest-list [data-mprint]").forEach(function (b) { b.addEventListener("click", function () { printManifest(b.dataset.mprint); }); });
     $$("#manifest-list [data-mcsv]").forEach(function (b) { b.addEventListener("click", function () { exportManifest(b.dataset.mcsv); }); });
     $$("#manifest-list [data-mxmit]").forEach(function (b) { b.addEventListener("click", function () { transmitManifest(b.dataset.mxmit); }); });
+    $$("#manifest-list [data-mlabels]").forEach(function (b) { b.addEventListener("click", function () { var c = cloudCfg(), base = c.url || location.origin; window.open(base + "/api/manifest/" + encodeURIComponent(b.dataset.mlabels) + "/labels?key=" + encodeURIComponent(c.key), "_blank"); }); });
   }
   function printManifest(id) {
     var m = state.manifests.find(function (x) { return x.id === id; }); if (!m) return;

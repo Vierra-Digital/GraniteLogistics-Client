@@ -1,8 +1,16 @@
-# Netlify deploy config — Granite Logistics PWA (static frontend).
-# No build step: the app is plain HTML/CSS/JS served from the repo root.
+# Netlify deploy config — Granite Logistics PWA + Neon-backed Functions.
+# Static frontend (no build step) plus serverless functions under /api/*.
 [build]
   publish = "."
   command = ""
+
+[build.environment]
+  # Functions don't use Puppeteer; don't fetch Chromium during install.
+  PUPPETEER_SKIP_DOWNLOAD = "true"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
 
 # Revalidate the service worker on every load so updates ship promptly.
 [[headers]]

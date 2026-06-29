@@ -78,8 +78,10 @@ function handleApi(req, res, pathname) {
     return sendJSON(res, 200, { ok: true, service: "granite-logistics", tenants: tenants.length, time: new Date().toISOString() });
   }
 
-  var tenant = tenantOf(req);
-  if (!tenant) return sendJSON(res, 401, { error: "unauthorized", hint: "send a valid x-api-key" });
+  var urlObj = new URL(req.url, "http://localhost");
+  var apiKey = req.headers["x-api-key"] || urlObj.searchParams.get("key") || "";
+  var tenant = TENANTS[apiKey] || null;
+  if (!tenant) return sendJSON(res, 401, { error: "unauthorized", hint: "send a valid x-api-key (header or ?key=)" });
 
   if (pathname === "/api/state" && req.method === "GET") return sendJSON(res, 200, readState(tenant));
   if (pathname === "/api/state" && req.method === "PUT") {
@@ -101,6 +103,29 @@ function handleApi(req, res, pathname) {
         sendJSON(res, 201, { ok: true, tenant: tenant, created: created.length, packages: created });
       } catch (e) { sendJSON(res, 400, { error: "invalid JSON order payload" }); }
     });
+  }
+  // Puppeteer-rendered shipping label (4x6 PDF) for one package
+  if (pathname.indexOf("/api/label/") === 0 && req.method === "GET") {
+    var lid = decodeURIComponent(pathname.slice("/api/label/".length));
+    var lst = readState(tenant), lpkg = (lst.packages || []).find(function (p) { return p.id === lid; });
+    if (!lpkg) return sendJSON(res, 404, { error: "package not found" });
+    var lco = (lst.settings && lst.settings.company && lst.settings.company.name) || "Granite Logistics";
+    return require("./labels").renderLabelPDF(lpkg, lco).then(function (buf) {
+      res.writeHead(200, { "Content-Type": "application/pdf", "Content-Disposition": 'inline; filename="' + lid + '.pdf"', "Access-Control-Allow-Origin": "*" });
+      res.end(buf);
+    }).catch(function (e) { sendJSON(res, 501, { error: "label render failed", detail: e.message }); });
+  }
+  // All labels for a manifest as one multi-page PDF
+  if (pathname.indexOf("/api/manifest/") === 0 && /\/labels$/.test(pathname) && req.method === "GET") {
+    var mid = decodeURIComponent(pathname.slice("/api/manifest/".length, pathname.length - "/labels".length));
+    var mst = readState(tenant), m = (mst.manifests || []).find(function (x) { return x.id === mid; });
+    if (!m) return sendJSON(res, 404, { error: "manifest not found" });
+    var mpkgs = (m.packageIds || []).map(function (id) { return (mst.packages || []).find(function (p) { return p.id === id; }); }).filter(Boolean);
+    var mco = (mst.settings && mst.settings.company && mst.settings.company.name) || "Granite Logistics";
+    return require("./labels").renderManifestPDF(mpkgs, mco).then(function (buf) {
+      res.writeHead(200, { "Content-Type": "application/pdf", "Content-Disposition": 'inline; filename="' + mid + '-labels.pdf"', "Access-Control-Allow-Origin": "*" });
+      res.end(buf);
+    }).catch(function (e) { sendJSON(res, 501, { error: "label render failed", detail: e.message }); });
   }
   sendJSON(res, 404, { error: "not found" });
 }

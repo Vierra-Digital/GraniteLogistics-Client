@@ -115,6 +115,18 @@ API (all but health require header `x-api-key`):
 - `GET /api/packages` — list packages
 - `POST /api/orders` — **API-first ingest** (single or `{orders:[...]}`); supports an
   optional `x-signature` HMAC-SHA256 of the body (secret = `GL_WEBHOOK_SECRET`)
+- `GET /api/label/:id` — **Puppeteer-rendered 4×6 PDF shipping label** (Code 128)
+- `GET /api/manifest/:id/labels` — every label in a manifest as one multi-page PDF
+
+**Labels (Puppeteer):** `npm install` (root) pulls Puppeteer. The bundled Chromium
+download may be blocked; the label service auto-detects a system **Chrome or Edge**,
+or set `GL_CHROME` to a Chromium executable path. Labels are rendered server-side, so
+the package must exist on the server (via Cloud Sync push / auto-sync, or `POST /api/orders`).
+These endpoints also accept the key as `?key=` so a label opens as a normal link.
+
+**DB options (no cloud API):** the server stores per-tenant JSON files under `server/data/`.
+For an embedded database with no external service, swap that for **SQLite** (Node 24 ships
+`node:sqlite`); for a pure-browser/static deploy, **IndexedDB** is the zero-infra store.
 
 **Multi-tenant:** each API key maps to an isolated tenant (default keys:
 `granite-dev-key`→default, `acme-key`→acme, `globex-key`→globex; override with
@@ -136,6 +148,21 @@ workspace name read/write that row — fine for a pilot (use a non-guessable wor
 name); harden with Supabase Auth + RLS (commented in `schema.sql`) for production.
 The bundled Node server (and `POST /api/orders` webhooks) is the alternative provider
 for self-hosting.
+
+### Run free on Netlify + Neon (serverless functions)
+Everything on Netlify — functions are the API, Neon is free Postgres (no separate server,
+and `DATABASE_URL` never touches the browser):
+1. **Neon** → create a free project, copy the connection string.
+2. **Netlify** → deploy this repo, then Site settings → Environment variables:
+   - `DATABASE_URL` = your Neon connection string (required)
+   - `GL_TENANTS` = `{"your-key":"your-tenant"}` (optional; defaults include `granite-dev-key`)
+3. In the app: **Settings → Cloud Sync → Provider: Granite API**, leave **Server URL blank**
+   (same origin), set **API key** to a tenant key, then Push / enable **Auto-sync**.
+
+The functions (`netlify/functions/`) serve `/api/health`, `/api/state` (GET/PUT) and
+`/api/orders` (POST) — multi-tenant by API key, auto-creating the `workspaces` table on
+first call. Because they reuse the same `/api/*` contract as the Node server, the existing
+"Granite API" Cloud Sync provider talks to them with no client change.
 
 GitHub Pages is static-only, so it serves the PWA; for live cloud sync, host
 `server/server.js` on any Node host (Render, Railway, Fly, a VM) and point the
