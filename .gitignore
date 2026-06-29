@@ -1,10 +1,24 @@
-# Runtime data (server state is per-deployment, not source)
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Next.js app (kept local, not part of the deploy repo) + build output
+next/
+.next/
+
+# Build / runtime artifacts
+*.log
+server/data/
 server/data.json
+
+# Env files (never commit secrets)
+.env
+.env.local
+**/.env.local
 
 # Local tooling
 .claude/launch.json
 
-# OS / editor
+# OS / editor cruft
 .DS_Store
 Thumbs.db
-node_modules/
