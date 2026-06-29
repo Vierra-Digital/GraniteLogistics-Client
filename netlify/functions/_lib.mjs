@@ -1,5 +1,6 @@
-// Shared helpers for the Granite Netlify Functions (Neon-backed).
-import { neon } from "@neondatabase/serverless";
+// Shared helpers for the Granite Netlify Functions.
+// Storage = Netlify Blobs (built-in, free, no external DB or env vars).
+import { getStore } from "@netlify/blobs";
 
 export const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -10,7 +11,6 @@ export const CORS = {
 export function json(obj, status = 200) {
   return new Response(JSON.stringify(obj), { status, headers: CORS });
 }
-export function db() { return neon(process.env.DATABASE_URL); }
 
 // apiKey -> tenant; override with GL_TENANTS='{"key":"tenant"}'.
 export function tenants() {
@@ -25,21 +25,15 @@ export function tenantOf(req) {
 
 export const EMPTY = { packages: [], manifests: [], loadUnits: [], events: [], settings: {} };
 
-export async function ensureTable(sql) {
-  await sql`create table if not exists workspaces (
-    tenant text primary key,
-    data jsonb not null default '{}'::jsonb,
-    updated_at timestamptz not null default now()
-  )`;
+// One JSON blob per tenant in the "granite-workspaces" Blobs store.
+// Strong consistency so a push on one device is immediately readable on another.
+function store() { return getStore({ name: "granite-workspaces", consistency: "strong" }); }
+export async function readState(tenant) {
+  const data = await store().get(tenant, { type: "json" });
+  return data || { ...EMPTY };
 }
-export async function readState(sql, tenant) {
-  const rows = await sql`select data from workspaces where tenant = ${tenant}`;
-  return rows[0]?.data || { ...EMPTY };
-}
-export async function writeState(sql, tenant, data) {
-  await sql`insert into workspaces (tenant, data, updated_at)
-            values (${tenant}, ${JSON.stringify(data)}::jsonb, now())
-            on conflict (tenant) do update set data = excluded.data, updated_at = now()`;
+export async function writeState(tenant, data) {
+  await store().setJSON(tenant, { ...data, updatedAt: new Date().toISOString() });
 }
 
 export function nextId(state) {
