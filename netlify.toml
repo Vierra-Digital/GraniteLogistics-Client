@@ -1,0 +1,17 @@
+# Netlify deploy config — Granite Logistics PWA (static frontend).
+# No build step: the app is plain HTML/CSS/JS served from the repo root.
+[build]
+  publish = "."
+  command = ""
+
+# Revalidate the service worker on every load so updates ship promptly.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+# Correct MIME type for the PWA manifest.
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json"
