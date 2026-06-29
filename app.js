@@ -224,7 +224,8 @@
   function defaultSettings() {
     return {
       company: { name: "Granite Logistics", address: "2200 Industrial Pkwy, Dayton, OH 45402", phone: "(937) 555-0118", email: "ops@granitelogistics.co" },
-      defaultCarrier: "UPS", defaultLane: "Lane 1", role: "Admin", roleChosen: false
+      defaultCarrier: "UPS", defaultLane: "Lane 1", role: "Admin", roleChosen: false, theme: "light",
+      cloud: { url: "", key: "granite-dev-key" }
     };
   }
   var state = { packages: [], manifests: [], loadUnits: [], events: [], settings: defaultSettings() };
@@ -265,6 +266,11 @@
       state.events.unshift({ ts: inflight[0].exception.ts, pkgId: inflight[0].id, who: inflight[0].customer.name, kind: "exception", note: "Exception: Address Issue — Suite number missing" });
     }
     if (inflight[1]) inflight[1].promisedTs = Date.now() - 7200000; // past due → SLA Late
+    var dlv = state.packages.filter(function (p) { return p.status === "Delivered"; });
+    if (dlv[0]) {
+      dlv[0].return = { status: "In Transit", reason: "Damaged / Defective", note: "Screen cracked on arrival", ts: Date.now() - 5400000 };
+      state.events.unshift({ ts: dlv[0].return.ts, pkgId: dlv[0].id, who: dlv[0].customer.name, kind: "return", note: "Return requested: Damaged / Defective" });
+    }
     rebuildManifests(); save();
   }
   function load() {
@@ -309,7 +315,9 @@
     presort: ["Pre-Sort & Staging", "ZIP pre-sort and load-ready consolidation before carrier handoff."],
     batch: ["Batch & Lane Routing", "Group items into carrier manifests and assign dock lanes."],
     driver: ["Driver Scan", "Scan a label to retrieve destination details instantly."],
+    home: ["Home", "Your tasks at a glance."],
     tracking: ["Chain of Custody", "Tamper-evident, end-to-end package history."],
+    returns: ["Returns", "Reverse logistics — manage return requests through to receipt."],
     reports: ["Reports & Analytics", "Operational metrics computed from your live data."],
     activity: ["Activity Log", "Tamper-evident audit trail of every event, newest first."],
     settings: ["Settings", "Company profile, defaults, and data management."]
@@ -317,9 +325,9 @@
 
   // ---- Role-based access (maps to the platform's user roles) ----
   var ROLE_VIEWS = {
-    Admin: ["overview", "ingest", "runner", "presort", "batch", "driver", "tracking", "reports", "activity", "settings"],
-    Runner: ["ingest", "runner", "presort", "batch", "tracking", "activity"],
-    Driver: ["driver", "tracking"],
+    Admin: ["overview", "ingest", "runner", "presort", "batch", "driver", "tracking", "returns", "reports", "activity", "settings"],
+    Runner: ["home", "ingest", "runner", "presort", "batch", "tracking", "returns", "activity"],
+    Driver: ["home", "driver", "tracking"],
     Viewer: ["overview", "tracking", "reports", "activity"]
   };
   var ROLE_META = {
@@ -361,6 +369,67 @@
     if (sb) sb.classList.toggle("open", willOpen);
     if (bd) bd.classList.toggle("open", willOpen);
   }
+  function applyTheme() {
+    var t = (state.settings && state.settings.theme === "dark") ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", t);
+    var b = $("#theme-btn"); if (b) b.textContent = t === "dark" ? "☀" : "☾";
+  }
+
+  // ---- Notifications (alerts bell) ----
+  function buildNotifs() {
+    var list = [];
+    state.packages.forEach(function (p) {
+      if (p.exception) list.push({ kind: "exc", ts: p.exception.ts, pkgId: p.id, title: p.exception.type, sub: p.id + " · " + p.customer.name });
+      else if (p.status !== "Delivered" && slaStatus(p) === "Late") list.push({ kind: "sla", ts: p.promisedTs, pkgId: p.id, title: "SLA breach — past promised delivery", sub: p.id + " · " + p.customer.name });
+    });
+    list.sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
+    return list;
+  }
+  function renderNotifs() {
+    var list = buildNotifs();
+    var badge = $("#notif-badge");
+    if (badge) { badge.textContent = list.length; badge.classList.toggle("show", list.length > 0); }
+    var panel = $("#notif-panel"); if (!panel) return;
+    panel.innerHTML = '<div class="notif-head"><span>Alerts</span><span class="muted small">' + list.length + ' open</span></div>' +
+      (list.length ? list.map(function (n) {
+        return '<div class="notif-item" data-open="' + n.pkgId + '"><span class="notif-ico ' + n.kind + '">' + (n.kind === "exc" ? "⚠" : "⏱") + '</span>' +
+          '<div class="notif-main"><b>' + n.title + '</b><div class="notif-time">' + n.sub + '</div></div></div>';
+      }).join("") : '<div class="notif-empty">✓ All clear — no open exceptions or SLA breaches.</div>');
+    $$("#notif-panel [data-open]").forEach(function (b) { b.addEventListener("click", function () { closeNotif(); openPackage(b.dataset.open); }); });
+  }
+  function toggleNotif() { var p = $("#notif-panel"); if (p) p.classList.toggle("open"); }
+  function closeNotif() { var p = $("#notif-panel"); if (p) p.classList.remove("open"); }
+
+  // ---- Command palette (Ctrl/Cmd-K) ----
+  var cmdItems = [], cmdSel = 0;
+  function openCmd() { var b = $("#cmd-backdrop"); if (!b) return; b.classList.add("open"); var i = $("#cmd-input"); i.value = ""; renderCmd(""); setTimeout(function () { i.focus(); }, 20); }
+  function closeCmd() { var b = $("#cmd-backdrop"); if (b) b.classList.remove("open"); }
+  function renderCmd(q) {
+    q = (q || "").trim().toLowerCase();
+    cmdItems = [];
+    allowedViews().forEach(function (v) {
+      var label = VIEW_META[v][0];
+      if (!q || label.toLowerCase().indexOf(q) >= 0) cmdItems.push({ type: "view", view: v, label: label, sub: "Go to view" });
+    });
+    if (q) {
+      state.packages.filter(function (p) {
+        return (p.id + " " + p.customer.name + " " + p.customer.city + " " + p.item.description).toLowerCase().indexOf(q) >= 0;
+      }).slice(0, 6).forEach(function (p) {
+        cmdItems.push({ type: "pkg", id: p.id, label: p.id + " · " + p.item.description, sub: p.customer.name + " — " + STAGE_LABEL[p.status] });
+      });
+    }
+    cmdItems = cmdItems.slice(0, 12); cmdSel = 0; drawCmd();
+  }
+  function drawCmd() {
+    var el = $("#cmd-results"); if (!el) return;
+    el.innerHTML = cmdItems.length ? cmdItems.map(function (it, i) {
+      return '<div class="cmd-item' + (i === cmdSel ? " sel" : "") + '" data-i="' + i + '">' +
+        '<span class="cmd-ico">' + (it.type === "view" ? "↪" : "▢") + '</span>' +
+        '<div class="cmd-main">' + it.label + '<div class="cm-sub">' + it.sub + '</div></div></div>';
+    }).join("") : '<div class="cmd-empty">No matches.</div>';
+    $$("#cmd-results .cmd-item").forEach(function (el2) { el2.addEventListener("click", function () { activateCmd(cmdItems[+el2.dataset.i]); }); });
+  }
+  function activateCmd(it) { if (!it) return; closeCmd(); if (it.type === "view") go(it.view); else openPackage(it.id); }
   function go(view) {
     if (typeof stopScan === "function") stopScan(); // release camera when navigating
     if (typeof toggleSidebar === "function") toggleSidebar(false); // close mobile drawer
@@ -375,7 +444,8 @@
 
   // ---- Renderers ----
   function render(view) {
-    if (view === "overview") renderOverview();
+    if (view === "home") renderHome();
+    else if (view === "overview") renderOverview();
     else if (view === "ingest") renderIngest();
     else if (view === "runner") renderRunner();
     else if (view === "batch") renderBatch();
@@ -385,8 +455,9 @@
     else if (view === "activity") renderActivity();
     else if (view === "settings") renderSettings();
     else if (view === "presort") renderPresort();
+    else if (view === "returns") renderReturns();
   }
-  function renderAll() { var active = $(".nav-item.active").dataset.view; render(active); }
+  function renderAll() { var active = $(".nav-item.active").dataset.view; render(active); if (typeof renderNotifs === "function") renderNotifs(); }
 
   function counts() {
     var c = {}; STAGES.forEach(function (s) { c[s] = 0; });
@@ -449,6 +520,7 @@
     var rows = state.packages.slice().sort(function (a, b) { return stageIdx(b.status) - stageIdx(a.status); }).slice(0, 9);
     $("#overview-table").innerHTML =
       '<thead><tr><th>Package</th><th>Customer</th><th>Destination</th><th>Carrier</th><th>Status</th></tr></thead><tbody>' +
+      (rows.length ? "" : '<tr><td colspan="5" class="muted" style="padding:20px;text-align:center">No shipments yet — pull or add orders in Order Ingest.</td></tr>') +
       rows.map(function (p) {
         return '<tr data-id="' + p.id + '"><td class="mono">' + p.id + '</td><td>' + p.customer.name +
           '</td><td>' + p.customer.city + ", " + p.customer.state + '</td><td>' + (p.carrier || "—") +
@@ -699,8 +771,9 @@
       });
     });
     (state.events || []).forEach(function (e) {
-      events.push({ ts: e.ts, pkgId: e.pkgId, kind: e.kind, who: e.who, note: e.note,
-        label: e.kind === "resolved" ? "Resolved" : "Exception", pill: e.kind === "resolved" ? "pill sla-ok" : "pill sla-late" });
+      var label = e.kind === "resolved" ? "Resolved" : e.kind === "return" ? "Return" : "Exception";
+      var pill = e.kind === "resolved" ? "pill sla-ok" : e.kind === "return" ? "pill st-InTransit" : "pill sla-late";
+      events.push({ ts: e.ts, pkgId: e.pkgId, kind: e.kind, who: e.who, note: e.note, label: label, pill: pill });
     });
     events.sort(function (a, b) { return b.ts - a.ts; });
     if (activityQuery) {
@@ -724,6 +797,44 @@
     var set = function (n, v) { var el = $('#set-' + n); if (el) el.value = v; };
     set("name", c.name); set("address", c.address); set("phone", c.phone); set("email", c.email);
     set("carrier", s.defaultCarrier); set("lane", s.defaultLane);
+    var cl = s.cloud || {};
+    var cu = $("#cloud-url"); if (cu) cu.value = cl.url || "";
+    var ck = $("#cloud-key"); if (ck) ck.value = cl.key || "granite-dev-key";
+  }
+
+  // ---- Cloud sync (talks to the backend API) ----
+  function cloudCfg() {
+    var c = state.settings.cloud || {};
+    return { url: (c.url || "").trim().replace(/\/$/, ""), key: (c.key || "granite-dev-key").trim() };
+  }
+  function saveCloudInputs() {
+    state.settings.cloud = { url: (($("#cloud-url") || {}).value || "").trim(), key: (($("#cloud-key") || {}).value || "").trim() || "granite-dev-key" };
+    save();
+  }
+  function cloudStatus(msg) { var el = $("#cloud-status"); if (el) el.textContent = msg; }
+  function cloudPush() {
+    saveCloudInputs(); var c = cloudCfg(); cloudStatus("Pushing…");
+    fetch(c.url + "/api/state", {
+      method: "PUT", headers: { "Content-Type": "application/json", "x-api-key": c.key },
+      body: JSON.stringify({ packages: state.packages, manifests: state.manifests, loadUnits: state.loadUnits, events: state.events, settings: state.settings })
+    }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (o) {
+        if (o.ok) { cloudStatus("✓ Pushed " + o.j.packages + " packages · " + new Date().toLocaleTimeString()); toast("Pushed to cloud", "api"); }
+        else { cloudStatus("Error: " + (o.j.error || "failed")); toast("Push failed", "ok"); }
+      }).catch(function () { cloudStatus("✕ Cloud unreachable — check the server URL."); toast("Cloud unreachable", "ok"); });
+  }
+  function cloudPull() {
+    saveCloudInputs(); var c = cloudCfg(); cloudStatus("Pulling…");
+    fetch(c.url + "/api/state", { headers: { "x-api-key": c.key } })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (o) {
+        if (o.ok && Array.isArray(o.j.packages)) {
+          state.packages = o.j.packages; state.manifests = o.j.manifests || []; state.loadUnits = o.j.loadUnits || []; state.events = o.j.events || [];
+          save(); cocSelected = null; trackQuery = "";
+          cloudStatus("✓ Pulled " + o.j.packages.length + " packages · " + new Date().toLocaleTimeString());
+          toast("Pulled from cloud", "api"); applyRole(); go(allowedViews()[0]);
+        } else { cloudStatus("Error: " + (o.j.error || "failed")); toast("Pull failed", "ok"); }
+      }).catch(function () { cloudStatus("✕ Cloud unreachable — check the server URL."); toast("Cloud unreachable", "ok"); });
   }
 
   // ---- Operational logistics: ZIP pre-sort, palletization, transmission ----
@@ -901,6 +1012,28 @@
   // ---- Tracking / chain of custody ----
   var cocSelected = null;
   var trackQuery = "";
+  var trackSelectMode = false, trackSelect = {};
+  function updateBulkBar() {
+    var bar = $("#track-bulk"); if (!bar) return;
+    if (!trackSelectMode) { bar.style.display = "none"; return; }
+    var ids = Object.keys(trackSelect);
+    bar.style.display = "flex";
+    bar.innerHTML = '<span class="bulk-count">' + ids.length + ' selected</span>' +
+      '<button class="btn sm" data-bulk="export"' + (ids.length ? '' : ' disabled') + '>↓ Export selected</button>' +
+      '<button class="btn sm" data-bulk="clear">Clear</button>';
+    var ex = bar.querySelector('[data-bulk="export"]'); if (ex) ex.addEventListener("click", exportSelected);
+    var cl = bar.querySelector('[data-bulk="clear"]'); if (cl) cl.addEventListener("click", function () { trackSelect = {}; renderTracking(); });
+  }
+  function exportSelected() {
+    var ids = Object.keys(trackSelect); if (!ids.length) return;
+    var cols = ["id", "status", "source", "name", "item", "value", "city", "state", "zip", "carrier", "tracking", "barcode"];
+    var lines = [cols.join(",")];
+    state.packages.filter(function (p) { return trackSelect[p.id]; }).forEach(function (p) {
+      lines.push([p.id, p.status, p.source, p.customer.name, p.item.description, p.item.value, p.customer.city, p.customer.state, p.customer.zip, p.carrier || "", p.tracking || "", p.barcode].map(csvCell).join(","));
+    });
+    downloadFile("granite-selected.csv", lines.join("\n"), "text/csv");
+    toast(ids.length + " packages exported", "ok");
+  }
   function renderTracking() {
     var pkgs = state.packages.slice().sort(function (a, b) { return stageIdx(b.status) - stageIdx(a.status); });
     if (trackQuery) {
@@ -911,20 +1044,28 @@
       });
     }
     $("#tracking-list").innerHTML = pkgs.length ? pkgs.map(function (p) {
-      return '<div class="row-item selectable" data-id="' + p.id + '"><div class="ri-main">' +
+      return '<div class="row-item selectable' + (trackSelectMode && trackSelect[p.id] ? ' selected' : '') + '" data-id="' + p.id + '">' +
+        (trackSelectMode ? '<input type="checkbox" class="tk-check"' + (trackSelect[p.id] ? ' checked' : '') + ' />' : '') +
+        '<div class="ri-main">' +
         '<div class="ri-title">' + p.id + " · " + p.item.description + (p.exception ? ' <span class="pill sla-late">exception</span>' : '') + '</div>' +
         '<div class="ri-sub">' + p.customer.name + " — " + p.customer.city + ", " + p.customer.state + '</div></div>' +
         '<span class="' + pillClass(p.status) + '">' + STAGE_LABEL[p.status] + '</span>' + slaPillHtml(p) + '</div>';
     }).join("") : '<p class="muted">No packages match “' + trackQuery + '”.</p>';
     $$("#tracking-list .row-item").forEach(function (el) {
       el.addEventListener("click", function () {
-        cocSelected = el.dataset.id;
+        var id = el.dataset.id;
+        if (trackSelectMode) {
+          if (trackSelect[id]) delete trackSelect[id]; else trackSelect[id] = true;
+          renderTracking(); return;
+        }
+        cocSelected = id;
         $$("#tracking-list .row-item").forEach(function (r) { r.classList.remove("selected"); });
         el.classList.add("selected");
-        renderCoc(el.dataset.id);
+        renderCoc(id);
       });
     });
-    if (cocSelected && getPkg(cocSelected)) renderCoc(cocSelected);
+    updateBulkBar();
+    if (!trackSelectMode && cocSelected && getPkg(cocSelected)) renderCoc(cocSelected);
   }
   function renderCoc(id) {
     var p = getPkg(id);
@@ -950,6 +1091,52 @@
         (p.photos.delivery ? '<img style="width:120px;height:120px;border-radius:11px;border:1px solid var(--line)" src="' + p.photos.delivery + '">' : "") + '</div>';
     }
     $("#coc-detail").innerHTML = meta + tl + photos;
+  }
+
+  // ---- Role home (field mode for Runner / Driver) ----
+  function homeTiles(arr) {
+    return '<div class="home-tiles">' + arr.map(function (t) {
+      return '<div class="home-tile' + (t[2] ? ' attn' : '') + '"><div class="ht-val">' + t[1] + '</div><div class="ht-label">' + t[0] + '</div></div>';
+    }).join("") + '</div>';
+  }
+  function homeAction(view, ico, title, sub) {
+    return '<button class="home-action" data-go="' + view + '"><span class="ha-ico">' + ico + '</span><span class="ha-title">' + title + '</span><span class="ha-sub">' + sub + '</span></button>';
+  }
+  function renderHome() {
+    var el = $("#home-content"); if (!el) return;
+    var c = counts(), role = currentRole();
+    if (role === "Driver") {
+      $("#view-title").textContent = "Driver Home";
+      $("#view-sub").textContent = "Your stops and scans for today.";
+      var stops = state.packages.filter(function (p) { return p.status === "InTransit" || p.status === "OutforDelivery"; });
+      el.innerHTML =
+        homeTiles([["On Vehicle", c.OutforDelivery, false], ["In Transit", c.InTransit, false], ["Awaiting Pickup", c.Staged, false]]) +
+        '<button class="home-cta" data-go="driver">📷 &nbsp;Scan a Label</button>' +
+        '<div class="card"><div class="card-head"><h2>Your Stops</h2><span class="muted">' + stops.length + ' active</span></div>' +
+        '<div class="pickup-list">' + (stops.length ? stops.map(function (p) {
+          var act = p.status === "InTransit" ? "Out for Delivery →" : "Mark Delivered ✓";
+          return '<div class="row-item" data-open="' + p.id + '"><div class="ri-main"><div class="ri-title">' + p.id + ' · ' + p.item.description +
+            (p.exception ? ' <span class="pill sla-late">exception</span>' : '') + '</div><div class="ri-sub">' + p.customer.name + ' — ' + p.customer.address + ', ' + p.customer.city + '</div></div>' +
+            '<span class="' + pillClass(p.status) + '">' + STAGE_LABEL[p.status] + '</span> <button class="btn ok sm" data-scan="' + p.id + '">' + act + '</button></div>';
+        }).join("") : '<p class="muted">No active stops. Scan a staged label to begin.</p>') + '</div></div>';
+    } else {
+      $("#view-title").textContent = "Runner Home";
+      $("#view-sub").textContent = "Your pickups and staging at a glance.";
+      var awaiting = c.Won + c.Intake;
+      var loose = state.packages.filter(function (p) { return p.status === "PickedUp" && !p.loadUnit; }).length;
+      var openUnits = state.loadUnits.filter(function (u) { return u.parcels.map(getPkg).filter(Boolean).some(function (p) { return p.status === "PickedUp"; }); }).length;
+      var exc = state.packages.filter(function (p) { return p.exception; }).length;
+      el.innerHTML =
+        homeTiles([["Pickups Awaiting", awaiting, awaiting > 0], ["To Pre-Sort", loose, false], ["Open Exceptions", exc, exc > 0]]) +
+        '<div class="home-actions">' +
+        homeAction("runner", "▣", "Today's Pickups", "Photograph & label items") +
+        homeAction("presort", "⤧", "Pre-Sort & Stage", "ZIP-sort and palletize") +
+        homeAction("batch", "⊞", "Manifests", "Build & hand off to carrier") +
+        '</div>';
+    }
+    $$("#home-content [data-go]").forEach(function (b) { b.addEventListener("click", function () { go(b.dataset.go); }); });
+    $$("#home-content [data-open]").forEach(function (b) { b.addEventListener("click", function () { openPackage(b.dataset.open); }); });
+    $$("#home-content [data-scan]").forEach(function (b) { b.addEventListener("click", function (ev) { ev.stopPropagation(); processScan(b.dataset.scan); renderHome(); }); });
   }
 
   // ---- SLA + exceptions ----
@@ -994,6 +1181,49 @@
     p.exception = null; save(); toast("Exception resolved on " + p.id, "ok"); closeModal(); renderAll();
   }
 
+  // ---- Returns / reverse logistics ----
+  var RETURN_FLOW = ["Requested", "In Transit", "Received"];
+  function returnPillClass(st) { return st === "Received" ? "pill sla-ok" : st === "In Transit" ? "pill st-InTransit" : "pill sla-risk"; }
+  function initiateReturn(id) {
+    var p = getPkg(id); if (!p) return;
+    modal('<button class="close-x" data-close>×</button><h2>Initiate Return — ' + p.id + '</h2>' +
+      '<p class="muted">' + p.item.description + ' → ' + p.customer.name + '</p>' +
+      '<form id="ret-form" class="order-form" style="margin-top:12px">' +
+      '<div class="ff"><label>Reason</label><select name="reason"><option>Damaged / Defective</option><option>Wrong Item</option><option>No Longer Wanted</option><option>Did Not Arrive</option><option>Other</option></select></div>' +
+      '<div class="ff"><label>Note</label><input name="note" placeholder="Optional details" /></div>' +
+      '<button class="btn primary" type="submit">Create Return</button></form>');
+    $("#ret-form").addEventListener("submit", function (e) {
+      e.preventDefault();
+      var reason = this.elements.namedItem("reason").value, note = this.elements.namedItem("note").value.trim();
+      p.return = { status: "Requested", reason: reason, note: note, ts: Date.now() };
+      logEvent(p, "return", "Return requested: " + reason + (note ? " — " + note : ""));
+      save(); toast("Return created for " + p.id, "ok"); closeModal(); renderAll();
+    });
+  }
+  function advanceReturn(id) {
+    var p = getPkg(id); if (!p || !p.return) return;
+    var i = RETURN_FLOW.indexOf(p.return.status);
+    if (i < 0 || i >= RETURN_FLOW.length - 1) return;
+    p.return.status = RETURN_FLOW[i + 1]; p.return.ts = Date.now();
+    logEvent(p, "return", "Return " + p.return.status.toLowerCase());
+    save(); toast(p.id + " return → " + p.return.status, "ok"); renderAll();
+  }
+  function renderReturns() {
+    var rets = state.packages.filter(function (p) { return p.return; }).sort(function (a, b) { return (b.return.ts || 0) - (a.return.ts || 0); });
+    var cnt = $("#returns-count"); if (cnt) cnt.textContent = rets.length + (rets.length === 1 ? " return" : " returns");
+    var el = $("#returns-list"); if (!el) return;
+    el.innerHTML = rets.length ? rets.map(function (p) {
+      var st = p.return.status;
+      return '<div class="row-item"><div class="ri-main"><div class="ri-title">' + p.id + ' · ' + p.item.description + '</div>' +
+        '<div class="ri-sub">' + p.customer.name + ' · ' + p.return.reason + (p.return.note ? ' — ' + p.return.note : '') + '</div></div>' +
+        '<span class="' + returnPillClass(st) + '">' + st + '</span>' +
+        (st !== "Received" ? ' <button class="btn ok sm" data-radv="' + p.id + '">Advance →</button>' : '') +
+        ' <button class="btn sm" data-ropen="' + p.id + '">Open</button></div>';
+    }).join("") : '<p class="muted">No returns yet. Initiate one from any delivered package’s detail.</p>';
+    $$("#returns-list [data-radv]").forEach(function (b) { b.addEventListener("click", function () { advanceReturn(b.dataset.radv); }); });
+    $$("#returns-list [data-ropen]").forEach(function (b) { b.addEventListener("click", function () { openPackage(b.dataset.ropen); }); });
+  }
+
   // ---- Package modal ----
   function openPackage(id) {
     var p = getPkg(id);
@@ -1010,6 +1240,7 @@
     modal(
       '<button class="close-x" data-close>×</button>' +
       '<span class="' + pillClass(p.status) + '">' + STAGE_LABEL[p.status] + '</span>' + slaPillHtml(p) +
+      (p.return ? ' <span class="' + returnPillClass(p.return.status) + '">↩ Return: ' + p.return.status + '</span>' : '') +
       (p.exception ? '<div class="exc-banner">⚠ ' + p.exception.type + (p.exception.note ? ' — ' + p.exception.note : '') + '</div>' : '') +
       '<h2 style="margin-top:8px">' + p.id + " — " + p.item.description + '</h2>' +
       '<p class="muted">' + p.source + " · order " + p.orderRef + " · " + money(p.item.value) + '</p>' +
@@ -1023,6 +1254,9 @@
       '<div class="mono small" style="text-align:center">' + p.barcode + '</div></div>' +
       '</div><div><h2 style="font-size:.95rem;margin-bottom:10px">Chain of Custody</h2>' + tl + photos + '</div></div>' +
       '<div style="margin-top:18px;display:flex;gap:8px;justify-content:flex-end">' +
+      '<button class="btn sm" id="copy-track">🔗 Copy tracking link</button>' +
+      (p.status === "Delivered" && !p.return ? '<button class="btn sm" id="init-return">↩ Initiate Return</button>' : '') +
+      (p.return && p.return.status !== "Received" ? '<button class="btn sm ok" id="adv-return">↩ Advance Return</button>' : '') +
       (p.exception
         ? '<button class="btn sm ok" id="resolve-exc">✓ Resolve Exception</button>'
         : '<button class="btn sm" id="flag-exc">⚠ Flag Exception</button>') +
@@ -1033,6 +1267,15 @@
     var dl = $("#del-pkg"); if (dl) dl.addEventListener("click", function () { deletePackage(p.id); });
     var fx = $("#flag-exc"); if (fx) fx.addEventListener("click", function () { flagException(p.id); });
     var rx = $("#resolve-exc"); if (rx) rx.addEventListener("click", function () { resolveException(p.id); });
+    var ir = $("#init-return"); if (ir) ir.addEventListener("click", function () { initiateReturn(p.id); });
+    var ar = $("#adv-return"); if (ar) ar.addEventListener("click", function () { advanceReturn(p.id); });
+    var ct = $("#copy-track");
+    if (ct) ct.addEventListener("click", function () {
+      var url = location.href.replace(/[^\/]*$/, "track.html?n=" + encodeURIComponent(p.id)).replace(/#.*$/, "");
+      var done = function () { toast("Customer tracking link copied", "ok"); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, function () { toast(url, "ok"); });
+      else toast(url, "ok");
+    });
   }
 
   function attr(s) { return String(s == null ? "" : s).replace(/"/g, "&quot;"); }
@@ -1189,6 +1432,15 @@
   var searchInput = $("#track-search");
   if (searchInput) searchInput.addEventListener("input", function () { trackQuery = this.value.trim().toLowerCase(); renderTracking(); });
 
+  var trackSelectBtn = $("#track-select-btn");
+  if (trackSelectBtn) trackSelectBtn.addEventListener("click", function () {
+    trackSelectMode = !trackSelectMode;
+    if (!trackSelectMode) trackSelect = {};
+    this.classList.toggle("primary", trackSelectMode);
+    this.textContent = trackSelectMode ? "✕ Done" : "☑ Select";
+    renderTracking();
+  });
+
   var resetBtn = $("#reset-data");
   if (resetBtn) resetBtn.addEventListener("click", function () {
     if (!window.confirm("Reset all data back to the demo seed? This clears any orders you've added.")) return;
@@ -1214,6 +1466,9 @@
   });
 
   // Data backup / restore
+  var cloudPushBtn = $("#cloud-push"); if (cloudPushBtn) cloudPushBtn.addEventListener("click", cloudPush);
+  var cloudPullBtn = $("#cloud-pull"); if (cloudPullBtn) cloudPullBtn.addEventListener("click", cloudPull);
+
   var backupBtn = $("#backup-json");
   if (backupBtn) backupBtn.addEventListener("click", function () {
     downloadFile("granite-backup.json", JSON.stringify({ packages: state.packages, manifests: state.manifests, settings: state.settings, seq: seq }, null, 2), "application/json");
@@ -1250,21 +1505,41 @@
   var menuBtn = $("#menu-btn"); if (menuBtn) menuBtn.addEventListener("click", function () { toggleSidebar(); });
   var sbBackdrop = $("#sidebar-backdrop"); if (sbBackdrop) sbBackdrop.addEventListener("click", function () { toggleSidebar(false); });
 
-  // Global package search
-  var gsearch = $("#global-search");
-  if (gsearch) gsearch.addEventListener("keydown", function (e) {
-    if (e.key !== "Enter") return;
-    var q = this.value.trim(); if (!q) return;
-    var norm = function (s) { return String(s).toUpperCase().replace(/[^A-Z0-9]/g, ""); };
-    var m = state.packages.find(function (p) { return norm(p.id) === norm(q) || norm(p.barcode) === norm(q); });
-    if (m) { openPackage(m.id); this.value = ""; return; }
-    if (allowedViews().indexOf("tracking") >= 0) {
-      trackQuery = q.toLowerCase(); go("tracking");
-      var si = $("#track-search"); if (si) si.value = q;
-      toast('Showing matches for "' + q + '"', "ok");
-    } else { toast('No package matches "' + q + '"', "ok"); }
-    this.value = "";
+  // Theme toggle
+  var themeBtn = $("#theme-btn");
+  if (themeBtn) themeBtn.addEventListener("click", function () {
+    state.settings.theme = (state.settings.theme === "dark") ? "light" : "dark";
+    save(); applyTheme();
   });
+
+  // Notifications bell
+  var notifBtn = $("#notif-btn");
+  if (notifBtn) notifBtn.addEventListener("click", function (e) { e.stopPropagation(); renderNotifs(); toggleNotif(); });
+  document.addEventListener("click", function (e) {
+    var w = $(".notif-wrap"), panel = $("#notif-panel");
+    if (panel && panel.classList.contains("open") && w && !w.contains(e.target)) closeNotif();
+  });
+
+  // Command palette
+  var cmdInput = $("#cmd-input");
+  if (cmdInput) {
+    cmdInput.addEventListener("input", function () { renderCmd(this.value); });
+    cmdInput.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowDown") { e.preventDefault(); cmdSel = Math.min(cmdSel + 1, cmdItems.length - 1); drawCmd(); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); cmdSel = Math.max(cmdSel - 1, 0); drawCmd(); }
+      else if (e.key === "Enter") { e.preventDefault(); activateCmd(cmdItems[cmdSel]); }
+      else if (e.key === "Escape") { closeCmd(); }
+    });
+  }
+  var cmdBackdrop = $("#cmd-backdrop");
+  if (cmdBackdrop) cmdBackdrop.addEventListener("click", function (e) { if (e.target === cmdBackdrop) closeCmd(); });
+  document.addEventListener("keydown", function (e) {
+    if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) { e.preventDefault(); openCmd(); }
+  });
+
+  // Search trigger → command palette
+  var searchTrigger = $("#search-trigger");
+  if (searchTrigger) searchTrigger.addEventListener("click", openCmd);
 
   // ---- Deep-linking: index.html sends e.g. #tracking or #tracking=GL-1042 ----
 
@@ -1291,9 +1566,11 @@
   }
 
   // ---- Boot ----
+  applyTheme();
   updateRoleUI();
   if (!applyHash()) go(allowedViews()[0]);
   applyRole();
+  renderNotifs();
   if (!state.settings.roleChosen) openGate(); // first entry → pick a workspace
   window.addEventListener("hashchange", applyHash);
 

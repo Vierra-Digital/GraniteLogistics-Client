@@ -70,8 +70,17 @@ These work for real, no backend required:
 - **Edit / delete packages** — full CRUD from the package detail dialog.
 - **Customer tracking page** (`track.html`) — public status lookup with a delivery
   stepper, ETA, and condition photos.
-- **Role-based access** — a "View as" selector (Admin / Runner / Driver / Viewer)
-  shows only the nav each role should see.
+- **Role-based access** — a workspace picker (Admin / Runner / Driver / Viewer) on
+  entry; grouped navigation shows only the tools each role should see, with a role
+  badge + one-click "Switch".
+- **Field mode** — Runner and Driver land on a focused, big-button **Home** (task
+  tiles + large actions / a scan CTA), distinct from the admin's data-dense overview.
+- **Notifications** — a top-bar alerts bell with a live count of open exceptions and
+  SLA breaches; click any alert to jump straight to the package.
+- **Dark mode** — a platform-wide light/dark toggle that persists per device.
+- **Returns / reverse logistics** — initiate a return on any delivered package and
+  move it through Requested → In Transit → Received, with a dedicated Returns queue.
+- **Command palette** — Ctrl/⌘-K to jump to any view or open any package fast.
 - **Settings** — editable company profile that flows onto printed labels &
   manifests, default carrier/lane, and **full JSON backup / restore** to move data
   between devices.

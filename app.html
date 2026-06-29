@@ -48,6 +48,7 @@
     <nav class="nav">
       <div class="nav-group">
         <div class="nav-label">Dashboard</div>
+        <button class="nav-item" data-view="home"><span class="ico">⌂</span> Home</button>
         <button class="nav-item active" data-view="overview"><span class="ico">▦</span> Executive Overview</button>
       </div>
       <div class="nav-group">
@@ -57,6 +58,7 @@
         <button class="nav-item" data-view="presort"><span class="ico">⤧</span> Pre-Sort &amp; Staging</button>
         <button class="nav-item" data-view="batch"><span class="ico">⊞</span> Batch &amp; Manifests</button>
         <button class="nav-item" data-view="driver"><span class="ico">◎</span> Driver Scan</button>
+        <button class="nav-item" data-view="returns"><span class="ico">↩</span> Returns</button>
       </div>
       <div class="nav-group">
         <div class="nav-label">Visibility</div>
@@ -86,12 +88,22 @@
         <p id="view-sub" class="muted">Real-time visibility from auction win to delivery confirmation.</p>
       </div>
       <div class="tb-right">
-        <div class="global-search"><input id="global-search" type="search" placeholder="Search package #…" /></div>
+        <button class="search-trigger" id="search-trigger" title="Search (Ctrl/⌘ K)"><span class="st-ico">⌕</span><span class="st-label">Search…</span><span class="st-kbd">⌘K</span></button>
+        <button class="icon-btn" id="theme-btn" title="Toggle light / dark" aria-label="Toggle theme">☾</button>
+        <div class="notif-wrap">
+          <button class="icon-btn" id="notif-btn" title="Alerts" aria-label="Alerts">🔔<span class="notif-badge" id="notif-badge"></span></button>
+          <div class="notif-panel" id="notif-panel"></div>
+        </div>
         <button class="role-badge" id="role-badge" title="Switch workspace"><span class="rb-dot"></span><span id="role-badge-text">Admin</span><span class="rb-switch">Switch</span></button>
       </div>
     </header>
 
     <div class="view-wrap">
+      <!-- ============ HOME (field mode: Runner / Driver) ============ -->
+      <section class="view" id="view-home">
+        <div id="home-content"></div>
+      </section>
+
       <!-- ============ OVERVIEW ============ -->
       <section class="view active" id="view-overview">
         <div class="kpi-row" id="kpi-row"></div>
@@ -236,6 +248,15 @@
         </div>
       </section>
 
+      <!-- ============ RETURNS ============ -->
+      <section class="view" id="view-returns">
+        <p class="lead">Reverse logistics: manage return requests from initiation through carrier transit to final receipt at the facility.</p>
+        <div class="card">
+          <div class="card-head"><h2>Return Requests</h2><span class="muted" id="returns-count"></span></div>
+          <div id="returns-list" class="stage-list"></div>
+        </div>
+      </section>
+
       <!-- ============ REPORTS ============ -->
       <section class="view" id="view-reports">
         <div class="kpi-row" id="rep-kpi"></div>
@@ -292,6 +313,21 @@
             </div>
           </div>
         </div>
+        <div class="card">
+          <div class="card-head"><h2>Cloud Sync</h2><span class="muted">Share data across devices via the backend API</span></div>
+          <div class="grid-2">
+            <div class="order-form">
+              <div class="ff"><label>Server URL <span class="muted small">(blank = this server)</span></label><input id="cloud-url" placeholder="https://your-host.example.com" /></div>
+              <div class="ff"><label>API key</label><input id="cloud-key" placeholder="granite-dev-key" /></div>
+            </div>
+            <div class="import-box">
+              <button class="btn primary" id="cloud-push">↑ Push to cloud</button>
+              <button class="btn" id="cloud-pull">↓ Pull from cloud</button>
+              <div id="cloud-status" class="muted small"></div>
+              <p class="muted small">Pushes/pulls the full workspace to the Granite API so another device can load the same data.</p>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- ============ DRIVER ============ -->
@@ -323,7 +359,13 @@
         <p class="lead">End-to-end, tamper-evident chain of custody for every package — the answer to "where is my package?"</p>
         <div class="grid-2">
           <div class="card">
-            <div class="card-head"><h2>All Packages</h2><input id="track-search" class="search-input" type="search" placeholder="Search id, customer, city…" /></div>
+            <div class="card-head"><h2>All Packages</h2>
+              <div class="head-actions">
+                <button class="btn sm" id="track-select-btn">☑ Select</button>
+                <input id="track-search" class="search-input" type="search" placeholder="Search id, customer, city…" />
+              </div>
+            </div>
+            <div class="bulk-bar" id="track-bulk" style="display:none"></div>
             <div id="tracking-list" class="tracking-list"></div>
           </div>
           <div class="card">
@@ -334,6 +376,14 @@
       </section>
     </div>
   </main>
+</div>
+
+<!-- Command palette -->
+<div class="cmd-backdrop" id="cmd-backdrop">
+  <div class="cmd" role="dialog" aria-label="Command palette">
+    <input id="cmd-input" type="text" placeholder="Jump to a view or search a package…  ·  Esc to close" autocomplete="off" />
+    <div class="cmd-results" id="cmd-results"></div>
+  </div>
 </div>
 
 <!-- Modal -->

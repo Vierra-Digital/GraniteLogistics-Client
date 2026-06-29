@@ -53,9 +53,11 @@ transport density." Stage one to a manifest, then in **Batch & Lane Routing** hi
 **⇈ Transmit** on the manifest. "And we transmit clean **ASN/EDI data straight to the
 carrier network** — no manual keying, no errors."
 
-**7. Roles & control (20s) — enterprise readiness.**
-Back in the platform, use **View as → Driver**. "Role-based access — a driver only sees
-what a driver needs." Switch back to Admin. Mention **Settings** brands every label/manifest.
+**7. Roles & control (30s) — enterprise readiness.**
+Click the **role badge → Switch → Store Runner** (or Driver). "Every role gets its own
+workspace. A runner lands on a focused, big-button **field home** — pickups, pre-sort,
+manifests — and never sees the admin's reports or settings. A driver gets a scan-first
+screen." Switch back to **Administrator**. Mention **Settings** brands every label/manifest.
 
 ## Handling the obvious question
 **"Is this live with UPS/FedEx today?"** — Be straight:

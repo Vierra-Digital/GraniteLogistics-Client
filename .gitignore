@@ -1,0 +1,10 @@
+# Runtime data (server state is per-deployment, not source)
+server/data.json
+
+# Local tooling
+.claude/launch.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+node_modules/
