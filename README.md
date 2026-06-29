@@ -19,13 +19,14 @@ python -m http.server 8080
 
 (Service worker / install prompt need a server, not a `file://` open.)
 
-## Two pages
+## Pages
 
-- **`index.html`** — the public marketing landing: a single shipping-themed hero
-  with a working **Install the App** (PWA) button and a **Track a shipment** bar
-  that deep-links into the platform (`app.html#tracking=GL-1042`).
-- **`app.html`** — the operations platform (the demo dashboard).
-  Installing the PWA opens straight to this page.
+- **`index.html`** — public marketing landing: a single shipping-themed hero with a
+  working **Install the App** (PWA) button and a **Track a shipment** bar.
+- **`track.html`** — public, customer-facing tracking page (status stepper, ETA,
+  condition photos). The landing's track bar routes here (`track.html?n=GL-1042`).
+- **`app.html`** — the operations platform (the demo dashboard). Installing the
+  PWA opens straight to this page.
 
 ## Deploy to a live URL
 
@@ -45,6 +46,49 @@ or an S3 bucket. No backend needed for the demo.
 
 **▶ Run Live Demo** (bottom-left) auto-walks one package through the entire journey
 with nar/toast callouts — the one-click pitch flow.
+
+## Real functionality (not just simulated)
+
+These work for real, no backend required:
+
+- **Local persistence** — every order and status change is saved to the device
+  (localStorage) and survives reloads. **Reset demo data** restores the seed.
+- **Manual order intake** — a real form on *Order Ingest* creates orders.
+- **CSV import** — upload a CSV of orders (with a downloadable template); rows
+  become live packages.
+- **CSV export** — download all shipments as a CSV.
+- **Real condition photos** — *Photo & Bin* and delivery use the device camera /
+  file picker (downscaled + timestamp-stamped); falls back to a placeholder.
+- **Live barcode scanning** — *Driver Scan* uses the browser `BarcodeDetector` +
+  camera where supported (Chromium/Android); the dropdown is the fallback.
+- **Label printing** — the label dialog prints a clean 4" label via the browser.
+- **Search** — filter the chain-of-custody list by id, customer, city, etc.
+- **Reports & Analytics** — a dashboard with KPIs (avg transit time, delivery rate,
+  value delivered) and charts computed live from the chain-of-custody timestamps.
+- **Manifests** — batches are recorded as manifests you can **print** or **export
+  to CSV** for the carrier.
+- **Edit / delete packages** — full CRUD from the package detail dialog.
+- **Customer tracking page** (`track.html`) — public status lookup with a delivery
+  stepper, ETA, and condition photos.
+- **Role-based access** — a "View as" selector (Admin / Runner / Driver / Viewer)
+  shows only the nav each role should see.
+- **Settings** — editable company profile that flows onto printed labels &
+  manifests, default carrier/lane, and **full JSON backup / restore** to move data
+  between devices.
+- **Activity Log** — a tamper-evident audit trail of every chain-of-custody event,
+  searchable, newest first.
+- **Operational logistics** (facility prep before carrier handoff):
+  - **ZIP-code pre-sort** — groups outbound parcels by destination ZIP zone and
+    routes each to a dock lane to bypass initial hub handling.
+  - **Palletized / load-ready staging** — consolidates parcels into standardized
+    load units with weight + density metrics.
+  - **Streamlined manifesting** — transmits a manifest to the carrier as a
+    structured ASN / EDI-214-style payload (with SCAC), and prints/exports it.
+- **Exceptions & SLA** — every package has a promised-delivery (SLA) date with
+  live On-time / At-risk / Late status; delivery exceptions (address issue, damage,
+  weather, failed attempt, customs hold) can be flagged and resolved. Open
+  exceptions and SLA breaches surface in an **Alerts** panel, on the customer
+  tracking page, and in the Reports on-time rate.
 
 ## Files
 

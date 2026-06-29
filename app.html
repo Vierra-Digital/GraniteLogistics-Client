@@ -9,12 +9,33 @@
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+
+<!-- Workspace picker (makes role/experience explicit) -->
+<div id="role-gate" class="role-gate">
+  <div class="rg-inner">
+    <div class="rg-brand">
+      <svg viewBox="0 0 32 32"><path d="M16 1.5 30 9.25v15.5L16 32.5 2 24.75V9.25Z" fill="#13263a" stroke="#2f9bd6" stroke-width="2" stroke-linejoin="round"/><path d="M10 13h12M10 17h12M16 12.5v9" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
+      GRANITE&nbsp;LOGISTICS <span>Operations Platform</span>
+    </div>
+    <h1>Choose your workspace</h1>
+    <p>Each role gets a focused set of tools — pick the one that fits you.</p>
+    <div class="rg-grid">
+      <button class="rg-card" data-role="Admin"><span class="rg-ico">▦</span><b>Administrator</b><span>Full platform — executive dashboards, reports, settings, and every operations tool.</span></button>
+      <button class="rg-card" data-role="Runner"><span class="rg-ico">▣</span><b>Store Runner</b><span>Daily pickups, condition photos, ZIP pre-sort, staging &amp; manifests.</span></button>
+      <button class="rg-card" data-role="Driver"><span class="rg-ico">◎</span><b>Carrier Driver</b><span>Scan labels and confirm deliveries — a focused, on-the-road view.</span></button>
+      <button class="rg-card" data-role="Viewer"><span class="rg-ico">⊶</span><b>Viewer</b><span>Read-only access to dashboards, tracking, and reports.</span></button>
+    </div>
+  </div>
+</div>
+
+<div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
 <div id="app">
   <!-- Sidebar -->
-  <aside class="sidebar">
+  <aside class="sidebar" id="sidebar">
     <a class="brand" href="index.html" title="Back to site">
       <div class="brand-mark" aria-hidden="true">
-        <svg viewBox="0 0 32 32" width="26" height="26"><path d="M16 2 29 9.5v13L16 30 3 22.5v-13Z" fill="none" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/><path d="M11 13h10M11 17h10M16 13v8" stroke="#2f9bd6" stroke-width="2.2" stroke-linecap="round"/></svg>
+        <svg viewBox="0 0 32 32" width="24" height="24"><path d="M16 2 29 9.5v13L16 30 3 22.5v-13Z" fill="none" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/><path d="M11 13h10M11 17h10M16 13v8" stroke="#2f9bd6" stroke-width="2.2" stroke-linecap="round"/></svg>
       </div>
       <div class="brand-text">
         <strong>GRANITE LOGISTICS</strong>
@@ -22,38 +43,51 @@
       </div>
     </a>
 
+    <div class="role-chip" id="role-chip"></div>
+
     <nav class="nav">
-      <button class="nav-item active" data-view="overview"><span class="ico">▦</span> Executive Overview</button>
-      <button class="nav-item" data-view="ingest"><span class="ico">⇄</span> Order Ingest <em class="badge-api">API</em></button>
-      <button class="nav-item" data-view="runner"><span class="ico">▣</span> Runner Dashboard</button>
-      <button class="nav-item" data-view="batch"><span class="ico">⊞</span> Batch &amp; Lane Routing</button>
-      <button class="nav-item" data-view="driver"><span class="ico">◎</span> Driver Scan</button>
-      <button class="nav-item" data-view="tracking"><span class="ico">⊶</span> Chain of Custody</button>
+      <div class="nav-group">
+        <div class="nav-label">Dashboard</div>
+        <button class="nav-item active" data-view="overview"><span class="ico">▦</span> Executive Overview</button>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">Operations</div>
+        <button class="nav-item" data-view="ingest"><span class="ico">⇄</span> Order Ingest <em class="badge-api">API</em></button>
+        <button class="nav-item" data-view="runner"><span class="ico">▣</span> Runner Dashboard</button>
+        <button class="nav-item" data-view="presort"><span class="ico">⤧</span> Pre-Sort &amp; Staging</button>
+        <button class="nav-item" data-view="batch"><span class="ico">⊞</span> Batch &amp; Manifests</button>
+        <button class="nav-item" data-view="driver"><span class="ico">◎</span> Driver Scan</button>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">Visibility</div>
+        <button class="nav-item" data-view="tracking"><span class="ico">⊶</span> Chain of Custody</button>
+        <button class="nav-item" data-view="reports"><span class="ico">▤</span> Reports</button>
+        <button class="nav-item" data-view="activity"><span class="ico">≡</span> Activity Log</button>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">Administration</div>
+        <button class="nav-item" data-view="settings"><span class="ico">⚙</span> Settings</button>
+      </div>
     </nav>
 
     <div class="sidebar-foot">
       <button id="run-demo" class="btn-demo">▶ Run Live Demo</button>
-      <div class="env-pill"><span class="dot"></span> Sandbox / Demo Data</div>
+      <button id="reset-data" class="btn-reset">⟲ Reset demo data</button>
+      <div class="env-pill"><span class="dot"></span> Saved to this device</div>
     </div>
   </aside>
 
   <!-- Main -->
   <main class="main">
     <header class="topbar">
-      <div>
+      <button class="menu-btn" id="menu-btn" aria-label="Open menu">☰</button>
+      <div class="tb-titles">
         <h1 id="view-title">Executive Overview</h1>
         <p id="view-sub" class="muted">Real-time visibility from auction win to delivery confirmation.</p>
       </div>
-      <div class="topbar-right">
-        <div class="integration-chip" title="Simulated connection">
-          <span class="dot ok"></span> Shopify
-        </div>
-        <div class="integration-chip" title="Simulated connection">
-          <span class="dot ok"></span> UPS API
-        </div>
-        <div class="integration-chip" title="Simulated connection">
-          <span class="dot ok"></span> FedEx API
-        </div>
+      <div class="tb-right">
+        <div class="global-search"><input id="global-search" type="search" placeholder="Search package #…" /></div>
+        <button class="role-badge" id="role-badge" title="Switch workspace"><span class="rb-dot"></span><span id="role-badge-text">Admin</span><span class="rb-switch">Switch</span></button>
       </div>
     </header>
 
@@ -61,6 +95,11 @@
       <!-- ============ OVERVIEW ============ -->
       <section class="view active" id="view-overview">
         <div class="kpi-row" id="kpi-row"></div>
+
+        <div class="card" id="alerts-card">
+          <div class="card-head"><h2>⚠ Alerts</h2><span class="muted" id="alerts-count"></span></div>
+          <div id="overview-alerts" class="alerts-list"></div>
+        </div>
 
         <div class="grid-2">
           <div class="card">
@@ -93,12 +132,48 @@
 
       <!-- ============ INGEST ============ -->
       <section class="view" id="view-ingest">
-        <p class="lead">Orders flow in automatically from each client's commerce backend — no manual re-entry. Below is a live view of inbound connectors.</p>
+        <p class="lead">Orders flow in automatically from each client's commerce backend — or add them manually / by CSV. Everything is saved to this device.</p>
         <div class="connectors" id="connectors"></div>
+
+        <div class="card">
+          <div class="card-head"><h2>Add Orders</h2><span class="muted">Manual entry or CSV import</span></div>
+          <div class="grid-2">
+            <form id="order-form" class="order-form" autocomplete="off">
+              <div class="ff"><label>Customer name</label><input name="name" required placeholder="Jane Doe" /></div>
+              <div class="ff"><label>Item description</label><input name="item" required placeholder="LG 55&quot; OLED TV" /></div>
+              <div class="ff-row">
+                <div class="ff"><label>Declared value ($)</label><input name="value" type="number" min="0" value="0" /></div>
+                <div class="ff"><label>Source</label><select name="source"><option>Manual Entry</option><option>Shopify</option><option>WooCommerce</option><option>MacBid Auction</option></select></div>
+              </div>
+              <div class="ff"><label>Address</label><input name="address" placeholder="123 Main St" /></div>
+              <div class="ff-row">
+                <div class="ff"><label>City</label><input name="city" placeholder="Dayton" /></div>
+                <div class="ff" style="max-width:90px"><label>State</label><input name="state" maxlength="2" placeholder="OH" /></div>
+                <div class="ff" style="max-width:120px"><label>ZIP</label><input name="zip" placeholder="45402" /></div>
+              </div>
+              <div class="ff"><label>Phone</label><input name="phone" placeholder="(937) 555-0100" /></div>
+              <button class="btn primary" type="submit">+ Create Order</button>
+            </form>
+            <div class="import-box">
+              <label class="import-drop" for="csv-input">
+                <span class="id-ico">⇪</span>
+                <b>Import orders from CSV</b>
+                <span class="muted small">Columns: name, item, value, address, city, state, zip, phone, source</span>
+                <input type="file" id="csv-input" accept=".csv,text/csv" hidden />
+              </label>
+              <button class="btn sm" id="csv-template">↓ Download CSV template</button>
+              <div id="import-result" class="muted small"></div>
+            </div>
+          </div>
+        </div>
+
         <div class="card">
           <div class="card-head">
             <h2>Inbound Order Stream</h2>
-            <button class="btn" id="pull-orders">⇣ Pull New Orders</button>
+            <div class="head-actions">
+              <button class="btn sm" id="export-csv">↓ Export CSV</button>
+              <button class="btn" id="pull-orders">⇣ Pull New Orders</button>
+            </div>
           </div>
           <div id="ingest-feed" class="ingest-feed"></div>
         </div>
@@ -110,6 +185,19 @@
         <div class="card">
           <div class="card-head"><h2>Today's Pickups</h2><span class="muted" id="runner-count"></span></div>
           <div id="runner-list" class="pickup-list"></div>
+        </div>
+      </section>
+
+      <!-- ============ PRE-SORT & STAGING ============ -->
+      <section class="view" id="view-presort">
+        <p class="lead">Facility-level prep before carrier handoff: pre-sort outbound volume by ZIP code to bypass initial hub handling, then consolidate parcels into standardized load-ready units.</p>
+        <div class="card">
+          <div class="card-head"><h2>ZIP-Code Pre-Sort</h2><button class="btn" id="run-presort">⤧ Run ZIP Pre-Sort</button></div>
+          <div id="presort-zones" class="stage-list"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Load-Ready Units</h2><span class="muted">Palletized / consolidated for transport density</span></div>
+          <div id="loadunit-list" class="stage-list"></div>
         </div>
       </section>
 
@@ -142,6 +230,68 @@
             </div>
           </div>
         </div>
+        <div class="card">
+          <div class="card-head"><h2>Recent Manifests</h2><span class="muted">Print or export for the carrier</span></div>
+          <div id="manifest-list" class="stage-list"></div>
+        </div>
+      </section>
+
+      <!-- ============ REPORTS ============ -->
+      <section class="view" id="view-reports">
+        <div class="kpi-row" id="rep-kpi"></div>
+        <div class="grid-2">
+          <div class="card"><div class="card-head"><h2>Shipments by Source</h2></div><div class="funnel" id="rep-source"></div></div>
+          <div class="card"><div class="card-head"><h2>Value in Custody by Carrier</h2></div><div class="funnel" id="rep-carrier"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Average Time per Stage</h2><span class="muted">hours, from chain-of-custody timestamps</span></div>
+          <div class="funnel" id="rep-stage"></div>
+        </div>
+      </section>
+
+      <!-- ============ ACTIVITY LOG ============ -->
+      <section class="view" id="view-activity">
+        <div class="card">
+          <div class="card-head"><h2>Audit Trail</h2>
+            <div class="head-actions"><span class="muted" id="activity-count"></span>
+              <input id="activity-search" class="search-input" type="search" placeholder="Search events…" /></div>
+          </div>
+          <div id="activity-feed" class="activity-feed"></div>
+        </div>
+      </section>
+
+      <!-- ============ SETTINGS ============ -->
+      <section class="view" id="view-settings">
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head"><h2>Company Profile</h2><span class="muted">Printed on labels &amp; manifests</span></div>
+            <form id="settings-form" class="order-form">
+              <div class="ff"><label>Company name</label><input name="name" id="set-name" /></div>
+              <div class="ff"><label>Address</label><input name="address" id="set-address" /></div>
+              <div class="ff-row">
+                <div class="ff"><label>Phone</label><input name="phone" id="set-phone" /></div>
+                <div class="ff"><label>Email</label><input name="email" id="set-email" /></div>
+              </div>
+              <div class="ff-row">
+                <div class="ff"><label>Default carrier</label><select name="carrier" id="set-carrier"><option>UPS</option><option>FedEx</option><option>Dayton Freight</option><option>Pitt Ohio</option></select></div>
+                <div class="ff"><label>Default lane</label><select name="lane" id="set-lane"><option>Lane 1</option><option>Lane 2</option><option>Lane 3</option><option>Lane 4</option></select></div>
+              </div>
+              <button class="btn primary" type="submit">Save settings</button>
+            </form>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>Data Management</h2><span class="muted">This device</span></div>
+            <div class="import-box">
+              <button class="btn" id="backup-json">↓ Export full backup (JSON)</button>
+              <label class="import-drop" for="restore-json">
+                <span class="id-ico">⇪</span><b>Restore from backup</b>
+                <span class="muted small">Replaces all current data with a .json backup</span>
+                <input type="file" id="restore-json" accept=".json,application/json" hidden />
+              </label>
+              <p class="muted small">Data is stored locally in this browser. Export a backup to move it between devices.</p>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- ============ DRIVER ============ -->
@@ -151,8 +301,12 @@
           <div class="card scan-card">
             <div class="card-head"><h2>Scan Label</h2></div>
             <div class="scanner">
-              <div class="scan-window"><div class="scan-line"></div><span>◎ Camera viewfinder</span></div>
-              <label class="muted small">Simulate a scan</label>
+              <div class="scan-window">
+                <video id="scan-video" playsinline muted></video>
+                <div class="scan-line"></div><span id="scan-hint">◎ Camera viewfinder</span>
+              </div>
+              <button class="btn" id="scan-live">📷 Live Camera Scan</button>
+              <label class="muted small">…or simulate a scan</label>
               <select id="scan-select"></select>
               <button class="btn primary" id="do-scan">Scan Barcode</button>
             </div>
@@ -169,7 +323,7 @@
         <p class="lead">End-to-end, tamper-evident chain of custody for every package — the answer to "where is my package?"</p>
         <div class="grid-2">
           <div class="card">
-            <div class="card-head"><h2>All Packages</h2></div>
+            <div class="card-head"><h2>All Packages</h2><input id="track-search" class="search-input" type="search" placeholder="Search id, customer, city…" /></div>
             <div id="tracking-list" class="tracking-list"></div>
           </div>
           <div class="card">
@@ -189,6 +343,9 @@
 
 <!-- Toasts -->
 <div class="toast-stack" id="toasts"></div>
+
+<!-- Print target (hidden on screen, shown only when printing a label) -->
+<div id="print-root" class="print-root"></div>
 
 <script src="barcode.js"></script>
 <script src="app.js"></script>

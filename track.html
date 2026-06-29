@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0a1622" />
+<title>Track a Shipment — Granite Logistics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="landing.css" />
+<style>
+  .track-page{max-width:760px;margin:0 auto;padding:clamp(36px,6vw,72px) clamp(20px,5vw,40px) 80px}
+  .track-page .eyebrow{justify-content:flex-start}
+  .track-page h1{font-family:var(--disp);font-weight:700;text-transform:uppercase;font-size:clamp(2rem,5vw,3rem);color:#fff;margin:0 0 10px}
+  .track-page .sub{margin-bottom:26px}
+  .tk-form{display:flex;border:1px solid rgba(255,255,255,.2);border-radius:3px;overflow:hidden;background:rgba(255,255,255,.04);max-width:520px}
+  .tk-form input{flex:1;background:transparent;border:0;outline:0;color:#fff;padding:15px 16px;font-size:1rem;font-family:var(--body)}
+  .tk-form input::placeholder{color:#67727f}
+  .tk-form button{font-family:var(--disp);font-weight:600;letter-spacing:.05em;text-transform:uppercase;background:var(--accent);color:#042235;border:0;padding:0 26px;cursor:pointer}
+  .tk-form button:hover{background:var(--accent-l)}
+  #result{margin-top:30px}
+  .tk-card{background:#fff;color:#13263a;border-radius:8px;padding:24px;box-shadow:0 24px 60px rgba(0,0,0,.4)}
+  .tk-empty b{font-size:1.1rem}
+  .tk-empty .muted{color:#5d6a7a}
+  .tk-top{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap;border-bottom:1px solid #e3e8ee;padding-bottom:16px}
+  .tk-id{font-family:"Consolas",monospace;font-weight:700;color:#5d6a7a;font-size:.9rem}
+  .tk-status{font-family:var(--disp);font-weight:700;font-size:1.7rem;text-transform:uppercase;color:#13263a;line-height:1.1}
+  .tk-eta{font-family:var(--disp);font-weight:600;color:var(--accent-d);text-transform:uppercase;letter-spacing:.04em;font-size:.92rem;text-align:right}
+  .tk-steps{display:flex;margin:26px 0 22px}
+  .tk-step{flex:1;position:relative;text-align:center;font-size:.74rem;color:#8a96a4;font-weight:600}
+  .tk-step::before{content:"";position:absolute;top:9px;left:-50%;width:100%;height:3px;background:#dde3ea;z-index:0}
+  .tk-step:first-child::before{display:none}
+  .tk-step.done::before,.tk-step.cur::before{background:var(--accent)}
+  .tk-dot{position:relative;z-index:1;display:block;width:20px;height:20px;border-radius:50%;background:#dde3ea;margin:0 auto 8px;border:3px solid #fff;box-shadow:0 0 0 1px #dde3ea}
+  .tk-step.done .tk-dot{background:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+  .tk-step.cur .tk-dot{background:var(--accent);box-shadow:0 0 0 4px rgba(47,155,214,.25)}
+  .tk-step.done .tk-lbl,.tk-step.cur .tk-lbl{color:#13263a}
+  .tk-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:8px}
+  .tk-grid>div{display:flex;flex-direction:column;gap:3px;padding:10px 0;border-top:1px solid #eef2f6}
+  .tk-grid b{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#8a96a4}
+  .tk-grid span{font-size:.96rem}
+  .tk-grid .mono{font-family:"Consolas",monospace}
+  .tk-photos{display:flex;gap:12px;margin-top:16px}
+  .tk-photos img{width:120px;height:120px;object-fit:cover;border-radius:8px;border:1px solid #e3e8ee}
+  .tk-exc{margin-top:14px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:11px 14px;font-weight:600;font-size:.92rem}
+  @media(max-width:560px){.tk-grid{grid-template-columns:1fr}.tk-step .tk-lbl{display:none}}
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <a class="wordmark" href="index.html">
+    <span class="mark" aria-hidden="true">
+      <svg viewBox="0 0 32 32" width="30" height="30"><path d="M16 1.5 30 9.25v15.5L16 32.5 2 24.75V9.25Z" fill="#13263a" stroke="#2f9bd6" stroke-width="2" stroke-linejoin="round"/><path d="M10 13h12M10 17h12M16 12.5v9" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
+    </span>
+    <span class="wm-text">GRANITE<strong>LOGISTICS</strong></span>
+  </a>
+  <nav class="site-nav">
+    <a href="index.html">Home</a>
+    <a href="app.html">Platform</a>
+    <a class="phone" href="tel:+19375550118">(937) 555-0118</a>
+  </nav>
+  <a class="btn-ghost" href="app.html">Launch Platform</a>
+</header>
+
+<main class="track-page">
+  <p class="eyebrow"><span class="tick"></span> CUSTOMER TRACKING</p>
+  <h1>Track your shipment</h1>
+  <p class="sub">Enter your Granite Logistics tracking number to see live status, estimated delivery, and condition photos.</p>
+
+  <form class="tk-form" id="tk-form">
+    <input id="tk-input" type="text" placeholder="Tracking #  ·  e.g. GL-1042" autocomplete="off" />
+    <button type="submit">Track</button>
+  </form>
+
+  <div id="result"></div>
+</main>
+
+<footer class="site-footer">
+  <span>&copy; <span id="year">2026</span> Granite Logistics LLC &middot; Dayton, Ohio</span>
+  <span class="foot-contact"><a href="tel:+19375550118">(937) 555-0118</a> &middot; <a href="mailto:ops@granitelogistics.co">ops@granitelogistics.co</a></span>
+</footer>
+
+<script>
+(function () {
+  var STORE = "granite-logistics-state-v1";
+  var STEPS = ["Order Received", "Processing", "In Transit", "Out for Delivery", "Delivered"];
+  var STATUS_STEP = { Won: 0, Intake: 1, PickedUp: 1, Staged: 1, InTransit: 2, OutforDelivery: 3, Delivered: 4 };
+  var STATUS_LABEL = { Won: "Order Received", Intake: "Processing", PickedUp: "Processing", Staged: "Ready for Carrier", InTransit: "In Transit", OutforDelivery: "Out for Delivery", Delivered: "Delivered" };
+  var norm = function (s) { return String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, ""); };
+  var fmt = function (ts) { return new Date(ts).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }); };
+
+  function load() { try { var d = JSON.parse(localStorage.getItem(STORE) || "null"); return d && Array.isArray(d.packages) ? d.packages : []; } catch (e) { return []; } }
+  function lookup(q) { var n = norm(q); return load().find(function (p) { return norm(p.id) === n || norm(p.barcode) === n; }); }
+
+  function render(p, q) {
+    var box = document.getElementById("result");
+    if (!q) { box.innerHTML = ""; return; }
+    if (!p) {
+      box.innerHTML = '<div class="tk-card tk-empty"><b>No shipment found for “' + q + '”.</b>' +
+        '<p class="muted">Double-check the tracking number. In this demo, packages created in the platform on this device appear here.</p></div>';
+      return;
+    }
+    var step = STATUS_STEP[p.status] || 0;
+    var deliveredTs = (p.history.find(function (h) { return h.stage === "Delivered"; }) || {}).ts;
+    var lastTs = p.history.length ? p.history[p.history.length - 1].ts : Date.now();
+    var eta;
+    if (deliveredTs) eta = "Delivered " + fmt(deliveredTs);
+    else if (p.promisedTs && p.promisedTs < Date.now()) eta = "Delayed — was due " + fmt(p.promisedTs);
+    else eta = "Est. delivery " + fmt(p.promisedTs || (lastTs + (4 - step) * 86400000 + 86400000));
+    var excHtml = p.exception ? '<div class="tk-exc">⚠ Delivery exception: ' + p.exception.type + (p.exception.note ? ' — ' + p.exception.note : '') + '</div>' : "";
+    var steps = STEPS.map(function (s, i) {
+      return '<div class="tk-step ' + (i < step ? "done" : i === step ? "cur" : "") + '"><span class="tk-dot"></span><span class="tk-lbl">' + s + '</span></div>';
+    }).join("");
+    var photos = (p.photos && (p.photos.pickup || p.photos.delivery))
+      ? '<div class="tk-photos">' + (p.photos.pickup ? '<img src="' + p.photos.pickup + '" alt="condition photo">' : "") +
+        (p.photos.delivery ? '<img src="' + p.photos.delivery + '" alt="delivery photo">' : "") + "</div>"
+      : "";
+    box.innerHTML = '<div class="tk-card">' +
+      '<div class="tk-top"><div><div class="tk-id">' + p.id + '</div><div class="tk-status">' + (STATUS_LABEL[p.status] || p.status) + '</div></div>' +
+      '<div class="tk-eta">' + eta + '</div></div>' +
+      excHtml +
+      '<div class="tk-steps">' + steps + '</div>' +
+      '<div class="tk-grid">' +
+      '<div><b>Item</b><span>' + p.item.description + '</span></div>' +
+      '<div><b>Destination</b><span>' + p.customer.city + ", " + p.customer.state + '</span></div>' +
+      '<div><b>Carrier</b><span>' + (p.carrier || "Granite Logistics") + '</span></div>' +
+      '<div><b>Tracking #</b><span class="mono">' + (p.tracking || p.barcode) + '</span></div>' +
+      '</div>' + photos + '</div>';
+  }
+
+  var input = document.getElementById("tk-input");
+  document.getElementById("tk-form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var q = input.value.trim();
+    history.replaceState(null, "", q ? "?n=" + encodeURIComponent(q) : location.pathname);
+    render(lookup(q), q);
+  });
+  var y = document.getElementById("year"); if (y) y.textContent = new Date().getFullYear();
+  var n = new URLSearchParams(location.search).get("n");
+  if (n) { input.value = n; render(lookup(n), n); }
+})();
+</script>
+</body>
+</html>

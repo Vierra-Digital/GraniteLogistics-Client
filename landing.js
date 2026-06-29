@@ -63,7 +63,7 @@
   $("#track-form").addEventListener("submit", function (e) {
     e.preventDefault();
     var val = $("#track-input").value.trim();
-    window.location.href = "app.html#tracking" + (val ? "=" + encodeURIComponent(val) : "");
+    window.location.href = "track.html" + (val ? "?n=" + encodeURIComponent(val) : "");
   });
 
   // ---- Service worker (installable / offline) ----
