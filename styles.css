@@ -395,6 +395,24 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
   .ff-row{flex-wrap:wrap}
 }
 
+/* ---- Chain-of-custody master→detail (mobile) ---- */
+.coc-back{display:none;background:transparent;border:0;color:var(--blue-d);font-weight:700;cursor:pointer;font-size:.88rem;padding:4px 0;margin-right:6px}
+@media(max-width:980px){
+  #view-tracking:not(.detail-open) .coc-detail-card{display:none}
+  #view-tracking.detail-open .coc-list-card{display:none}
+  #view-tracking.detail-open .coc-back{display:inline-flex;align-items:center;gap:4px}
+}
+
+/* ---- Form grouping labels (cleaner intake form) ---- */
+.form-group-label{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--slate-400);margin-top:8px;padding-bottom:5px;border-bottom:1px solid var(--line)}
+.order-form .form-group-label:first-child{margin-top:0}
+
+/* ---- Consistent empty states across lists ---- */
+.pickup-list>p.muted,.stage-list>p.muted,.tracking-list>p.muted,.activity-feed>p.muted,
+.alerts-list>p.muted,.ingest-feed>p.muted,#coc-detail>p.muted{
+  text-align:center;padding:30px 18px;border:1px dashed var(--line);border-radius:12px;margin:0;font-size:.88rem
+}
+
 /* ---- UX polish: graceful wrapping, tap targets, keyboard focus ---- */
 .card-head{flex-wrap:wrap}
 .head-actions{flex-wrap:wrap;align-items:center}

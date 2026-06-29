@@ -919,17 +919,20 @@
     }).catch(function () { syncing = false; });
   }
   function cloudStatus(msg) { var el = $("#cloud-status"); if (el) el.textContent = msg; }
+  function cloudBusy(on) { ["#cloud-push", "#cloud-pull"].forEach(function (id) { var b = $(id); if (b) b.disabled = on; }); }
   function cloudPush() {
-    saveCloudInputs(); cloudStatus("Pushing…");
+    saveCloudInputs(); cloudStatus("Pushing…"); cloudBusy(true);
     pushState().then(function (o) { cloudStatus("✓ Pushed " + o.count + " packages · " + new Date().toLocaleTimeString()); toast("Pushed to cloud", "api"); })
-      .catch(function (e) { cloudStatus("✕ Push failed — " + (e.message || "unreachable")); toast("Push failed", "ok"); });
+      .catch(function (e) { cloudStatus("✕ Push failed — " + (e.message || "unreachable")); toast("Push failed", "ok"); })
+      .finally(function () { cloudBusy(false); });
   }
   function cloudPull() {
-    saveCloudInputs(); cloudStatus("Pulling…");
+    saveCloudInputs(); cloudStatus("Pulling…"); cloudBusy(true);
     pullState().then(function (s) {
       if (applyPulled(s)) { cocSelected = null; trackQuery = ""; cloudStatus("✓ Pulled " + state.packages.length + " packages · " + new Date().toLocaleTimeString()); toast("Pulled from cloud", "api"); applyRole(); go(allowedViews()[0]); }
       else { cloudStatus("No data found for this workspace yet — push first."); }
-    }).catch(function (e) { cloudStatus("✕ Pull failed — " + (e.message || "unreachable")); toast("Pull failed", "ok"); });
+    }).catch(function (e) { cloudStatus("✕ Pull failed — " + (e.message || "unreachable")); toast("Pull failed", "ok"); })
+      .finally(function () { cloudBusy(false); });
   }
   function syncProviderUI() {
     var p = (($("#cloud-provider") || {}).value) || "granite";
@@ -1136,6 +1139,7 @@
     toast(ids.length + " packages exported", "ok");
   }
   function renderTracking() {
+    var tvReset = $("#view-tracking"); if (tvReset) tvReset.classList.remove("detail-open"); // open to the list on mobile
     var pkgs = state.packages.slice().sort(function (a, b) { return stageIdx(b.status) - stageIdx(a.status); });
     if (trackQuery) {
       pkgs = pkgs.filter(function (p) {
@@ -1163,6 +1167,7 @@
         $$("#tracking-list .row-item").forEach(function (r) { r.classList.remove("selected"); });
         el.classList.add("selected");
         renderCoc(id);
+        var tv = $("#view-tracking"); if (tv) tv.classList.add("detail-open"); // mobile master→detail
       });
     });
     updateBulkBar();
@@ -1532,6 +1537,9 @@
 
   var searchInput = $("#track-search");
   if (searchInput) searchInput.addEventListener("input", function () { trackQuery = this.value.trim().toLowerCase(); renderTracking(); });
+
+  var cocBack = $("#coc-back");
+  if (cocBack) cocBack.addEventListener("click", function () { var v = $("#view-tracking"); if (v) v.classList.remove("detail-open"); });
 
   var trackSelectBtn = $("#track-select-btn");
   if (trackSelectBtn) trackSelectBtn.addEventListener("click", function () {

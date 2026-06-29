@@ -162,12 +162,15 @@
           <div class="card-head"><h2>Add Orders</h2><span class="muted">Manual entry or CSV import</span></div>
           <div class="grid-2">
             <form id="order-form" class="order-form" autocomplete="off">
+              <div class="form-group-label">Customer</div>
               <div class="ff"><label>Customer name</label><input name="name" required placeholder="Jane Doe" /></div>
+              <div class="form-group-label">Item details</div>
               <div class="ff"><label>Item description</label><input name="item" required placeholder="LG 55&quot; OLED TV" /></div>
               <div class="ff-row">
                 <div class="ff"><label>Declared value ($)</label><input name="value" type="number" min="0" value="0" /></div>
                 <div class="ff"><label>Source</label><select name="source"><option>Manual Entry</option><option>Shopify</option><option>WooCommerce</option><option>MacBid Auction</option></select></div>
               </div>
+              <div class="form-group-label">Delivery address</div>
               <div class="ff"><label>Address</label><input name="address" placeholder="123 Main St" /></div>
               <div class="ff-row">
                 <div class="ff"><label>City</label><input name="city" placeholder="Dayton" /></div>
@@ -383,7 +386,7 @@
       <section class="view" id="view-tracking">
         <p class="lead">End-to-end, tamper-evident chain of custody for every package — the answer to "where is my package?"</p>
         <div class="grid-2">
-          <div class="card">
+          <div class="card coc-list-card">
             <div class="card-head"><h2>All Packages</h2>
               <div class="head-actions">
                 <button class="btn sm" id="track-select-btn">☑ Select</button>
@@ -393,8 +396,8 @@
             <div class="bulk-bar" id="track-bulk" style="display:none"></div>
             <div id="tracking-list" class="tracking-list"></div>
           </div>
-          <div class="card">
-            <div class="card-head"><h2 id="coc-title">Chain of Custody</h2></div>
+          <div class="card coc-detail-card">
+            <div class="card-head"><button class="coc-back" id="coc-back" type="button">← All packages</button><h2 id="coc-title">Chain of Custody</h2></div>
             <div id="coc-detail"><p class="muted">Select a package to view its full journey.</p></div>
           </div>
         </div>
