@@ -24,6 +24,38 @@ function readState() {
 }
 function writeState(obj) { fs.writeFileSync(DATA, JSON.stringify(obj, null, 2)); }
 
+function nextId(state) {
+  var max = 1040;
+  (state.packages || []).forEach(function (p) { var m = /GL-(\d+)/.exec(p.id || ""); if (m) max = Math.max(max, +m[1]); });
+  return "GL-" + (max + 1);
+}
+// Build a package from an inbound order payload (mirrors the client's intake shape).
+function makeOrder(d, state) {
+  var id = nextId(state);
+  var now = Date.now();
+  return {
+    id: id,
+    source: d.source || "API",
+    orderRef: d.orderRef || ("#" + (10000 + Math.floor(Math.random() * 89999))),
+    customer: {
+      name: (d.name || "—").toString().trim(),
+      address: (d.address || "").toString().trim(),
+      city: (d.city || "").toString().trim(),
+      state: (d.state || "").toString().trim().toUpperCase(),
+      zip: (d.zip || "").toString().trim(),
+      phone: (d.phone || "").toString().trim()
+    },
+    item: { description: (d.item || "Item").toString().trim(), value: Math.max(0, parseInt(d.value, 10) || 0), weight: Math.max(1, parseInt(d.weight, 10) || (2 + Math.floor(Math.random() * 38))) },
+    barcode: id.replace(/-/g, ""),
+    carrier: null, lane: null, batchId: null, tracking: null,
+    photos: {},
+    history: [{ stage: "Won", ts: now, note: "Order received via API webhook." }],
+    promisedTs: now + (3 + Math.floor(Math.random() * 3)) * 86400000,
+    exception: null,
+    status: "Won"
+  };
+}
+
 function sendJSON(res, code, obj) {
   var body = JSON.stringify(obj);
   res.writeHead(code, {
@@ -66,6 +98,24 @@ function handleApi(req, res, pathname) {
   }
   if (pathname === "/api/packages" && req.method === "GET") {
     return sendJSON(res, 200, { packages: readState().packages || [] });
+  }
+  // API-first ingest: a client store / carrier pushes orders here
+  if (pathname === "/api/orders" && req.method === "POST") {
+    var ob = "";
+    req.on("data", function (c) { ob += c; if (ob.length > 4e6) req.destroy(); });
+    req.on("end", function () {
+      try {
+        var parsed = JSON.parse(ob || "{}");
+        var orders = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.orders) ? parsed.orders : [parsed]);
+        var state = readState();
+        if (!Array.isArray(state.packages)) state.packages = [];
+        var created = orders.map(function (d) { var p = makeOrder(d, state); state.packages.push(p); return p; });
+        state.updatedAt = new Date().toISOString();
+        writeState(state);
+        sendJSON(res, 201, { ok: true, created: created.length, packages: created });
+      } catch (e) { sendJSON(res, 400, { error: "invalid JSON order payload" }); }
+    });
+    return;
   }
   sendJSON(res, 404, { error: "not found" });
 }

@@ -541,6 +541,35 @@
         '<div class="c-meta"><b>' + (bySource[s] || 0) + '</b> orders ingested</div></div>';
     }).join("");
     renderFeed();
+    var wc = $("#webhook-curl");
+    if (wc) {
+      var c = cloudCfg(), base = c.url || location.origin;
+      wc.textContent = 'curl -X POST ' + base + '/api/orders \\\n' +
+        '  -H "x-api-key: ' + c.key + '" -H "Content-Type: application/json" \\\n' +
+        '  -d \'{"name":"Jane Doe","item":"LG OLED TV","value":1100,"city":"Dayton","state":"OH","zip":"45402","source":"Shopify"}\'';
+    }
+  }
+  // API-first demo: push current state, POST an order to the webhook, pull it back.
+  function simulateWebhook() {
+    var c = cloudCfg(), base = c.url || "";
+    var st = $("#webhook-status");
+    var item = pick(ITEMS), city = pick(CITIES);
+    var order = { name: pick(FIRST) + " " + pick(LAST), item: item[0], value: item[1], address: (100 + rng(8900)) + " " + pick(STREETS), city: city[0], state: city[1], zip: city[2], source: "Shopify (webhook)" };
+    var hdr = { "Content-Type": "application/json", "x-api-key": c.key };
+    if (st) st.textContent = "Pushing current state…";
+    fetch(base + "/api/state", { method: "PUT", headers: hdr, body: JSON.stringify({ packages: state.packages, manifests: state.manifests, loadUnits: state.loadUnits, events: state.events, settings: state.settings }) })
+      .then(function () { if (st) st.textContent = "POSTing order to /api/orders…"; return fetch(base + "/api/orders", { method: "POST", headers: hdr, body: JSON.stringify(order) }); })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { if (!j.ok) throw new Error(j.error || "failed"); if (st) st.textContent = "Pulling updated state…"; return fetch(base + "/api/state", { headers: { "x-api-key": c.key } }); })
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        if (!Array.isArray(s.packages)) throw new Error("bad state");
+        state.packages = s.packages; state.manifests = s.manifests || []; state.loadUnits = s.loadUnits || []; state.events = s.events || [];
+        save();
+        if (st) st.textContent = "✓ Inbound order received via API — " + order.item + " → " + order.name;
+        toast("Inbound order ingested via webhook", "api"); renderIngest();
+      })
+      .catch(function () { if (st) st.textContent = "✕ Backend unreachable — run server/server.js, or set a Cloud Sync URL in Settings."; toast("Webhook backend unreachable", "ok"); });
   }
   function renderFeed() {
     var recent = state.packages.slice().reverse().slice(0, 8);
@@ -1466,6 +1495,14 @@
   });
 
   // Data backup / restore
+  var simBtn = $("#sim-webhook"); if (simBtn) simBtn.addEventListener("click", simulateWebhook);
+  var copyCurlBtn = $("#copy-curl");
+  if (copyCurlBtn) copyCurlBtn.addEventListener("click", function () {
+    var t = (($("#webhook-curl") || {}).textContent) || "";
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(function () { toast("curl command copied", "ok"); }, function () { toast(t, "ok"); });
+    else toast("Copy unavailable", "ok");
+  });
+
   var cloudPushBtn = $("#cloud-push"); if (cloudPushBtn) cloudPushBtn.addEventListener("click", cloudPush);
   var cloudPullBtn = $("#cloud-pull"); if (cloudPullBtn) cloudPullBtn.addEventListener("click", cloudPull);
 

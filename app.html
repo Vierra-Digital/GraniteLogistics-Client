@@ -148,6 +148,17 @@
         <div class="connectors" id="connectors"></div>
 
         <div class="card">
+          <div class="card-head"><h2>API &amp; Webhooks</h2><span class="muted">API-first integration</span></div>
+          <p class="muted small" style="margin-top:0">A client's store or carrier pushes orders straight to Granite — no manual entry. Live endpoint:</p>
+          <pre class="code-block" id="webhook-curl"></pre>
+          <div class="head-actions">
+            <button class="btn sm" id="copy-curl">⧉ Copy curl</button>
+            <button class="btn primary sm" id="sim-webhook">⚡ Simulate inbound order</button>
+          </div>
+          <div id="webhook-status" class="muted small"></div>
+        </div>
+
+        <div class="card">
           <div class="card-head"><h2>Add Orders</h2><span class="muted">Manual entry or CSV import</span></div>
           <div class="grid-2">
             <form id="order-form" class="order-form" autocomplete="off">
