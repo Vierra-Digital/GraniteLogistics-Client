@@ -355,6 +355,10 @@
         ? '<span class="uc-avatar">' + ((u.name || u.email || "U").charAt(0).toUpperCase()) + '</span><div class="uc-text"><b>' + (u.name || u.email) + '</b><span>' + m.label + '</span></div>'
         : "";
     }
+    var au = (typeof currentUser === "function") ? currentUser() : null;
+    var av = $("#am-avatar"); if (av) av.textContent = (au && (au.name || au.email) || "U").charAt(0).toUpperCase();
+    var an = $("#am-name"); if (an) an.textContent = au ? (au.name || au.email) : "Guest";
+    var ae = $("#am-email"); if (ae) ae.textContent = au ? au.email : "";
   }
   function applyRole() {
     var allowed = allowedViews();
@@ -541,7 +545,9 @@
     var box = $("#cust-orders"); if (!box) return;
     if (!mine.length) {
       box.innerHTML = '<div class="empty-state"><div class="es-ico">📦</div><b>No orders yet</b>' +
-        '<span>Place your first order with the form — it\'ll show up here so you can follow it from pickup to your door.</span></div>';
+        '<span>Create your first shipment in three quick steps. We\'ll move it from pickup to your door and keep you posted along the way.</span>' +
+        '<button class="btn primary" id="try-sample" type="button">✨ Try a sample order</button></div>';
+      var ts = $("#try-sample"); if (ts) ts.addEventListener("click", fillSampleOrder);
       return;
     }
     box.innerHTML = mine.slice().reverse().map(function (p) {
@@ -594,6 +600,17 @@
     ];
     var rs = $("#review-summary");
     if (rs) rs.innerHTML = rows.map(function (r) { return '<div><dt>' + r[0] + '</dt><dd>' + r[1] + '</dd></div>'; }).join("");
+  }
+  function fillSampleOrder() {
+    var f = $("#cust-order-form"); if (!f) return;
+    var u = (typeof currentUser === "function") ? currentUser() : null;
+    var set = function (n, val) { var el = f.elements.namedItem(n); if (el) { el.value = val; el.classList.remove("invalid"); } };
+    set("item", 'Samsung 65" QLED TV'); set("value", "1400");
+    set("name", (u && u.name) || "Jane Doe"); set("address", "742 Birchwood Ln");
+    set("city", "Columbus"); set("state", "OH"); set("zip", "43004"); set("phone", "(614) 555-0142");
+    gotoStep(1);
+    var card = $("#order-form-card"); if (card && card.scrollIntoView) card.scrollIntoView({ behavior: "smooth", block: "start" });
+    toast("Sample order filled in — review the steps and place it, or edit any field.", "ok");
   }
   var custForm = $("#cust-order-form");
   if (custForm) {
@@ -1855,9 +1872,18 @@
     reader.readAsText(f);
   });
 
-  // Workspace picker + role badge
+  // Workspace picker + account menu
   $$("#role-gate .rg-card").forEach(function (c) { c.addEventListener("click", function () { setRole(c.dataset.role); }); });
-  var roleBadge = $("#role-badge"); if (roleBadge) roleBadge.addEventListener("click", openGate);
+  function closeAccountMenu() { var m = $("#account-menu"); if (m) m.classList.remove("open"); }
+  var roleBadge = $("#role-badge");
+  if (roleBadge) roleBadge.addEventListener("click", function (e) {
+    e.stopPropagation();
+    var m = $("#account-menu"); if (m) m.classList.toggle("open");
+  });
+  var amSwitch = $("#am-switch"); if (amSwitch) amSwitch.addEventListener("click", function () { closeAccountMenu(); openGate(); });
+  var amTheme = $("#am-theme"); if (amTheme) amTheme.addEventListener("click", function () { closeAccountMenu(); state.settings.theme = (state.settings.theme === "dark") ? "light" : "dark"; save(); applyTheme(); });
+  var amSignout = $("#am-signout"); if (amSignout) amSignout.addEventListener("click", function () { closeAccountMenu(); logoutUser(); location.reload(); });
+  document.addEventListener("click", function (e) { var w = $(".account-wrap"); if (w && !w.contains(e.target)) closeAccountMenu(); });
 
   // Mobile drawer
   var menuBtn = $("#menu-btn"); if (menuBtn) menuBtn.addEventListener("click", function () { toggleSidebar(); });

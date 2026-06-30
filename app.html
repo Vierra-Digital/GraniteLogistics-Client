@@ -135,7 +135,15 @@
           <button class="icon-btn" id="notif-btn" title="Alerts" aria-label="Alerts">🔔<span class="notif-badge" id="notif-badge"></span></button>
           <div class="notif-panel" id="notif-panel"></div>
         </div>
-        <button class="role-badge" id="role-badge" title="Switch workspace"><span class="rb-dot"></span><span id="role-badge-text">Admin</span><span class="rb-switch">Switch</span></button>
+        <div class="account-wrap">
+          <button class="role-badge" id="role-badge" title="Account" aria-haspopup="true"><span class="rb-dot"></span><span id="role-badge-text">Admin</span><span class="rb-caret">▾</span></button>
+          <div class="account-menu" id="account-menu">
+            <div class="am-head"><span class="am-avatar" id="am-avatar">U</span><div class="am-id"><b id="am-name">—</b><span id="am-email">—</span></div></div>
+            <button class="am-item" id="am-switch"><span>🔄</span> Switch workspace</button>
+            <button class="am-item" id="am-theme"><span>☾</span> Toggle theme</button>
+            <button class="am-item danger" id="am-signout"><span>⎋</span> Sign out</button>
+          </div>
+        </div>
       </div>
     </header>
 
