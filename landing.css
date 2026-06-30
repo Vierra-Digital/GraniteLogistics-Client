@@ -147,3 +147,6 @@ a{color:inherit;text-decoration:none}
   .cta-row{flex-direction:column;align-items:stretch}
   .btn-primary,.btn-outline{justify-content:center}
 }
+
+/* Brand logo image (replaces inline SVG mark) */
+.wordmark .mark img{display:block}

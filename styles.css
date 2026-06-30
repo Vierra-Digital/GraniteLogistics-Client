@@ -610,6 +610,12 @@ body[data-role="Customer"] #reset-data{display:none}
 .am-item:hover{background:var(--bg)}
 .am-item.danger{color:#b91c1c}
 .am-item.danger:hover{background:rgba(239,68,68,.08)}
+/* Brand logo images (replaces inline SVG marks) */
+.brand-mark{background:none}
+.brand-mark img{display:block}
+.pre-mark img{display:block}
+.login-logo{border-radius:10px;display:block;flex-shrink:0}
+.rg-brand img{display:block}
 @media(max-width:760px){
   .order-layout{grid-template-columns:1fr}
   .order-hero h2{font-size:1.3rem}
