@@ -578,6 +578,14 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .btn.ghost{background:transparent;border-color:transparent;color:var(--blue-d);box-shadow:none}
 .btn.ghost:hover{background:var(--blue-soft)}
 .btn.block+.btn.block{margin-top:8px}
+/* Customer order tracker (clean status timeline) */
+.cust-detail-head{margin:4px 0 8px}
+.cust-detail-head h2{font-size:1.2rem;font-weight:800;letter-spacing:-.01em;color:var(--ink);margin:10px 0 4px}
+.cust-detail-head .muted{font-size:.85rem}
+.cust-detail-sub{font-size:.72rem;text-transform:uppercase;letter-spacing:.09em;color:var(--slate-400);font-weight:700;margin:20px 0 14px}
+.cust-timeline .tl-node.upcoming::before{background:var(--card);border-color:var(--slate-200)}
+.cust-timeline .tl-node.upcoming .tl-stage{color:var(--slate-400);font-weight:600}
+.cust-timeline .tl-node.current .tl-stage{color:var(--blue-d)}
 /* Trim header chrome to a clean, focused customer experience */
 body[data-role="Customer"] .notif-wrap,
 body[data-role="Customer"] #search-trigger,

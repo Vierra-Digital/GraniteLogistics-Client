@@ -552,7 +552,7 @@
         '<span class="co-meta">' + p.id + ' · ' + eta + '</span></div>' +
         '<span class="' + pillClass(p.status) + '">' + (CUST_STATUS[p.status] || STAGE_LABEL[p.status]) + '</span></button>';
     }).join("");
-    $$("#cust-orders [data-id]").forEach(function (b) { b.addEventListener("click", function () { openPackage(b.dataset.id); }); });
+    $$("#cust-orders [data-id]").forEach(function (b) { b.addEventListener("click", function () { openCustomerOrder(b.dataset.id); }); });
   }
   // Guided multi-step order flow (Item → Delivery → Review)
   var ORDER_STEP = 1;
@@ -640,7 +640,7 @@
   var osAnother = $("#os-another");
   if (osAnother) osAnother.addEventListener("click", function () { resetOrderForm(); var f = $("#cust-order-form"); var first = f && f.elements.namedItem("item"); if (first) first.focus(); });
   var osTrack = $("#os-track");
-  if (osTrack) osTrack.addEventListener("click", function () { if (lastOrderId) openPackage(lastOrderId); });
+  if (osTrack) osTrack.addEventListener("click", function () { if (lastOrderId) openCustomerOrder(lastOrderId); });
 
   function counts() {
     var c = {}; STAGES.forEach(function (s) { c[s] = 0; });
@@ -1564,6 +1564,43 @@
       if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, function () { toast(url, "ok"); });
       else toast(url, "ok");
     });
+  }
+
+  // Customer-facing order tracker — a clean status timeline, none of the ops controls.
+  function custEta(p) {
+    if (p.status === "Delivered") {
+      var d = p.history.find(function (h) { return h.stage === "Delivered"; });
+      return d ? "Delivered " + new Date(d.ts).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "Delivered";
+    }
+    return "Est. delivery " + new Date(p.promisedTs).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+  }
+  function openCustomerOrder(id) {
+    var p = getPkg(id); if (!p) return;
+    var cur = stageIdx(p.status);
+    var tl = '<div class="timeline cust-timeline">' + STAGES.map(function (s, i) {
+      var h = p.history.find(function (x) { return x.stage === s; });
+      var cls = i < cur ? "done" : (i === cur ? "current" : "upcoming");
+      var time = h ? fmtTime(h.ts) : (i === cur ? "In progress" : "");
+      return '<div class="tl-node ' + cls + '"><div class="tl-stage">' + (CUST_STATUS[s] || STAGE_LABEL[s]) + '</div>' +
+        '<div class="tl-time">' + time + '</div></div>';
+    }).join("") + '</div>';
+    var addr = [p.customer.address, p.customer.city, p.customer.state, p.customer.zip].filter(Boolean).join(", ");
+    modal(
+      '<button class="close-x" data-close>×</button>' +
+      '<div class="cust-detail-head">' +
+      '<span class="' + pillClass(p.status) + '">' + (CUST_STATUS[p.status] || STAGE_LABEL[p.status]) + '</span>' +
+      '<h2>' + p.item.description + '</h2>' +
+      '<p class="muted">Tracking ' + p.id + ' · ' + custEta(p) + '</p>' +
+      '</div>' +
+      '<h3 class="cust-detail-sub">Progress</h3>' + tl +
+      '<h3 class="cust-detail-sub">Delivery details</h3>' +
+      '<dl class="os-summary">' +
+      '<div><dt>Recipient</dt><dd>' + p.customer.name + '</dd></div>' +
+      (addr ? '<div><dt>Address</dt><dd>' + addr + '</dd></div>' : '') +
+      '<div><dt>Declared value</dt><dd>' + money(p.item.value) + '</dd></div>' +
+      (p.tracking ? '<div><dt>Carrier tracking</dt><dd>' + p.tracking + '</dd></div>' : '') +
+      '</dl>'
+    );
   }
 
   function attr(s) { return String(s == null ? "" : s).replace(/"/g, "&quot;"); }
