@@ -10,7 +10,39 @@
 </head>
 <body>
 
-<!-- Workspace picker (makes role/experience explicit) -->
+<!-- Boot preloader -->
+<div id="preloader" class="preloader">
+  <div class="pre-mark" aria-hidden="true">
+    <svg viewBox="0 0 32 32" width="40" height="40"><path d="M16 1.5 30 9.25v15.5L16 32.5 2 24.75V9.25Z" fill="#13263a" stroke="#2f9bd6" stroke-width="2" stroke-linejoin="round"/><path d="M10 13h12M10 17h12M16 12.5v9" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
+  </div>
+  <div class="spinner"></div>
+  <div class="pre-name">GRANITE LOGISTICS</div>
+</div>
+
+<!-- Login -->
+<div id="login-screen" class="login-screen">
+  <div class="login-card">
+    <div class="login-brand">
+      <svg viewBox="0 0 32 32" width="30" height="30"><path d="M16 1.5 30 9.25v15.5L16 32.5 2 24.75V9.25Z" fill="#13263a" stroke="#2f9bd6" stroke-width="2" stroke-linejoin="round"/><path d="M10 13h12M10 17h12M16 12.5v9" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
+      GRANITE<strong>LOGISTICS</strong>
+    </div>
+    <h1 id="login-title">Sign in</h1>
+    <p class="login-sub" id="login-sub">Welcome back to your operations platform.</p>
+    <form id="login-form" autocomplete="on">
+      <div class="ff" id="login-name-field" style="display:none"><label>Full name</label><input id="login-name" autocomplete="name" /></div>
+      <div class="ff"><label>Email</label><input id="login-email" type="email" autocomplete="email" required placeholder="you@company.com" /></div>
+      <div class="ff"><label>Password</label><input id="login-password" type="password" autocomplete="current-password" required placeholder="••••••••" /></div>
+      <div class="ff" id="login-role-field" style="display:none"><label>Your role</label>
+        <select id="login-role"><option value="Admin">Administrator</option><option value="Runner">Store Runner</option><option value="Driver">Carrier Driver</option><option value="Viewer">Viewer</option></select>
+      </div>
+      <div id="login-err" class="login-err"></div>
+      <button class="btn primary login-submit" type="submit" id="login-submit">Sign in</button>
+    </form>
+    <div class="login-alt" id="login-alt"></div>
+  </div>
+</div>
+
+<!-- Workspace picker (switch which role's tools you see) -->
 <div id="role-gate" class="role-gate">
   <div class="rg-inner">
     <div class="rg-brand">
@@ -20,6 +52,7 @@
     <h1>Choose your workspace</h1>
     <p>Each role gets a focused set of tools — pick the one that fits you.</p>
     <div class="rg-grid">
+      <button class="rg-card" data-role="Customer"><span class="rg-ico">🛒</span><b>Customer</b><span>Place an order and track it from pickup to your doorstep.</span></button>
       <button class="rg-card" data-role="Admin"><span class="rg-ico">▦</span><b>Administrator</b><span>Full platform — executive dashboards, reports, settings, and every operations tool.</span></button>
       <button class="rg-card" data-role="Runner"><span class="rg-ico">▣</span><b>Store Runner</b><span>Daily pickups, condition photos, ZIP pre-sort, staging &amp; manifests.</span></button>
       <button class="rg-card" data-role="Driver"><span class="rg-ico">◎</span><b>Carrier Driver</b><span>Scan labels and confirm deliveries — a focused, on-the-road view.</span></button>
@@ -47,6 +80,10 @@
 
     <nav class="nav">
       <div class="nav-group">
+        <div class="nav-label">Ordering</div>
+        <button class="nav-item" data-view="order"><span class="ico">🛒</span> Place an Order</button>
+      </div>
+      <div class="nav-group">
         <div class="nav-label">Dashboard</div>
         <button class="nav-item" data-view="home"><span class="ico">⌂</span> Home</button>
         <button class="nav-item active" data-view="overview"><span class="ico">▦</span> Executive Overview</button>
@@ -73,9 +110,13 @@
     </nav>
 
     <div class="sidebar-foot">
-      <button id="run-demo" class="btn-demo">▶ Run Live Demo</button>
-      <button id="reset-data" class="btn-reset">⟲ Reset demo data</button>
-      <div class="env-pill"><span class="dot"></span> Saved to this device</div>
+      <div class="user-chip" id="user-chip"></div>
+      <button id="run-demo" class="btn-demo">▶ Guided tour</button>
+      <div class="foot-row">
+        <button id="reset-data" class="btn-reset">⟲ Reset</button>
+        <button id="sign-out" class="btn-reset">⎋ Sign out</button>
+      </div>
+      <div class="env-pill"><span class="dot ok"></span> Synced to this device</div>
     </div>
   </aside>
 
@@ -99,6 +140,38 @@
     </header>
 
     <div class="view-wrap">
+      <!-- ============ ORDER (customer: place + track) ============ -->
+      <section class="view" id="view-order">
+        <div class="order-hero">
+          <h2>Place an order</h2>
+          <p>Tell us what to move and where it's going — we'll take it from pickup to your doorstep and keep you posted every step.</p>
+        </div>
+        <div class="order-layout">
+          <div class="card order-card" id="order-form-card">
+            <div class="card-head"><h2>New order</h2></div>
+            <form id="cust-order-form" class="order-form" autocomplete="off">
+              <div class="form-group-label">What we're moving</div>
+              <div class="ff"><label>Item description</label><input name="item" required placeholder='LG 55" OLED TV' /></div>
+              <div class="ff"><label>Declared value ($)</label><input name="value" type="number" min="0" inputmode="numeric" placeholder="0" /></div>
+              <div class="form-group-label">Deliver to</div>
+              <div class="ff"><label>Full name</label><input name="name" required placeholder="Jane Doe" /></div>
+              <div class="ff"><label>Street address</label><input name="address" placeholder="123 Main St" /></div>
+              <div class="ff-row">
+                <div class="ff"><label>City</label><input name="city" placeholder="Dayton" /></div>
+                <div class="ff ff-sm"><label>State</label><input name="state" maxlength="2" placeholder="OH" /></div>
+                <div class="ff ff-sm"><label>ZIP</label><input name="zip" inputmode="numeric" placeholder="45402" /></div>
+              </div>
+              <div class="ff"><label>Phone</label><input name="phone" inputmode="tel" placeholder="(555) 123-4567" /></div>
+              <button class="btn primary block" type="submit">Place order →</button>
+            </form>
+          </div>
+          <div class="card order-card">
+            <div class="card-head"><h2>Your orders</h2><span class="muted" id="cust-count"></span></div>
+            <div id="cust-orders" class="cust-orders"></div>
+          </div>
+        </div>
+      </section>
+
       <!-- ============ HOME (field mode: Runner / Driver) ============ -->
       <section class="view" id="view-home">
         <div id="home-content"></div>
@@ -405,6 +478,9 @@
     </div>
   </main>
 </div>
+
+<!-- Bottom tab bar (mobile) -->
+<nav class="bottom-nav" id="bottom-nav" aria-label="Primary"></nav>
 
 <!-- Command palette -->
 <div class="cmd-backdrop" id="cmd-backdrop">

@@ -1,6 +1,6 @@
 /* Granite Logistics — service worker for installable / offline PWA.
  * Cache-first for the app shell so the demo runs without a network (e.g. live pitches). */
-var CACHE = "granite-logistics-v25";
+var CACHE = "granite-logistics-v29";
 var ASSETS = [
   "./", "./index.html", "./app.html", "./track.html", "./landing.css", "./landing.js",
   "./styles.css", "./app.js", "./barcode.js", "./manifest.webmanifest"

@@ -224,7 +224,7 @@
   function defaultSettings() {
     return {
       company: { name: "Granite Logistics", address: "2200 Industrial Pkwy, Dayton, OH 45402", phone: "(937) 555-0118", email: "ops@granitelogistics.co" },
-      defaultCarrier: "UPS", defaultLane: "Lane 1", role: "Admin", roleChosen: false, theme: "light",
+      defaultCarrier: "UPS", defaultLane: "Lane 1", role: "Customer", roleChosen: false, theme: "light",
       cloud: { url: "", key: "granite-dev-key", autoSync: false }
     };
   }
@@ -310,6 +310,7 @@
 
   // ---- Navigation ----
   var VIEW_META = {
+    order: ["Place an Order", "Create a new shipment and track it from pickup to delivery."],
     overview: ["Executive Overview", "Real-time visibility from auction win to delivery confirmation."],
     ingest: ["Order Ingest", "Orders pulled directly from client commerce backends — zero manual entry."],
     runner: ["Runner Dashboard", "Daily pickups, condition photos, and label generation."],
@@ -326,24 +327,34 @@
 
   // ---- Role-based access (maps to the platform's user roles) ----
   var ROLE_VIEWS = {
-    Admin: ["overview", "ingest", "runner", "presort", "batch", "driver", "tracking", "returns", "reports", "activity", "settings"],
+    Customer: ["order"],
+    Admin: ["order", "overview", "ingest", "runner", "presort", "batch", "driver", "tracking", "returns", "reports", "activity", "settings"],
     Runner: ["home", "ingest", "runner", "presort", "batch", "tracking", "returns", "activity"],
     Driver: ["home", "driver", "tracking"],
     Viewer: ["overview", "tracking", "reports", "activity"]
   };
   var ROLE_META = {
+    Customer: { label: "Customer", ico: "🛒", tag: "Place orders" },
     Admin: { label: "Administrator", ico: "▦", tag: "Full access" },
     Runner: { label: "Store Runner", ico: "▣", tag: "Operations" },
     Driver: { label: "Carrier Driver", ico: "◎", tag: "Field" },
     Viewer: { label: "Viewer", ico: "⊶", tag: "Read-only" }
   };
-  function currentRole() { return (state.settings && state.settings.role) || "Admin"; }
-  function allowedViews() { return ROLE_VIEWS[currentRole()] || ROLE_VIEWS.Admin; }
+  function currentRole() { return (state.settings && state.settings.role) || "Customer"; }
+  function allowedViews() { return ROLE_VIEWS[currentRole()] || ROLE_VIEWS.Customer; }
   function updateRoleUI() {
     var m = ROLE_META[currentRole()] || ROLE_META.Admin;
+    document.body.setAttribute("data-role", currentRole());
     var chip = $("#role-chip");
     if (chip) chip.innerHTML = '<span class="rc-ico">' + m.ico + '</span><div class="rc-text"><b>' + m.label + '</b><span>' + m.tag + '</span></div>';
     var bt = $("#role-badge-text"); if (bt) bt.textContent = m.label;
+    var uc = $("#user-chip");
+    if (uc) {
+      var u = (typeof currentUser === "function") ? currentUser() : null;
+      uc.innerHTML = u
+        ? '<span class="uc-avatar">' + ((u.name || u.email || "U").charAt(0).toUpperCase()) + '</span><div class="uc-text"><b>' + (u.name || u.email) + '</b><span>' + m.label + '</span></div>'
+        : "";
+    }
   }
   function applyRole() {
     var allowed = allowedViews();
@@ -374,6 +385,60 @@
     var t = (state.settings && state.settings.theme === "dark") ? "dark" : "light";
     document.documentElement.setAttribute("data-theme", t);
     var b = $("#theme-btn"); if (b) b.textContent = t === "dark" ? "☀" : "☾";
+  }
+
+  // ---- Auth (local accounts; structured to swap for real server auth later) ----
+  var AUTH_KEY = "gl-auth-v1";
+  var loginMode = "signin";
+  function authData() { try { return JSON.parse(localStorage.getItem(AUTH_KEY) || "null") || { users: {}, session: null }; } catch (e) { return { users: {}, session: null }; } }
+  function authSave(a) { try { localStorage.setItem(AUTH_KEY, JSON.stringify(a)); } catch (e) { } }
+  function currentUser() { var a = authData(); return (a.session && a.users[a.session]) ? Object.assign({ email: a.session }, a.users[a.session]) : null; }
+  function loginUser(email, pw) { var a = authData(); var u = a.users[(email || "").toLowerCase()]; if (!u || u.pw !== pw) return false; a.session = email.toLowerCase(); authSave(a); return true; }
+  function registerUser(name, email, pw, role) { var a = authData(); email = email.toLowerCase(); a.users[email] = { pw: pw, role: role, name: name || email.split("@")[0] }; a.session = email; authSave(a); return true; }
+  function logoutUser() { var a = authData(); a.session = null; authSave(a); }
+
+  function renderLoginMode() {
+    var reg = loginMode === "register";
+    $("#login-title").textContent = reg ? "Create your account" : "Sign in";
+    $("#login-sub").textContent = reg ? "Set up your operations workspace." : "Welcome back to your operations platform.";
+    $("#login-name-field").style.display = reg ? "" : "none";
+    $("#login-role-field").style.display = "none";
+    $("#login-submit").textContent = reg ? "Create account" : "Sign in";
+    $("#login-password").setAttribute("autocomplete", reg ? "new-password" : "current-password");
+    $("#login-alt").innerHTML = reg
+      ? 'Already have an account? <button type="button" id="login-toggle" class="linkbtn">Sign in</button>'
+      : 'New here? <button type="button" id="login-toggle" class="linkbtn">Create an account</button>';
+    var tg = $("#login-toggle");
+    if (tg) tg.addEventListener("click", function () { loginMode = reg ? "signin" : "register"; $("#login-err").textContent = ""; renderLoginMode(); });
+  }
+  function showLogin() {
+    loginMode = Object.keys(authData().users).length ? "signin" : "register";
+    renderLoginMode();
+    var ls = $("#login-screen"); if (ls) ls.classList.add("open");
+  }
+  function hideLogin() { var ls = $("#login-screen"); if (ls) ls.classList.remove("open"); }
+  function enterApp() {
+    var u = currentUser();
+    if (u) { state.settings.role = u.role || state.settings.role; state.settings.roleChosen = true; save(); }
+    hideLogin();
+    updateRoleUI(); applyRole(); go(allowedViews()[0]); renderBottomNav(); renderNotifs(); bootSync();
+  }
+
+  // ---- Bottom tab bar (mobile) ----
+  var BN_LABEL = { order: "Order", overview: "Home", home: "Home", ingest: "Orders", runner: "Pickups", presort: "Pre-Sort", batch: "Manifests", driver: "Scan", tracking: "Tracking", returns: "Returns", reports: "Reports", activity: "Activity", settings: "Settings" };
+  function renderBottomNav() {
+    var el = $("#bottom-nav"); if (!el) return;
+    var allowed = allowedViews();
+    var primary = allowed.length > 4 ? allowed.slice(0, 4) : allowed.slice();
+    var active = $(".nav-item.active") ? $(".nav-item.active").dataset.view : allowed[0];
+    var html = primary.map(function (v) {
+      var ico = (document.querySelector('.nav-item[data-view="' + v + '"] .ico') || {}).textContent || "•";
+      return '<button class="bn-item' + (v === active ? " active" : "") + '" data-bn="' + v + '"><span class="bn-ico">' + ico + '</span><span>' + (BN_LABEL[v] || v) + '</span></button>';
+    }).join("");
+    html += '<button class="bn-item" data-bnmore="1"><span class="bn-ico">☰</span><span>Menu</span></button>';
+    el.innerHTML = html;
+    $$("#bottom-nav [data-bn]").forEach(function (b) { b.addEventListener("click", function () { go(b.dataset.bn); }); });
+    var more = $("#bottom-nav [data-bnmore]"); if (more) more.addEventListener("click", function () { toggleSidebar(true); });
   }
 
   // ---- Notifications (alerts bell) ----
@@ -440,12 +505,14 @@
     $("#view-title").textContent = VIEW_META[view][0];
     $("#view-sub").textContent = VIEW_META[view][1];
     render(view);
+    if (typeof renderBottomNav === "function") renderBottomNav();
   }
   $$(".nav-item").forEach(function (b) { b.addEventListener("click", function () { go(b.dataset.view); }); });
 
   // ---- Renderers ----
   function render(view) {
-    if (view === "home") renderHome();
+    if (view === "order") renderOrder();
+    else if (view === "home") renderHome();
     else if (view === "overview") renderOverview();
     else if (view === "ingest") renderIngest();
     else if (view === "runner") renderRunner();
@@ -459,6 +526,48 @@
     else if (view === "returns") renderReturns();
   }
   function renderAll() { var active = $(".nav-item.active").dataset.view; render(active); if (typeof renderNotifs === "function") renderNotifs(); }
+
+  // ---- Customer ordering flow (default experience) ----
+  var CUST_STATUS = {
+    Won: "Order received", Intake: "Preparing", PickedUp: "Picked up",
+    Staged: "Ready to ship", InTransit: "In transit", OutforDelivery: "Out for delivery", Delivered: "Delivered"
+  };
+  function renderOrder() {
+    var u = (typeof currentUser === "function") ? currentUser() : null;
+    var email = u ? u.email : null;
+    var mine = state.packages.filter(function (p) { return email && p.customerEmail === email; });
+    var cc = $("#cust-count"); if (cc) cc.textContent = mine.length ? (mine.length + (mine.length === 1 ? " order" : " orders")) : "";
+    var box = $("#cust-orders"); if (!box) return;
+    if (!mine.length) {
+      box.innerHTML = '<div class="empty-state"><div class="es-ico">📦</div><b>No orders yet</b>' +
+        '<span>Place your first order with the form — it\'ll show up here so you can follow it from pickup to your door.</span></div>';
+      return;
+    }
+    box.innerHTML = mine.slice().reverse().map(function (p) {
+      var eta = p.status === "Delivered" ? "Delivered"
+        : ("Est. " + new Date(p.promisedTs).toLocaleDateString(undefined, { month: "short", day: "numeric" }));
+      return '<button class="cust-order" data-id="' + p.id + '">' +
+        '<div class="co-main"><b>' + p.item.description + '</b>' +
+        '<span class="co-meta">' + p.id + ' · ' + eta + '</span></div>' +
+        '<span class="' + pillClass(p.status) + '">' + (CUST_STATUS[p.status] || STAGE_LABEL[p.status]) + '</span></button>';
+    }).join("");
+    $$("#cust-orders [data-id]").forEach(function (b) { b.addEventListener("click", function () { openPackage(b.dataset.id); }); });
+  }
+  var custForm = $("#cust-order-form");
+  if (custForm) custForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var v = function (n) { var el = this.elements.namedItem(n); return el ? el.value : ""; }.bind(this);
+    var u = (typeof currentUser === "function") ? currentUser() : null;
+    var p = makeOrderFrom({
+      name: v("name") || (u && u.name) || "—", item: v("item"), value: v("value"), source: "Customer Order",
+      address: v("address"), city: v("city"), state: v("state"), zip: v("zip"), phone: v("phone")
+    });
+    p.customerEmail = u ? u.email : null;
+    state.packages.push(p); save();
+    this.reset();
+    renderOrder();
+    toast("Order placed — tracking " + p.id, "ok");
+  });
 
   function counts() {
     var c = {}; STAGES.forEach(function (s) { c[s] = 0; });
@@ -1468,7 +1577,7 @@
       if (i >= steps.length) {
         demoRunning = false;
         $("#run-demo").disabled = false;
-        $("#run-demo").textContent = "▶ Run Live Demo";
+        $("#run-demo").textContent = "▶ Guided tour";
         toast("Journey complete: Auction Win → Delivery Confirmed", "ok");
         cocSelected = p.id; go("tracking");
         return;
@@ -1537,6 +1646,26 @@
 
   var searchInput = $("#track-search");
   if (searchInput) searchInput.addEventListener("input", function () { trackQuery = this.value.trim().toLowerCase(); renderTracking(); });
+
+  // Login + sign out
+  var loginForm = $("#login-form");
+  if (loginForm) loginForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var email = ($("#login-email").value || "").trim(), pw = $("#login-password").value || "";
+    var err = $("#login-err"); err.textContent = "";
+    if (!email || !pw) { err.textContent = "Enter your email and password."; return; }
+    if (pw.length < 4) { err.textContent = "Password must be at least 4 characters."; return; }
+    if (loginMode === "register") {
+      if (authData().users[email.toLowerCase()]) { err.textContent = "That account already exists — sign in instead."; return; }
+      registerUser(($("#login-name").value || "").trim(), email, pw, "Customer");
+      enterApp(); toast("Welcome, " + (currentUser().name || email), "ok");
+    } else {
+      if (!loginUser(email, pw)) { err.textContent = "Incorrect email or password."; return; }
+      enterApp(); toast("Signed in", "ok");
+    }
+  });
+  var signOutBtn = $("#sign-out");
+  if (signOutBtn) signOutBtn.addEventListener("click", function () { logoutUser(); location.reload(); });
 
   var cocBack = $("#coc-back");
   if (cocBack) cocBack.addEventListener("click", function () { var v = $("#view-tracking"); if (v) v.classList.remove("detail-open"); });
@@ -1687,14 +1816,27 @@
   // ---- Boot ----
   applyTheme();
   updateRoleUI();
-  if (!applyHash()) go(allowedViews()[0]);
-  applyRole();
-  renderNotifs();
-  if (!state.settings.roleChosen) openGate(); // first entry → pick a workspace
-  bootSync(); // pull latest if auto-sync is on
+  renderBottomNav();
+  if (currentUser()) {
+    state.settings.role = currentUser().role || state.settings.role;
+    state.settings.roleChosen = true;
+    if (!applyHash()) go(allowedViews()[0]);
+    applyRole();
+    renderNotifs();
+    bootSync();
+  } else {
+    showLogin(); // not signed in → login screen is the entry
+  }
   window.addEventListener("hashchange", applyHash);
 
-  // QA / debugging hook (harmless in a demo)
+  // Hide the boot preloader once the shell is ready
+  setTimeout(function () {
+    var p = $("#preloader"); if (!p) return;
+    p.classList.add("hide");
+    setTimeout(function () { p.style.display = "none"; }, 420);
+  }, 550);
+
+  // QA / debugging hook
   window.GL = state;
 
   // Register service worker for installable / offline PWA
