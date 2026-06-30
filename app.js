@@ -533,6 +533,7 @@
     Staged: "Ready to ship", InTransit: "In transit", OutforDelivery: "Out for delivery", Delivered: "Delivered"
   };
   function renderOrder() {
+    if (typeof resetOrderForm === "function") resetOrderForm();
     var u = (typeof currentUser === "function") ? currentUser() : null;
     var email = u ? u.email : null;
     var mine = state.packages.filter(function (p) { return email && p.customerEmail === email; });
@@ -553,21 +554,93 @@
     }).join("");
     $$("#cust-orders [data-id]").forEach(function (b) { b.addEventListener("click", function () { openPackage(b.dataset.id); }); });
   }
-  var custForm = $("#cust-order-form");
-  if (custForm) custForm.addEventListener("submit", function (e) {
-    e.preventDefault();
-    var v = function (n) { var el = this.elements.namedItem(n); return el ? el.value : ""; }.bind(this);
-    var u = (typeof currentUser === "function") ? currentUser() : null;
-    var p = makeOrderFrom({
-      name: v("name") || (u && u.name) || "—", item: v("item"), value: v("value"), source: "Customer Order",
-      address: v("address"), city: v("city"), state: v("state"), zip: v("zip"), phone: v("phone")
+  // Guided multi-step order flow (Item → Delivery → Review)
+  var ORDER_STEP = 1;
+  function gotoStep(n) {
+    ORDER_STEP = n;
+    $$("#cust-order-form .order-step").forEach(function (s) { s.classList.toggle("active", +s.dataset.step === n); });
+    $$("#order-steps .ostep").forEach(function (s) {
+      var d = +s.dataset.step;
+      s.classList.toggle("active", d === n);
+      s.classList.toggle("done", d < n);
+      var dot = s.querySelector(".os-dot"); if (dot) dot.textContent = d < n ? "✓" : String(d);
     });
-    p.customerEmail = u ? u.email : null;
-    state.packages.push(p); save();
-    this.reset();
-    renderOrder();
-    toast("Order placed — tracking " + p.id, "ok");
-  });
+    var err = $("#step-err"); if (err) err.textContent = "";
+  }
+  function stepVal(n) { var f = $("#cust-order-form"); var el = f && f.elements.namedItem(n); return el ? el.value.trim() : ""; }
+  function validateStep(n) {
+    var f = $("#cust-order-form"); if (!f) return true;
+    var need = n === 1 ? [["item", "Please describe the item you're shipping."]]
+      : n === 2 ? [["name", "Please enter the recipient's name."]] : [];
+    for (var i = 0; i < need.length; i++) {
+      var el = f.elements.namedItem(need[i][0]);
+      if (el && !el.value.trim()) {
+        el.classList.add("invalid"); el.focus();
+        var err = $("#step-err"); if (err) err.textContent = need[i][1];
+        return false;
+      }
+      if (el) el.classList.remove("invalid");
+    }
+    return true;
+  }
+  function buildReview() {
+    var addr = [stepVal("address"), stepVal("city"), stepVal("state").toUpperCase(), stepVal("zip")].filter(Boolean).join(", ") || "—";
+    var rows = [
+      ["Item", stepVal("item") || "—"],
+      ["Declared value", stepVal("value") ? "$" + stepVal("value") : "—"],
+      ["Recipient", stepVal("name") || "—"],
+      ["Address", addr],
+      ["Phone", stepVal("phone") || "—"]
+    ];
+    var rs = $("#review-summary");
+    if (rs) rs.innerHTML = rows.map(function (r) { return '<div><dt>' + r[0] + '</dt><dd>' + r[1] + '</dd></div>'; }).join("");
+  }
+  var custForm = $("#cust-order-form");
+  if (custForm) {
+    custForm.addEventListener("click", function (e) {
+      var t = e.target;
+      var nx = t.closest ? t.closest("[data-next]") : null;
+      var bk = t.closest ? t.closest("[data-back]") : null;
+      if (nx) { if (!validateStep(ORDER_STEP)) return; var to = +nx.getAttribute("data-next"); if (to === 3) buildReview(); gotoStep(to); }
+      else if (bk) { gotoStep(+bk.getAttribute("data-back")); }
+    });
+    custForm.addEventListener("input", function (e) { if (e.target.classList) e.target.classList.remove("invalid"); var err = $("#step-err"); if (err) err.textContent = ""; });
+    custForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      if (!stepVal("item")) { gotoStep(1); validateStep(1); return; }
+      if (!stepVal("name")) { gotoStep(2); validateStep(2); return; }
+      var v = function (n) { var el = this.elements.namedItem(n); return el ? el.value : ""; }.bind(this);
+      var u = (typeof currentUser === "function") ? currentUser() : null;
+      var p = makeOrderFrom({
+        name: v("name") || (u && u.name) || "—", item: v("item"), value: v("value"), source: "Customer Order",
+        address: v("address"), city: v("city"), state: v("state"), zip: v("zip"), phone: v("phone")
+      });
+      p.customerEmail = u ? u.email : null;
+      state.packages.push(p); save();
+      this.reset();
+      renderOrder();
+      showOrderSuccess(p);
+      toast("Order placed — tracking " + p.id, "ok");
+    });
+  }
+  var lastOrderId = null;
+  function showOrderSuccess(p) {
+    lastOrderId = p.id;
+    var idEl = $("#os-id"); if (idEl) idEl.textContent = p.id;
+    var dest = p.customer.name + (p.customer.city ? " · " + p.customer.city + ", " + p.customer.state : "");
+    var eta = new Date(p.promisedTs).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    var sum = $("#os-summary");
+    if (sum) sum.innerHTML =
+      '<div><dt>Item</dt><dd>' + p.item.description + '</dd></div>' +
+      '<div><dt>Deliver to</dt><dd>' + dest + '</dd></div>' +
+      '<div><dt>Estimated delivery</dt><dd>' + eta + '</dd></div>';
+    var card = $("#order-form-card"); if (card) card.classList.add("is-success");
+  }
+  function resetOrderForm() { var card = $("#order-form-card"); if (card) card.classList.remove("is-success"); if (typeof gotoStep === "function") gotoStep(1); }
+  var osAnother = $("#os-another");
+  if (osAnother) osAnother.addEventListener("click", function () { resetOrderForm(); var f = $("#cust-order-form"); var first = f && f.elements.namedItem("item"); if (first) first.focus(); });
+  var osTrack = $("#os-track");
+  if (osTrack) osTrack.addEventListener("click", function () { if (lastOrderId) openPackage(lastOrderId); });
 
   function counts() {
     var c = {}; STAGES.forEach(function (s) { c[s] = 0; });
@@ -1839,8 +1912,26 @@
   // QA / debugging hook
   window.GL = state;
 
-  // Register service worker for installable / offline PWA
+  // Register service worker for installable / offline PWA.
+  // Detect new deploys and activate them immediately, then reload once so the user
+  // always lands on the latest version (no more "stuck on old PWA" on the phone).
   if ("serviceWorker" in navigator) {
-    window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () { }); });
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("sw.js").then(function (reg) {
+        reg.update();
+        if (reg.waiting) reg.waiting.postMessage("skip-waiting");
+        reg.addEventListener("updatefound", function () {
+          var nw = reg.installing;
+          if (!nw) return;
+          nw.addEventListener("statechange", function () {
+            if (nw.state === "installed" && navigator.serviceWorker.controller) nw.postMessage("skip-waiting");
+          });
+        });
+      }).catch(function () { });
+      var reloaded = false;
+      navigator.serviceWorker.addEventListener("controllerchange", function () {
+        if (reloaded) return; reloaded = true; window.location.reload();
+      });
+    });
   }
 })();

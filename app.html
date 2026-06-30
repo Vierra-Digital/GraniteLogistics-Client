@@ -148,22 +148,52 @@
         </div>
         <div class="order-layout">
           <div class="card order-card" id="order-form-card">
-            <div class="card-head"><h2>New order</h2></div>
-            <form id="cust-order-form" class="order-form" autocomplete="off">
-              <div class="form-group-label">What we're moving</div>
-              <div class="ff"><label>Item description</label><input name="item" required placeholder='LG 55" OLED TV' /></div>
-              <div class="ff"><label>Declared value ($)</label><input name="value" type="number" min="0" inputmode="numeric" placeholder="0" /></div>
-              <div class="form-group-label">Deliver to</div>
-              <div class="ff"><label>Full name</label><input name="name" required placeholder="Jane Doe" /></div>
-              <div class="ff"><label>Street address</label><input name="address" placeholder="123 Main St" /></div>
-              <div class="ff-row">
-                <div class="ff"><label>City</label><input name="city" placeholder="Dayton" /></div>
-                <div class="ff ff-sm"><label>State</label><input name="state" maxlength="2" placeholder="OH" /></div>
-                <div class="ff ff-sm"><label>ZIP</label><input name="zip" inputmode="numeric" placeholder="45402" /></div>
+            <div class="order-steps" id="order-steps">
+              <div class="ostep active" data-step="1"><span class="os-dot">1</span><span class="os-name">Item</span></div>
+              <div class="ostep" data-step="2"><span class="os-dot">2</span><span class="os-name">Delivery</span></div>
+              <div class="ostep" data-step="3"><span class="os-dot">3</span><span class="os-name">Review</span></div>
+            </div>
+            <form id="cust-order-form" class="order-form" autocomplete="off" novalidate>
+              <!-- Step 1 -->
+              <div class="order-step active" data-step="1">
+                <div class="step-head"><h3>What are we moving?</h3><p>Describe the item and its value so we handle it right.</p></div>
+                <div class="ff"><label>Item description</label><input name="item" required placeholder='LG 55" OLED TV' /></div>
+                <div class="ff"><label>Declared value ($)</label><input name="value" type="number" min="0" inputmode="numeric" placeholder="0" /></div>
+                <div class="step-nav"><button type="button" class="btn primary block" data-next="2">Continue →</button></div>
               </div>
-              <div class="ff"><label>Phone</label><input name="phone" inputmode="tel" placeholder="(555) 123-4567" /></div>
-              <button class="btn primary block" type="submit">Place order →</button>
+              <!-- Step 2 -->
+              <div class="order-step" data-step="2">
+                <div class="step-head"><h3>Where's it going?</h3><p>Tell us who's receiving it and where.</p></div>
+                <div class="ff"><label>Full name</label><input name="name" required placeholder="Jane Doe" /></div>
+                <div class="ff"><label>Street address</label><input name="address" placeholder="123 Main St" /></div>
+                <div class="ff-row">
+                  <div class="ff"><label>City</label><input name="city" placeholder="Dayton" /></div>
+                  <div class="ff ff-sm"><label>State</label><input name="state" maxlength="2" placeholder="OH" /></div>
+                  <div class="ff ff-sm"><label>ZIP</label><input name="zip" inputmode="numeric" placeholder="45402" /></div>
+                </div>
+                <div class="ff"><label>Phone</label><input name="phone" inputmode="tel" placeholder="(555) 123-4567" /></div>
+                <div class="step-nav"><button type="button" class="btn block ghost" data-back="1">← Back</button><button type="button" class="btn primary block" data-next="3">Continue →</button></div>
+              </div>
+              <!-- Step 3 -->
+              <div class="order-step" data-step="3">
+                <div class="step-head"><h3>Review &amp; confirm</h3><p>Check the details, then we'll get it moving.</p></div>
+                <dl class="os-summary" id="review-summary"></dl>
+                <div class="step-nav"><button type="button" class="btn block ghost" data-back="2">← Back</button><button type="submit" class="btn primary block">Place order →</button></div>
+              </div>
+              <div class="step-err" id="step-err" role="alert"></div>
             </form>
+            <div class="order-success" id="order-success">
+              <div class="os-check" aria-hidden="true">✓</div>
+              <h3>Order placed</h3>
+              <p>We've got it from here — we'll move it from pickup to your doorstep and keep you posted.</p>
+              <div class="os-ticket">
+                <span class="os-label">Tracking number</span>
+                <span class="os-id" id="os-id">GL-0000</span>
+              </div>
+              <dl class="os-summary" id="os-summary"></dl>
+              <button class="btn primary block" id="os-another" type="button">Place another order</button>
+              <button class="btn block ghost" id="os-track" type="button">View it in your orders</button>
+            </div>
           </div>
           <div class="card order-card">
             <div class="card-head"><h2>Your orders</h2><span class="muted" id="cust-count"></span></div>
