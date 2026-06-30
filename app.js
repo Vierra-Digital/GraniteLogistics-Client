@@ -391,15 +391,50 @@
     var b = $("#theme-btn"); if (b) b.textContent = t === "dark" ? "☀" : "☾";
   }
 
-  // ---- Auth (local accounts; structured to swap for real server auth later) ----
-  var AUTH_KEY = "gl-auth-v1";
+  // ---- Auth ----
+  // Server-backed accounts via /api/auth (hashed passwords + signed session token),
+  // with a local-account fallback so the app still works offline or without the backend.
+  var AUTH_KEY = "gl-auth-v2";
+  var LOCAL_USERS_KEY = "gl-users-local";
   var loginMode = "signin";
-  function authData() { try { return JSON.parse(localStorage.getItem(AUTH_KEY) || "null") || { users: {}, session: null }; } catch (e) { return { users: {}, session: null }; } }
-  function authSave(a) { try { localStorage.setItem(AUTH_KEY, JSON.stringify(a)); } catch (e) { } }
-  function currentUser() { var a = authData(); return (a.session && a.users[a.session]) ? Object.assign({ email: a.session }, a.users[a.session]) : null; }
-  function loginUser(email, pw) { var a = authData(); var u = a.users[(email || "").toLowerCase()]; if (!u || u.pw !== pw) return false; a.session = email.toLowerCase(); authSave(a); return true; }
-  function registerUser(name, email, pw, role) { var a = authData(); email = email.toLowerCase(); a.users[email] = { pw: pw, role: role, name: name || email.split("@")[0] }; a.session = email; authSave(a); return true; }
-  function logoutUser() { var a = authData(); a.session = null; authSave(a); }
+  function authData() { try { return JSON.parse(localStorage.getItem(AUTH_KEY) || "null") || { token: null, user: null }; } catch (e) { return { token: null, user: null }; } }
+  function authSave(a) { try { localStorage.setItem(AUTH_KEY, JSON.stringify(a)); localStorage.setItem("gl-onboarded", "1"); } catch (e) { } }
+  function currentUser() { var a = authData(); return a.user ? Object.assign({}, a.user) : null; }
+  function authToken() { return authData().token; }
+  function logoutUser() { try { localStorage.removeItem(AUTH_KEY); } catch (e) { } }
+
+  function postAuth(action, body) {
+    return fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.assign({ action: action }, body)) })
+      .then(function (r) { return r.json().then(function (j) { return j; }); });
+  }
+  // Local fallback (used only when the auth API is unreachable)
+  function localUsers() { try { return JSON.parse(localStorage.getItem(LOCAL_USERS_KEY) || "{}"); } catch (e) { return {}; } }
+  function localUsersSave(u) { try { localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(u)); } catch (e) { } }
+  function localRegister(name, email, pw, role) {
+    var u = localUsers(); email = (email || "").toLowerCase();
+    if (u[email]) return { ok: false, error: "That account already exists — sign in instead." };
+    u[email] = { pw: pw, name: name || email.split("@")[0], role: role }; localUsersSave(u);
+    authSave({ token: "local", user: { email: email, name: u[email].name, role: role } });
+    return { ok: true, offline: true };
+  }
+  function localLogin(email, pw) {
+    var u = localUsers()[(email || "").toLowerCase()];
+    if (!u || u.pw !== pw) return { ok: false, error: "Incorrect email or password." };
+    authSave({ token: "local", user: { email: email.toLowerCase(), name: u.name, role: u.role } });
+    return { ok: true, offline: true };
+  }
+  function registerUser(name, email, pw, role) {
+    return postAuth("register", { name: name, email: email, pw: pw, role: role }).then(function (j) {
+      if (j && j.ok) { authSave({ token: j.token, user: j.user }); return { ok: true }; }
+      return { ok: false, error: (j && j.error) || "Could not create account." };
+    }).catch(function () { return localRegister(name, email, pw, role); });
+  }
+  function loginUser(email, pw) {
+    return postAuth("login", { email: email, pw: pw }).then(function (j) {
+      if (j && j.ok) { authSave({ token: j.token, user: j.user }); return { ok: true }; }
+      return { ok: false, error: (j && j.error) || "Incorrect email or password." };
+    }).catch(function () { return localLogin(email, pw); });
+  }
 
   function renderLoginMode() {
     var reg = loginMode === "register";
@@ -416,7 +451,7 @@
     if (tg) tg.addEventListener("click", function () { loginMode = reg ? "signin" : "register"; $("#login-err").textContent = ""; renderLoginMode(); });
   }
   function showLogin() {
-    loginMode = Object.keys(authData().users).length ? "signin" : "register";
+    loginMode = localStorage.getItem("gl-onboarded") ? "signin" : "register";
     renderLoginMode();
     var ls = $("#login-screen"); if (ls) ls.classList.add("open");
   }
@@ -1779,17 +1814,21 @@
   if (loginForm) loginForm.addEventListener("submit", function (e) {
     e.preventDefault();
     var email = ($("#login-email").value || "").trim(), pw = $("#login-password").value || "";
+    var name = ($("#login-name").value || "").trim();
     var err = $("#login-err"); err.textContent = "";
     if (!email || !pw) { err.textContent = "Enter your email and password."; return; }
     if (pw.length < 4) { err.textContent = "Password must be at least 4 characters."; return; }
-    if (loginMode === "register") {
-      if (authData().users[email.toLowerCase()]) { err.textContent = "That account already exists — sign in instead."; return; }
-      registerUser(($("#login-name").value || "").trim(), email, pw, "Customer");
-      enterApp(); toast("Welcome, " + (currentUser().name || email), "ok");
-    } else {
-      if (!loginUser(email, pw)) { err.textContent = "Incorrect email or password."; return; }
-      enterApp(); toast("Signed in", "ok");
-    }
+    var mode = loginMode;
+    var btn = $("#login-submit"); var orig = btn ? btn.textContent : "";
+    if (btn) { btn.disabled = true; btn.textContent = mode === "register" ? "Creating account…" : "Signing in…"; }
+    var work = (mode === "register") ? registerUser(name, email, pw, "Customer") : loginUser(email, pw);
+    work.then(function (res) {
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
+      if (!res || !res.ok) { err.textContent = (res && res.error) || "Something went wrong. Please try again."; return; }
+      enterApp();
+      toast(mode === "register" ? ("Welcome, " + (currentUser().name || email)) : "Signed in", "ok");
+      if (res.offline) toast("Backend unreachable — using a local account on this device.", "ok");
+    });
   });
   var signOutBtn = $("#sign-out");
   if (signOutBtn) signOutBtn.addEventListener("click", function () { logoutUser(); location.reload(); });

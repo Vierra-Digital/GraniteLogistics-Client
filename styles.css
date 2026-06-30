@@ -616,6 +616,11 @@ body[data-role="Customer"] #reset-data{display:none}
 .pre-mark img{display:block}
 .login-logo{border-radius:10px;display:block;flex-shrink:0}
 .rg-brand img{display:block}
+/* Login screen: navy hero band showcasing the full logo lockup */
+.login-card{padding:0;overflow:hidden}
+.login-hero{background:radial-gradient(130% 120% at 50% 0,#1d3a55,transparent 62%),#0f1b2c;padding:30px 24px 26px;text-align:center}
+.login-hero-logo{width:min(220px,66%);height:auto;display:inline-block;filter:drop-shadow(0 8px 20px rgba(0,0,0,.45))}
+.login-body{padding:24px 28px 28px}
 @media(max-width:760px){
   .order-layout{grid-template-columns:1fr}
   .order-hero h2{font-size:1.3rem}
