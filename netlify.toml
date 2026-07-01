@@ -1,4 +1,4 @@
-# Netlify deploy config — Granite Logistics PWA + Neon-backed Functions.
+# Netlify deploy config — Granite Logistics PWA + Netlify Blobs-backed Functions.
 # Static frontend (no build step) plus serverless functions under /api/*.
 [build]
   publish = "."

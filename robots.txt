@@ -1,0 +1,5 @@
+User-agent: *
+Disallow: /app.html
+Disallow: /api/
+
+Sitemap: https://usegl.com/sitemap.xml

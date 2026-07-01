@@ -10,6 +10,23 @@
 <meta name="apple-mobile-web-app-title" content="Granite" />
 <title>Granite Logistics — Freight, Fulfillment &amp; Last-Mile</title>
 <meta name="description" content="Granite Logistics is the API-first logistics platform: pull orders from your store, print carrier-ready labels, and keep a tamper-evident chain of custody from dock to doorstep." />
+<link rel="canonical" href="https://usegl.com/" />
+<meta name="robots" content="index, follow" />
+<!-- Open Graph -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Granite Logistics" />
+<meta property="og:title" content="Granite Logistics — Freight, Fulfillment &amp; Last-Mile" />
+<meta property="og:description" content="API-first logistics: pull orders from your store, print carrier-ready labels, and keep a tamper-evident chain of custody from dock to doorstep." />
+<meta property="og:url" content="https://usegl.com/" />
+<meta property="og:image" content="https://usegl.com/assets/og-image.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="Granite Logistics" />
+<!-- Twitter -->
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Granite Logistics — Freight, Fulfillment &amp; Last-Mile" />
+<meta name="twitter:description" content="API-first logistics: pull orders from your store, print carrier-ready labels, and keep a tamper-evident chain of custody from dock to doorstep." />
+<meta name="twitter:image" content="https://usegl.com/assets/og-image.png" />
 <link rel="manifest" href="manifest.webmanifest" />
 <link rel="icon" href="favicon.ico" sizes="any" />
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
@@ -187,6 +204,35 @@
 </footer>
 
 <div class="toast-stack" id="toasts"></div>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "name": "Granite Logistics",
+      "url": "https://usegl.com/",
+      "logo": "https://usegl.com/assets/icon-512.png",
+      "image": "https://usegl.com/assets/og-image.png",
+      "description": "API-first logistics platform for freight, fulfillment, and last-mile delivery with a tamper-evident chain of custody.",
+      "email": "ops@granitelogistics.co",
+      "telephone": "+1-937-555-0118",
+      "address": { "@type": "PostalAddress", "addressLocality": "Dayton", "addressRegion": "OH", "addressCountry": "US" }
+    },
+    {
+      "@type": "WebSite",
+      "name": "Granite Logistics",
+      "url": "https://usegl.com/",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": { "@type": "EntryPoint", "urlTemplate": "https://usegl.com/track.html?n={search_term_string}" },
+        "query-input": "required name=search_term_string"
+      }
+    }
+  ]
+}
+</script>
 
 <script src="barcode.js"></script>
 <script src="landing.js"></script>
