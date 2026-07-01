@@ -86,10 +86,13 @@ h1,h2{margin:0}
 .notif-ico{width:30px;height:30px;border-radius:8px;flex-shrink:0;display:grid;place-items:center;font-size:.9rem}
 .notif-ico.exc{background:#fee2e2;color:#b91c1c}
 .notif-ico.sla{background:#fef3c7;color:#b45309}
+.notif-ico.ok{background:var(--blue-soft);color:var(--blue-d)}
 .notif-main{min-width:0;font-size:.85rem}
 .notif-main b{font-weight:700}
 .notif-time{font-size:.74rem;color:var(--slate-500);margin-top:2px}
 .notif-empty{padding:26px 12px;text-align:center;color:var(--slate-500);font-size:.86rem}
+.notif-item.unread{background:var(--blue-soft)}
+.notif-item.unread:hover{background:var(--blue-soft)}
 
 /* Bulk select bar */
 .bulk-bar{display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:12px;background:rgba(47,155,214,.08);border:1px solid rgba(47,155,214,.25);border-radius:11px}
@@ -610,8 +613,8 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .cust-timeline .tl-node.upcoming::before{background:var(--card);border-color:var(--slate-200)}
 .cust-timeline .tl-node.upcoming .tl-stage{color:var(--slate-400);font-weight:600}
 .cust-timeline .tl-node.current .tl-stage{color:var(--blue-d)}
-/* Trim header chrome to a clean, focused customer experience */
-body[data-role="Customer"] .notif-wrap,
+/* Trim header chrome to a clean, focused customer experience.
+   The alerts bell stays — it's repurposed to show updates on the customer's own orders. */
 body[data-role="Customer"] #search-trigger,
 body[data-role="Customer"] #theme-btn,
 body[data-role="Customer"] #run-demo,

@@ -223,7 +223,7 @@
   var STORE_KEY = "granite-logistics-state-v1";
   function defaultSettings() {
     return {
-      company: { name: "Granite Logistics", address: "2200 Industrial Pkwy, Dayton, OH 45402", phone: "(937) 555-0118", email: "ops@granitelogistics.co" },
+      company: { name: "Granite Logistics", address: "", phone: "", email: "" },
       defaultCarrier: "UPS", defaultLane: "Lane 1", role: "Customer", roleChosen: false, theme: "light",
       cloud: { url: "", key: "granite-dev-key", autoSync: false }
     };
@@ -510,7 +510,45 @@
     list.sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
     return list;
   }
+  // Customers get their own bell — updates on their own orders, not ops-wide alerts.
+  // "Seen" state is tracked per-account in localStorage so the badge clears once opened.
+  function custNotifSeenKey(email) { return "gl-notifs-seen:" + email; }
+  function getNotifSeenTs(email) { try { return parseInt(localStorage.getItem(custNotifSeenKey(email)) || "0", 10) || 0; } catch (e) { return 0; } }
+  function setNotifSeenTs(email, ts) { try { localStorage.setItem(custNotifSeenKey(email), String(ts)); } catch (e) { } }
+  function buildCustomerNotifs(email) {
+    var list = [];
+    state.packages.forEach(function (p) {
+      if (p.customerEmail !== email) return;
+      (p.history || []).forEach(function (h, i) {
+        if (i === 0) return; // skip "order placed" — that's the confirmation screen, not a notification
+        var label = (CUST_STATUS[h.stage] || STAGE_LABEL[h.stage] || h.stage).toLowerCase();
+        list.push({ ts: h.ts, pkgId: p.id, exc: false, title: "Your " + p.item.description + " is " + label });
+      });
+      if (p.exception) list.push({ ts: p.exception.ts, pkgId: p.id, exc: true, title: "An update is needed on your " + p.item.description });
+    });
+    list.sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
+    return list;
+  }
+  function renderCustomerNotifs() {
+    var u = (typeof currentUser === "function") ? currentUser() : null;
+    var email = u ? u.email : null;
+    var badge = $("#notif-badge");
+    var panel = $("#notif-panel");
+    if (!email) { if (badge) badge.classList.remove("show"); if (panel) panel.innerHTML = ""; return; }
+    var list = buildCustomerNotifs(email);
+    var seenTs = getNotifSeenTs(email);
+    var unread = list.filter(function (n) { return n.ts > seenTs; }).length;
+    if (badge) { badge.textContent = unread; badge.classList.toggle("show", unread > 0); }
+    if (!panel) return;
+    panel.innerHTML = '<div class="notif-head"><span>Order updates</span><span class="muted small">' + list.length + '</span></div>' +
+      (list.length ? list.slice(0, 15).map(function (n) {
+        return '<div class="notif-item' + (n.ts > seenTs ? " unread" : "") + '" data-open="' + n.pkgId + '"><span class="notif-ico ' + (n.exc ? "exc" : "ok") + '">' + (n.exc ? "⚠" : "📦") + '</span>' +
+          '<div class="notif-main"><b>' + n.title + '</b><div class="notif-time">' + fmtTime(n.ts) + '</div></div></div>';
+      }).join("") : '<div class="notif-empty">No updates yet — place an order to start tracking it here.</div>');
+    $$("#notif-panel [data-open]").forEach(function (b) { b.addEventListener("click", function () { closeNotif(); openCustomerOrder(b.dataset.open); }); });
+  }
   function renderNotifs() {
+    if ((typeof currentRole === "function" ? currentRole() : "") === "Customer") { renderCustomerNotifs(); return; }
     var list = buildNotifs();
     var badge = $("#notif-badge");
     if (badge) { badge.textContent = list.length; badge.classList.toggle("show", list.length > 0); }
@@ -524,6 +562,13 @@
   }
   function toggleNotif() { var p = $("#notif-panel"); if (p) p.classList.toggle("open"); }
   function closeNotif() { var p = $("#notif-panel"); if (p) p.classList.remove("open"); }
+  function markCustomerNotifsSeen() {
+    if ((typeof currentRole === "function" ? currentRole() : "") !== "Customer") return;
+    var u = (typeof currentUser === "function") ? currentUser() : null; if (!u) return;
+    setNotifSeenTs(u.email, Date.now());
+    var badge = $("#notif-badge"); if (badge) badge.classList.remove("show");
+    $$("#notif-panel .notif-item.unread").forEach(function (el) { el.classList.remove("unread"); });
+  }
 
   // ---- Command palette (Ctrl/Cmd-K) ----
   var cmdItems = [], cmdSel = 0;
@@ -600,21 +645,45 @@
   function myOrdersPost(payload) {
     return fetch("/api/my-orders", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + authToken() }, body: JSON.stringify(payload) }).then(function (r) { return r.json(); });
   }
-  // Replace this customer's orders in local state with the authoritative server list.
+  // Replace this customer's orders in local state with the authoritative server list —
+  // but keep any orders still waiting to sync (placed while offline) so a server pull
+  // never silently erases them before they've had a chance to reach the server.
   function mergeCustomerOrders(serverOrders, email) {
     if (!email || !Array.isArray(serverOrders)) return;
-    state.packages = state.packages.filter(function (p) { return p.customerEmail !== email; }).concat(serverOrders);
+    var pending = state.packages.filter(function (p) { return p.customerEmail === email && p.pendingSync; });
+    state.packages = state.packages.filter(function (p) { return p.customerEmail !== email; }).concat(serverOrders).concat(pending);
     save();
+  }
+  // Retry any orders that were placed while offline (or the API was unreachable) —
+  // once one lands on the server, drop the local placeholder and re-merge.
+  function syncPendingOrders(email) {
+    if (!email || !hasServerAuth()) return;
+    var pending = state.packages.filter(function (p) { return p.customerEmail === email && p.pendingSync; });
+    pending.forEach(function (p) {
+      var payload = {
+        name: p.customer.name, item: p.item.description, value: p.item.value,
+        address: p.customer.address, city: p.customer.city, state: p.customer.state, zip: p.customer.zip, phone: p.customer.phone
+      };
+      myOrdersPost(payload).then(function (j) {
+        if (!(j && j.ok && j.order)) return;
+        state.packages = state.packages.filter(function (x) { return x.id !== p.id; });
+        mergeCustomerOrders(j.orders, email);
+        renderCustomerOrderList(email);
+        renderNotifs();
+        toast("Synced an offline order — now tracking " + j.order.id, "ok");
+      }).catch(function () { /* still offline — will retry next time this view loads */ });
+    });
   }
   function renderOrder() {
     if (typeof resetOrderForm === "function") resetOrderForm();
     var u = (typeof currentUser === "function") ? currentUser() : null;
     var email = u ? u.email : null;
     renderCustomerOrderList(email);
+    if (typeof renderNotifs === "function") renderNotifs();
     // Pull the authoritative list from the server (if signed in), then re-render.
     if (email && hasServerAuth()) {
       myOrdersGet().then(function (j) {
-        if (j && j.ok) { mergeCustomerOrders(j.orders, email); renderCustomerOrderList(email); }
+        if (j && j.ok) { mergeCustomerOrders(j.orders, email); renderCustomerOrderList(email); renderNotifs(); syncPendingOrders(email); }
       }).catch(function () { /* offline — keep local view */ });
     }
   }
@@ -632,10 +701,11 @@
     box.innerHTML = mine.slice().reverse().map(function (p) {
       var eta = p.status === "Delivered" ? "Delivered"
         : ("Est. " + new Date(p.promisedTs).toLocaleDateString(undefined, { month: "short", day: "numeric" }));
+      var pill = p.pendingSync ? '<span class="pill sla-risk">⟲ Syncing…</span>' : '<span class="' + pillClass(p.status) + '">' + (CUST_STATUS[p.status] || STAGE_LABEL[p.status]) + '</span>';
       return '<button class="cust-order" data-id="' + p.id + '">' +
         '<div class="co-main"><b>' + p.item.description + '</b>' +
         '<span class="co-meta">' + p.id + ' · ' + eta + '</span></div>' +
-        '<span class="' + pillClass(p.status) + '">' + (CUST_STATUS[p.status] || STAGE_LABEL[p.status]) + '</span></button>';
+        pill + '</button>';
     }).join("");
     $$("#cust-orders [data-id]").forEach(function (b) { b.addEventListener("click", function () { openCustomerOrder(b.dataset.id); }); });
   }
@@ -713,10 +783,13 @@
         name: v("name") || (u && u.name) || "—", item: v("item"), value: v("value"),
         address: v("address"), city: v("city"), state: v("state"), zip: v("zip"), phone: v("phone")
       };
-      var finish = function (p) { form.reset(); renderCustomerOrderList(email); showOrderSuccess(p); toast("Order placed — tracking " + p.id, "ok"); };
-      var placeLocal = function () {
+      var finish = function (p) { form.reset(); renderCustomerOrderList(email); showOrderSuccess(p); toast(p.pendingSync ? "Order saved — we'll sync it once you're back online." : "Order placed — tracking " + p.id, "ok"); };
+      // pendingSync=true means we intended to save this server-side but couldn't reach
+      // the API — it's kept and retried (see syncPendingOrders) instead of being lost.
+      var placeLocal = function (pendingSync) {
         var p = makeOrderFrom(Object.assign({ source: "Customer Order" }, payload));
         p.customerEmail = email;
+        if (pendingSync) p.pendingSync = true;
         state.packages.push(p); save();
         finish(p);
       };
@@ -725,10 +798,10 @@
         myOrdersPost(payload).then(function (j) {
           if (btn) { btn.disabled = false; btn.textContent = "Place order →"; }
           if (j && j.ok && j.order) { mergeCustomerOrders(j.orders, email); finish(j.order); }
-          else { placeLocal(); }
-        }).catch(function () { if (btn) { btn.disabled = false; btn.textContent = "Place order →"; } placeLocal(); });
+          else { placeLocal(true); }
+        }).catch(function () { if (btn) { btn.disabled = false; btn.textContent = "Place order →"; } placeLocal(true); });
       } else {
-        placeLocal();
+        placeLocal(false);
       }
     });
   }
@@ -2057,7 +2130,11 @@
 
   // Notifications bell
   var notifBtn = $("#notif-btn");
-  if (notifBtn) notifBtn.addEventListener("click", function (e) { e.stopPropagation(); renderNotifs(); toggleNotif(); });
+  if (notifBtn) notifBtn.addEventListener("click", function (e) {
+    e.stopPropagation(); renderNotifs(); toggleNotif();
+    var panel = $("#notif-panel");
+    if (panel && panel.classList.contains("open")) setTimeout(markCustomerNotifsSeen, 400);
+  });
   document.addEventListener("click", function (e) {
     var w = $(".notif-wrap"), panel = $("#notif-panel");
     if (panel && panel.classList.contains("open") && w && !w.contains(e.target)) closeNotif();
