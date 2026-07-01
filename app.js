@@ -456,6 +456,26 @@
     var ls = $("#login-screen"); if (ls) ls.classList.add("open");
   }
   function hideLogin() { var ls = $("#login-screen"); if (ls) ls.classList.remove("open"); }
+  // Validate the session token against the server so a login on one device is honored
+  // (and expired/tampered tokens rejected) on any other. Local/offline accounts skip this.
+  function verifySession() {
+    var a = authData();
+    if (!a.token || a.token === "local") return;
+    fetch("/api/auth", { headers: { "Authorization": "Bearer " + a.token } })
+      .then(function (r) {
+        if (r.status === 401) {
+          logoutUser();
+          if (typeof toast === "function") toast("Your session expired — please sign in again.", "ok");
+          showLogin();
+          return null;
+        }
+        return r.json().catch(function () { return null; });
+      })
+      .then(function (j) {
+        if (j && j.ok && j.user) { authSave({ token: a.token, user: j.user }); updateRoleUI(); }
+      })
+      .catch(function () { /* offline / backend unreachable — keep the cached session */ });
+  }
   function enterApp() {
     var u = currentUser();
     if (u) { state.settings.role = u.role || state.settings.role; state.settings.roleChosen = true; save(); }
@@ -1999,6 +2019,7 @@
     applyRole();
     renderNotifs();
     bootSync();
+    verifySession();
   } else {
     showLogin(); // not signed in → login screen is the entry
   }
