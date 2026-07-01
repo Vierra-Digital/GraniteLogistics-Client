@@ -385,6 +385,18 @@
     if (sb) sb.classList.toggle("open", willOpen);
     if (bd) bd.classList.toggle("open", willOpen);
   }
+  // If the mobile drawer is left open and the viewport then grows past the
+  // nav-mode breakpoint (window resize, or browser/OS zoom changing the
+  // effective layout width), force it closed — otherwise the sidebar and its
+  // dark backdrop can linger fixed on top of the now-desktop layout.
+  (function () {
+    var lastWide = window.innerWidth > 980;
+    window.addEventListener("resize", function () {
+      var wide = window.innerWidth > 980;
+      if (wide && !lastWide) toggleSidebar(false);
+      lastWide = wide;
+    });
+  })();
   function applyTheme() {
     var t = (state.settings && state.settings.theme === "dark") ? "dark" : "light";
     document.documentElement.setAttribute("data-theme", t);
@@ -439,7 +451,7 @@
   function renderLoginMode() {
     var reg = loginMode === "register";
     $("#login-title").textContent = reg ? "Create your account" : "Sign in";
-    $("#login-sub").textContent = reg ? "Set up your operations workspace." : "Welcome back to your operations platform.";
+    $("#login-sub").textContent = reg ? "Set up your account to place and track orders." : "Welcome back — sign in to see your orders.";
     $("#login-name-field").style.display = reg ? "" : "none";
     $("#login-role-field").style.display = "none";
     $("#login-submit").textContent = reg ? "Create account" : "Sign in";
@@ -456,6 +468,22 @@
     var ls = $("#login-screen"); if (ls) ls.classList.add("open");
   }
   function hideLogin() { var ls = $("#login-screen"); if (ls) ls.classList.remove("open"); }
+
+  // ---- Welcome tour: a short, skippable walkthrough shown once, right after
+  // a brand-new account is created (never on sign-in, never again after dismissed). ----
+  var WELCOME_SLIDES = 3;
+  var welcomeStep = 1;
+  function renderWelcomeStep() {
+    $$("#welcome-slides .w-slide").forEach(function (s) { s.classList.toggle("active", +s.dataset.slide === welcomeStep); });
+    $$("#welcome-dots .w-dot").forEach(function (d) { d.classList.toggle("active", +d.dataset.dot === welcomeStep); });
+    var nextBtn = $("#welcome-next"); if (nextBtn) nextBtn.textContent = welcomeStep === WELCOME_SLIDES ? "Get started →" : "Next →";
+  }
+  function showWelcomeTour() {
+    welcomeStep = 1;
+    renderWelcomeStep();
+    var b = $("#welcome-backdrop"); if (b) b.classList.add("open");
+  }
+  function closeWelcomeTour() { var b = $("#welcome-backdrop"); if (b) b.classList.remove("open"); }
   // Validate the session token against the server so a login on one device is honored
   // (and expired/tampered tokens rejected) on any other. Local/offline accounts skip this.
   function verifySession() {
@@ -694,6 +722,13 @@
     if (!mine.length) {
       box.innerHTML = '<div class="empty-state"><div class="es-ico">📦</div><b>No orders yet</b>' +
         '<span>Create your first shipment in three quick steps. We\'ll move it from pickup to your door and keep you posted along the way.</span>' +
+        '<div class="es-steps">' +
+        '<div class="es-step"><span class="es-step-ico">📝</span><span>Place your order</span></div>' +
+        '<span class="es-step-arrow">→</span>' +
+        '<div class="es-step"><span class="es-step-ico">🚚</span><span>We pick up &amp; ship</span></div>' +
+        '<span class="es-step-arrow">→</span>' +
+        '<div class="es-step"><span class="es-step-ico">✅</span><span>Delivered &amp; tracked</span></div>' +
+        '</div>' +
         '<button class="btn primary" id="try-sample" type="button">✨ Try a sample order</button></div>';
       var ts = $("#try-sample"); if (ts) ts.addEventListener("click", fillSampleOrder);
       return;
@@ -1831,7 +1866,7 @@
   }
   function closeModal() { $("#modal-backdrop").classList.remove("open"); }
   $("#modal-backdrop").addEventListener("click", function (e) { if (e.target === $("#modal-backdrop")) closeModal(); });
-  document.addEventListener("keydown", function (e) { if (e.key !== "Escape") return; closeModal(); closeConfirmDialog(); closeGate(); closeAccountMenu(); closeNotif(); });
+  document.addEventListener("keydown", function (e) { if (e.key !== "Escape") return; closeModal(); closeConfirmDialog(); closeGate(); closeAccountMenu(); closeNotif(); closeWelcomeTour(); });
 
   // Lightweight, app-styled confirmation prompt — replaces native window.confirm()
   // so destructive actions (delete, reset, sign out) look consistent everywhere.
@@ -1988,7 +2023,8 @@
       if (btn) { btn.disabled = false; btn.textContent = orig; }
       if (!res || !res.ok) { err.textContent = (res && res.error) || "Something went wrong. Please try again."; return; }
       enterApp();
-      toast(mode === "register" ? ("Welcome, " + (currentUser().name || email)) : "Signed in", "ok");
+      if (mode === "register") showWelcomeTour();
+      else toast("Signed in", "ok");
       if (res.offline) toast("Backend unreachable — using a local account on this device.", "ok");
     });
   });
@@ -1996,6 +2032,13 @@
     confirmDialog({ title: "Sign out?", message: "You'll need to sign in again to place or track orders.", confirmLabel: "Sign out", danger: true })
       .then(function (ok) { if (ok) { logoutUser(); location.reload(); } });
   }
+  var welcomeNext = $("#welcome-next");
+  if (welcomeNext) welcomeNext.addEventListener("click", function () {
+    if (welcomeStep < WELCOME_SLIDES) { welcomeStep++; renderWelcomeStep(); } else closeWelcomeTour();
+  });
+  var welcomeSkip = $("#welcome-skip"); if (welcomeSkip) welcomeSkip.addEventListener("click", closeWelcomeTour);
+  var welcomeBackdropEl = $("#welcome-backdrop");
+  if (welcomeBackdropEl) welcomeBackdropEl.addEventListener("click", function (e) { if (e.target === this) closeWelcomeTour(); });
   var signOutBtn = $("#sign-out");
   if (signOutBtn) signOutBtn.addEventListener("click", confirmSignOut);
 

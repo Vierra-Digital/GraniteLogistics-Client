@@ -52,6 +52,38 @@
   </div>
 </div>
 
+<!-- Welcome tour — shown once, right after a new account is created -->
+<div id="welcome-backdrop" class="welcome-backdrop">
+  <div class="welcome-card">
+    <div id="welcome-slides">
+      <div class="w-slide active" data-slide="1">
+        <div class="w-ico">🛒</div>
+        <h2>Welcome to Granite Logistics</h2>
+        <p>Place an order and we'll take it from pickup to your doorstep — tracked at every step.</p>
+      </div>
+      <div class="w-slide" data-slide="2">
+        <div class="w-ico">📝</div>
+        <h2>Ordering takes three quick steps</h2>
+        <p>Tell us what you're shipping, where it's going, and confirm. That's it — no paperwork.</p>
+      </div>
+      <div class="w-slide" data-slide="3">
+        <div class="w-ico">🔔</div>
+        <h2>We'll keep you posted</h2>
+        <p>Follow every order under "Your orders," and the bell up top lights up the moment something changes — like when it's out for delivery.</p>
+      </div>
+    </div>
+    <div class="welcome-dots" id="welcome-dots">
+      <span class="w-dot active" data-dot="1"></span>
+      <span class="w-dot" data-dot="2"></span>
+      <span class="w-dot" data-dot="3"></span>
+    </div>
+    <div class="welcome-actions">
+      <button class="btn ghost" id="welcome-skip" type="button">Skip</button>
+      <button class="btn primary" id="welcome-next" type="button">Next →</button>
+    </div>
+  </div>
+</div>
+
 <!-- Workspace picker (switch which role's tools you see) -->
 <div id="role-gate" class="role-gate">
   <button class="rg-close" id="rg-close" aria-label="Close">×</button>
