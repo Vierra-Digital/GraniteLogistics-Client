@@ -131,7 +131,7 @@ html[data-theme="dark"] .exc-banner{background:#241620;border-color:#5b2330}
 html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 
 /* Workspace picker (role gate) */
-.role-gate{position:fixed;inset:0;z-index:100;background:radial-gradient(1000px 600px at 75% -10%,#1d3a55,transparent 55%),#0a1622;display:none;align-items:center;justify-content:center;padding:24px;overflow:auto}
+.role-gate{position:fixed;inset:0;z-index:100;background:radial-gradient(1000px 600px at 75% -10%,#1d3a55,transparent 55%),#0a1622;display:none;align-items:center;justify-content:center;padding:max(24px,env(safe-area-inset-top,0px)) 24px max(24px,env(safe-area-inset-bottom,0px));overflow:auto}
 .role-gate.open{display:flex}
 .rg-inner{width:100%;max-width:860px;text-align:center;color:#dfe6ee}
 .rg-brand{display:inline-flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.1em;color:#fff;margin-bottom:26px}
@@ -477,7 +477,8 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* ===== Login ===== */
-.login-screen{position:fixed;inset:0;z-index:150;display:none;align-items:center;justify-content:center;padding:24px;
+.login-screen{position:fixed;inset:0;z-index:150;display:none;align-items:center;justify-content:center;
+  padding:max(24px,env(safe-area-inset-top,0px)) 24px max(24px,env(safe-area-inset-bottom,0px));
   background:radial-gradient(900px 500px at 75% -10%,#1d3a55,transparent 55%),#0a1622}
 .login-screen.open{display:flex}
 .login-card{width:100%;max-width:380px;background:var(--card);border-radius:18px;padding:28px;box-shadow:0 30px 80px rgba(0,0,0,.45);animation:fade .3s ease}
@@ -622,6 +623,14 @@ body[data-role="Customer"] #reset-data{display:none}
 .login-hero-logo{width:min(220px,66%);height:auto;display:inline-block;filter:drop-shadow(0 8px 20px rgba(0,0,0,.45))}
 .login-body{padding:24px 28px 28px}
 @media(max-width:760px){
-  .order-layout{grid-template-columns:1fr}
-  .order-hero h2{font-size:1.3rem}
+  .order-layout{grid-template-columns:1fr;gap:14px}
+}
+/* Mobile: the top bar already shows the screen title, so drop the duplicate hero
+   heading and tighten spacing for a cleaner, more app-like feel. */
+@media(max-width:600px){
+  .order-hero{margin-bottom:14px}
+  .order-hero h2{display:none}
+  .order-hero p{font-size:.9rem}
+  .order-card{padding:16px}
+  .order-steps{margin-bottom:16px}
 }

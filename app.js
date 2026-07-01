@@ -591,10 +591,34 @@
     Won: "Order received", Intake: "Preparing", PickedUp: "Picked up",
     Staged: "Ready to ship", InTransit: "In transit", OutforDelivery: "Out for delivery", Delivered: "Delivered"
   };
+  // Server-scoped orders: when signed in with a real (non-local) session, a customer's
+  // orders live under their account in Netlify Blobs and follow them across devices.
+  function hasServerAuth() { var t = (typeof authToken === "function") ? authToken() : null; return !!t && t !== "local"; }
+  function myOrdersGet() {
+    return fetch("/api/my-orders", { headers: { "Authorization": "Bearer " + authToken() } }).then(function (r) { return r.json(); });
+  }
+  function myOrdersPost(payload) {
+    return fetch("/api/my-orders", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + authToken() }, body: JSON.stringify(payload) }).then(function (r) { return r.json(); });
+  }
+  // Replace this customer's orders in local state with the authoritative server list.
+  function mergeCustomerOrders(serverOrders, email) {
+    if (!email || !Array.isArray(serverOrders)) return;
+    state.packages = state.packages.filter(function (p) { return p.customerEmail !== email; }).concat(serverOrders);
+    save();
+  }
   function renderOrder() {
     if (typeof resetOrderForm === "function") resetOrderForm();
     var u = (typeof currentUser === "function") ? currentUser() : null;
     var email = u ? u.email : null;
+    renderCustomerOrderList(email);
+    // Pull the authoritative list from the server (if signed in), then re-render.
+    if (email && hasServerAuth()) {
+      myOrdersGet().then(function (j) {
+        if (j && j.ok) { mergeCustomerOrders(j.orders, email); renderCustomerOrderList(email); }
+      }).catch(function () { /* offline — keep local view */ });
+    }
+  }
+  function renderCustomerOrderList(email) {
     var mine = state.packages.filter(function (p) { return email && p.customerEmail === email; });
     var cc = $("#cust-count"); if (cc) cc.textContent = mine.length ? (mine.length + (mine.length === 1 ? " order" : " orders")) : "";
     var box = $("#cust-orders"); if (!box) return;
@@ -681,18 +705,31 @@
       e.preventDefault();
       if (!stepVal("item")) { gotoStep(1); validateStep(1); return; }
       if (!stepVal("name")) { gotoStep(2); validateStep(2); return; }
-      var v = function (n) { var el = this.elements.namedItem(n); return el ? el.value : ""; }.bind(this);
+      var form = this;
+      var v = function (n) { var el = form.elements.namedItem(n); return el ? el.value : ""; };
       var u = (typeof currentUser === "function") ? currentUser() : null;
-      var p = makeOrderFrom({
-        name: v("name") || (u && u.name) || "—", item: v("item"), value: v("value"), source: "Customer Order",
+      var email = u ? u.email : null;
+      var payload = {
+        name: v("name") || (u && u.name) || "—", item: v("item"), value: v("value"),
         address: v("address"), city: v("city"), state: v("state"), zip: v("zip"), phone: v("phone")
-      });
-      p.customerEmail = u ? u.email : null;
-      state.packages.push(p); save();
-      this.reset();
-      renderOrder();
-      showOrderSuccess(p);
-      toast("Order placed — tracking " + p.id, "ok");
+      };
+      var finish = function (p) { form.reset(); renderCustomerOrderList(email); showOrderSuccess(p); toast("Order placed — tracking " + p.id, "ok"); };
+      var placeLocal = function () {
+        var p = makeOrderFrom(Object.assign({ source: "Customer Order" }, payload));
+        p.customerEmail = email;
+        state.packages.push(p); save();
+        finish(p);
+      };
+      if (hasServerAuth()) {
+        var btn = $("#cust-order-form [type=submit]"); if (btn) { btn.disabled = true; btn.textContent = "Placing…"; }
+        myOrdersPost(payload).then(function (j) {
+          if (btn) { btn.disabled = false; btn.textContent = "Place order →"; }
+          if (j && j.ok && j.order) { mergeCustomerOrders(j.orders, email); finish(j.order); }
+          else { placeLocal(); }
+        }).catch(function () { if (btn) { btn.disabled = false; btn.textContent = "Place order →"; } placeLocal(); });
+      } else {
+        placeLocal();
+      }
     });
   }
   var lastOrderId = null;

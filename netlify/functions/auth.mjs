@@ -4,39 +4,13 @@
 // Set GL_AUTH_SECRET in the Netlify env for production; a dev fallback is used otherwise.
 import { getStore } from "@netlify/blobs";
 import crypto from "node:crypto";
+import { CORS, json, sign, verifyToken, bearer } from "./_auth.mjs";
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
-  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-  "Content-Type": "application/json",
-};
-const json = (o, s = 200) => new Response(JSON.stringify(o), { status: s, headers: CORS });
-const SECRET = process.env.GL_AUTH_SECRET || "granite-dev-secret-change-me";
 const VALID_ROLES = ["Customer", "Admin", "Runner", "Driver", "Viewer"];
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 function store() { return getStore({ name: "granite-users", consistency: "strong" }); }
-function b64u(buf) { return Buffer.from(buf).toString("base64url"); }
 function hashPw(pw, salt) { return crypto.scryptSync(String(pw), salt, 64).toString("hex"); }
-
-function sign(payload) {
-  const body = b64u(JSON.stringify(payload));
-  const sig = crypto.createHmac("sha256", SECRET).update(body).digest("base64url");
-  return body + "." + sig;
-}
-function verify(token) {
-  try {
-    const [body, sig] = String(token).split(".");
-    if (!body || !sig) return null;
-    const expected = crypto.createHmac("sha256", SECRET).update(body).digest("base64url");
-    const a = Buffer.from(sig), b = Buffer.from(expected);
-    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
-    const p = JSON.parse(Buffer.from(body, "base64url").toString());
-    if (p.exp && Date.now() > p.exp) return null;
-    return p;
-  } catch (e) { return null; }
-}
 function tokenFor(u) { return sign({ email: u.email, name: u.name, role: u.role, exp: Date.now() + SESSION_MS }); }
 const publicUser = (u) => ({ email: u.email, name: u.name, role: u.role });
 
@@ -46,8 +20,7 @@ export default async (req) => {
 
   // GET — validate the current session token (Authorization: Bearer <token>)
   if (req.method === "GET") {
-    const tok = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-    const p = verify(tok);
+    const p = verifyToken(bearer(req));
     if (!p) return json({ ok: false, error: "Invalid or expired session" }, 401);
     return json({ ok: true, user: { email: p.email, name: p.name, role: p.role } });
   }
