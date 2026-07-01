@@ -1741,11 +1741,13 @@
     });
   }
   function deletePackage(id) {
-    if (!window.confirm("Delete " + id + "? This cannot be undone.")) return;
-    state.packages = state.packages.filter(function (p) { return p.id !== id; });
-    rebuildManifests(); save(); closeModal();
-    if (cocSelected === id) cocSelected = null;
-    toast(id + " deleted", "ok"); renderAll();
+    confirmDialog({ title: "Delete " + id + "?", message: "This cannot be undone.", confirmLabel: "Delete", danger: true }).then(function (ok) {
+      if (!ok) return;
+      state.packages = state.packages.filter(function (p) { return p.id !== id; });
+      rebuildManifests(); save(); closeModal();
+      if (cocSelected === id) cocSelected = null;
+      toast(id + " deleted", "ok"); renderAll();
+    });
   }
 
   function modal(html) {
@@ -1756,7 +1758,37 @@
   }
   function closeModal() { $("#modal-backdrop").classList.remove("open"); }
   $("#modal-backdrop").addEventListener("click", function (e) { if (e.target === $("#modal-backdrop")) closeModal(); });
-  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeModal(); });
+  document.addEventListener("keydown", function (e) { if (e.key !== "Escape") return; closeModal(); closeConfirmDialog(); closeGate(); closeAccountMenu(); closeNotif(); });
+
+  // Lightweight, app-styled confirmation prompt — replaces native window.confirm()
+  // so destructive actions (delete, reset, sign out) look consistent everywhere.
+  var confirmActive = null;
+  function confirmDialog(opts) {
+    var bd = $("#confirm-backdrop");
+    $("#confirm-title").textContent = opts.title || "Are you sure?";
+    $("#confirm-message").textContent = opts.message || "";
+    var okBtn = $("#confirm-ok"), cancelBtn = $("#confirm-cancel");
+    okBtn.textContent = opts.confirmLabel || "Confirm";
+    okBtn.className = "btn block " + (opts.danger ? "danger" : "primary");
+    cancelBtn.textContent = opts.cancelLabel || "Cancel";
+    bd.classList.add("open");
+    return new Promise(function (resolve) {
+      function cleanup(result) {
+        bd.classList.remove("open");
+        okBtn.removeEventListener("click", onOk);
+        cancelBtn.removeEventListener("click", onCancel);
+        confirmActive = null;
+        resolve(result);
+      }
+      function onOk() { cleanup(true); }
+      function onCancel() { cleanup(false); }
+      okBtn.addEventListener("click", onOk);
+      cancelBtn.addEventListener("click", onCancel);
+      confirmActive = onCancel;
+    });
+  }
+  function closeConfirmDialog() { if (confirmActive) confirmActive(); }
+  $("#confirm-backdrop").addEventListener("click", function (e) { if (e.target === this) closeConfirmDialog(); });
 
   // ---- Core: advance a package one stage ----
   function getPkg(id) { return state.packages.find(function (p) { return p.id === id; }); }
@@ -1887,8 +1919,12 @@
       if (res.offline) toast("Backend unreachable — using a local account on this device.", "ok");
     });
   });
+  function confirmSignOut() {
+    confirmDialog({ title: "Sign out?", message: "You'll need to sign in again to place or track orders.", confirmLabel: "Sign out", danger: true })
+      .then(function (ok) { if (ok) { logoutUser(); location.reload(); } });
+  }
   var signOutBtn = $("#sign-out");
-  if (signOutBtn) signOutBtn.addEventListener("click", function () { logoutUser(); location.reload(); });
+  if (signOutBtn) signOutBtn.addEventListener("click", confirmSignOut);
 
   var cocBack = $("#coc-back");
   if (cocBack) cocBack.addEventListener("click", function () { var v = $("#view-tracking"); if (v) v.classList.remove("detail-open"); });
@@ -1904,16 +1940,31 @@
 
   var resetBtn = $("#reset-data");
   if (resetBtn) resetBtn.addEventListener("click", function () {
-    if (!window.confirm("Reset all data back to the demo seed? This clears any orders you've added.")) return;
-    var keepRole = currentRole(), keepChosen = state.settings.roleChosen;
-    seed(); state.settings.role = keepRole; state.settings.roleChosen = keepChosen; save();
-    cocSelected = null; trackQuery = ""; toast("Demo data reset to seed.", "ok");
-    applyRole(); go(allowedViews()[0]);
+    confirmDialog({ title: "Reset all data?", message: "This resets to the demo seed and clears any orders you've added.", confirmLabel: "Reset", danger: true }).then(function (ok) {
+      if (!ok) return;
+      var keepRole = currentRole(), keepChosen = state.settings.roleChosen;
+      seed(); state.settings.role = keepRole; state.settings.roleChosen = keepChosen; save();
+      cocSelected = null; trackQuery = ""; toast("Demo data reset to seed.", "ok");
+      applyRole(); go(allowedViews()[0]);
+    });
   });
 
   // Activity search
   var actSearch = $("#activity-search");
   if (actSearch) actSearch.addEventListener("input", function () { activityQuery = this.value.trim().toLowerCase(); renderActivity(); });
+
+  // Reusable tabbed layout (Settings, Order Ingest, …) — each .tabbed-layout
+  // group wires its own .tab-btn clicks to show the matching .tab-panel.
+  $$(".tabbed-layout").forEach(function (group) {
+    $$(".tab-btn", group).forEach(function (t) {
+      t.addEventListener("click", function () {
+        $$(".tab-btn", group).forEach(function (x) { x.classList.remove("active"); });
+        this.classList.add("active");
+        var tab = this.dataset.tab;
+        $$(".tab-panel", group).forEach(function (p) { p.classList.toggle("active", p.dataset.panel === tab); });
+      });
+    });
+  });
 
   // Settings form
   var settingsForm = $("#settings-form");
@@ -1951,9 +2002,18 @@
     if (!f) return;
     var reader = new FileReader();
     reader.onload = function (e) {
+      var data;
       try {
-        var data = JSON.parse(e.target.result);
+        data = JSON.parse(e.target.result);
         if (!data || !Array.isArray(data.packages)) throw new Error("bad");
+      } catch (err) { toast("That file isn't a valid Granite backup.", "ok"); return; }
+      var n = data.packages.length;
+      confirmDialog({
+        title: "Restore this backup?",
+        message: "This replaces your current data with " + n + " package" + (n === 1 ? "" : "s") + " from the file. This cannot be undone.",
+        confirmLabel: "Restore", danger: true
+      }).then(function (ok) {
+        if (!ok) return;
         state.packages = data.packages;
         state.manifests = Array.isArray(data.manifests) ? data.manifests : [];
         state.loadUnits = Array.isArray(data.loadUnits) ? data.loadUnits : [];
@@ -1963,13 +2023,16 @@
         if (typeof data.seq === "number") seq = data.seq;
         rebuildManifests(); save();
         syncRoleSelect(); applyRole(); toast(state.packages.length + " packages restored from backup", "ok"); go("overview");
-      } catch (err) { toast("That file isn't a valid Granite backup.", "ok"); }
+      });
     };
     reader.readAsText(f);
   });
 
   // Workspace picker + account menu
   $$("#role-gate .rg-card").forEach(function (c) { c.addEventListener("click", function () { setRole(c.dataset.role); }); });
+  var rgClose = $("#rg-close"); if (rgClose) rgClose.addEventListener("click", closeGate);
+  var roleGateEl = $("#role-gate");
+  if (roleGateEl) roleGateEl.addEventListener("click", function (e) { if (e.target === this) closeGate(); });
   function closeAccountMenu() { var m = $("#account-menu"); if (m) m.classList.remove("open"); }
   var roleBadge = $("#role-badge");
   if (roleBadge) roleBadge.addEventListener("click", function (e) {
@@ -1978,7 +2041,7 @@
   });
   var amSwitch = $("#am-switch"); if (amSwitch) amSwitch.addEventListener("click", function () { closeAccountMenu(); openGate(); });
   var amTheme = $("#am-theme"); if (amTheme) amTheme.addEventListener("click", function () { closeAccountMenu(); state.settings.theme = (state.settings.theme === "dark") ? "light" : "dark"; save(); applyTheme(); });
-  var amSignout = $("#am-signout"); if (amSignout) amSignout.addEventListener("click", function () { closeAccountMenu(); logoutUser(); location.reload(); });
+  var amSignout = $("#am-signout"); if (amSignout) amSignout.addEventListener("click", function () { closeAccountMenu(); confirmSignOut(); });
   document.addEventListener("click", function (e) { var w = $(".account-wrap"); if (w && !w.contains(e.target)) closeAccountMenu(); });
 
   // Mobile drawer

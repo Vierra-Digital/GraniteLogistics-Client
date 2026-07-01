@@ -133,6 +133,9 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 /* Workspace picker (role gate) */
 .role-gate{position:fixed;inset:0;z-index:100;background:radial-gradient(1000px 600px at 75% -10%,#1d3a55,transparent 55%),#0a1622;display:none;align-items:center;justify-content:center;padding:max(24px,env(safe-area-inset-top,0px)) 24px max(24px,env(safe-area-inset-bottom,0px));overflow:auto}
 .role-gate.open{display:flex}
+.rg-close{position:absolute;top:max(18px,env(safe-area-inset-top,0px));right:20px;border:0;background:rgba(255,255,255,.08);
+  color:#dfe6ee;width:38px;height:38px;border-radius:50%;font-size:1.3rem;line-height:1;cursor:pointer;z-index:1;transition:.15s}
+.rg-close:hover{background:rgba(255,255,255,.16)}
 .rg-inner{width:100%;max-width:860px;text-align:center;color:#dfe6ee}
 .rg-brand{display:inline-flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.1em;color:#fff;margin-bottom:26px}
 .rg-brand svg{width:30px;height:30px}
@@ -157,6 +160,25 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .card-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}
 .card-head h2{font-size:1rem;font-weight:700;letter-spacing:-.01em;color:var(--ink)}
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+
+/* Reusable tabbed layout — used by Settings, Order Ingest, and anywhere a view
+   has several independent sections that don't need to be seen side-by-side. */
+.tabbed-layout{display:grid;grid-template-columns:220px 1fr;gap:20px;align-items:start}
+.tab-rail{display:flex;flex-direction:column;gap:3px;background:var(--card);border:1px solid var(--line);
+  border-radius:14px;padding:8px;position:sticky;top:20px}
+.tab-btn{display:flex;align-items:center;gap:10px;text-align:left;background:0;border:0;width:100%;
+  padding:11px 12px;border-radius:9px;font-size:.87rem;font-weight:600;color:var(--slate-700);cursor:pointer;font-family:inherit}
+.tab-btn .ico{width:20px;text-align:center;flex-shrink:0;font-size:1rem}
+.tab-btn:hover{background:var(--bg)}
+.tab-btn.active{background:var(--blue-soft);color:var(--blue-d)}
+.tab-panels{min-width:0}
+.tab-panel{display:none}
+.tab-panel.active{display:block;animation:os-pop .18s ease}
+@media(max-width:760px){
+  .tabbed-layout{grid-template-columns:1fr}
+  .tab-rail{flex-direction:row;overflow-x:auto;position:static;padding:6px;gap:2px}
+  .tab-btn{white-space:nowrap;width:auto;flex:0 0 auto}
+}
 
 /* KPIs */
 .kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px;margin-bottom:20px}
@@ -611,6 +633,16 @@ body[data-role="Customer"] #reset-data{display:none}
 .am-item:hover{background:var(--bg)}
 .am-item.danger{color:#b91c1c}
 .am-item.danger:hover{background:rgba(239,68,68,.08)}
+/* Confirm dialog (app-styled replacement for window.confirm) */
+.confirm-backdrop{position:fixed;inset:0;z-index:120;display:none;align-items:center;justify-content:center;
+  background:rgba(10,18,30,.5);padding:max(20px,env(safe-area-inset-top,0px)) 20px max(20px,env(safe-area-inset-bottom,0px))}
+.confirm-backdrop.open{display:flex}
+.confirm-card{width:100%;max-width:340px;background:var(--card);border-radius:16px;padding:22px;
+  box-shadow:0 30px 70px rgba(0,0,0,.4);text-align:center;animation:os-pop .18s ease}
+.confirm-card h3{font-size:1.08rem;font-weight:800;letter-spacing:-.01em;color:var(--ink);margin:0 0 8px}
+.confirm-card p{font-size:.88rem;color:var(--slate-500);margin:0 0 20px;line-height:1.5}
+.confirm-actions{display:flex;gap:10px}
+.confirm-actions .btn{flex:1;margin-top:0}
 /* Brand logo images (replaces inline SVG marks) */
 .brand-mark{background:none}
 .brand-mark img{display:block}

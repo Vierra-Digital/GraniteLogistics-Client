@@ -54,6 +54,7 @@
 
 <!-- Workspace picker (switch which role's tools you see) -->
 <div id="role-gate" class="role-gate">
+  <button class="rg-close" id="rg-close" aria-label="Close">×</button>
   <div class="rg-inner">
     <div class="rg-brand">
       <img src="assets/logo-mark.png" alt="" width="34" height="34" />
@@ -268,61 +269,74 @@
         <p class="lead">Orders flow in automatically from each client's commerce backend — or add them manually / by CSV. Everything is saved to this device.</p>
         <div class="connectors" id="connectors"></div>
 
-        <div class="card">
-          <div class="card-head"><h2>API &amp; Webhooks</h2><span class="muted">API-first integration</span></div>
-          <p class="muted small" style="margin-top:0">A client's store or carrier pushes orders straight to Granite — no manual entry. Live endpoint:</p>
-          <pre class="code-block" id="webhook-curl"></pre>
-          <div class="head-actions">
-            <button class="btn sm" id="copy-curl">⧉ Copy curl</button>
-            <button class="btn primary sm" id="sim-webhook">⚡ Simulate inbound order</button>
-          </div>
-          <div id="webhook-status" class="muted small"></div>
-        </div>
-
-        <div class="card">
-          <div class="card-head"><h2>Add Orders</h2><span class="muted">Manual entry or CSV import</span></div>
-          <div class="grid-2">
-            <form id="order-form" class="order-form" autocomplete="off">
-              <div class="form-group-label">Customer</div>
-              <div class="ff"><label>Customer name</label><input name="name" required placeholder="Jane Doe" /></div>
-              <div class="form-group-label">Item details</div>
-              <div class="ff"><label>Item description</label><input name="item" required placeholder="LG 55&quot; OLED TV" /></div>
-              <div class="ff-row">
-                <div class="ff"><label>Declared value ($)</label><input name="value" type="number" min="0" value="0" /></div>
-                <div class="ff"><label>Source</label><select name="source"><option>Manual Entry</option><option>Shopify</option><option>WooCommerce</option><option>MacBid Auction</option></select></div>
+        <div class="tabbed-layout">
+          <nav class="tab-rail">
+            <button class="tab-btn active" data-tab="webhooks" type="button"><span class="ico">⇄</span> API &amp; Webhooks</button>
+            <button class="tab-btn" data-tab="add" type="button"><span class="ico">+</span> Add Orders</button>
+            <button class="tab-btn" data-tab="stream" type="button"><span class="ico">☰</span> Order Stream</button>
+          </nav>
+          <div class="tab-panels">
+            <div class="tab-panel active" data-panel="webhooks">
+              <div class="card">
+                <div class="card-head"><h2>API &amp; Webhooks</h2><span class="muted">API-first integration</span></div>
+                <p class="muted small" style="margin-top:0">A client's store or carrier pushes orders straight to Granite — no manual entry. Live endpoint:</p>
+                <pre class="code-block" id="webhook-curl"></pre>
+                <div class="head-actions">
+                  <button class="btn sm" id="copy-curl">⧉ Copy curl</button>
+                  <button class="btn primary sm" id="sim-webhook">⚡ Simulate inbound order</button>
+                </div>
+                <div id="webhook-status" class="muted small"></div>
               </div>
-              <div class="form-group-label">Delivery address</div>
-              <div class="ff"><label>Address</label><input name="address" placeholder="123 Main St" /></div>
-              <div class="ff-row">
-                <div class="ff"><label>City</label><input name="city" placeholder="Dayton" /></div>
-                <div class="ff" style="max-width:90px"><label>State</label><input name="state" maxlength="2" placeholder="OH" /></div>
-                <div class="ff" style="max-width:120px"><label>ZIP</label><input name="zip" placeholder="45402" /></div>
+            </div>
+            <div class="tab-panel" data-panel="add">
+              <div class="card">
+                <div class="card-head"><h2>Add Orders</h2><span class="muted">Manual entry or CSV import</span></div>
+                <div class="grid-2">
+                  <form id="order-form" class="order-form" autocomplete="off">
+                    <div class="form-group-label">Customer</div>
+                    <div class="ff"><label>Customer name</label><input name="name" required placeholder="Jane Doe" /></div>
+                    <div class="form-group-label">Item details</div>
+                    <div class="ff"><label>Item description</label><input name="item" required placeholder="LG 55&quot; OLED TV" /></div>
+                    <div class="ff-row">
+                      <div class="ff"><label>Declared value ($)</label><input name="value" type="number" min="0" value="0" /></div>
+                      <div class="ff"><label>Source</label><select name="source"><option>Manual Entry</option><option>Shopify</option><option>WooCommerce</option><option>MacBid Auction</option></select></div>
+                    </div>
+                    <div class="form-group-label">Delivery address</div>
+                    <div class="ff"><label>Address</label><input name="address" placeholder="123 Main St" /></div>
+                    <div class="ff-row">
+                      <div class="ff"><label>City</label><input name="city" placeholder="Dayton" /></div>
+                      <div class="ff" style="max-width:90px"><label>State</label><input name="state" maxlength="2" placeholder="OH" /></div>
+                      <div class="ff" style="max-width:120px"><label>ZIP</label><input name="zip" placeholder="45402" /></div>
+                    </div>
+                    <div class="ff"><label>Phone</label><input name="phone" placeholder="(937) 555-0100" /></div>
+                    <button class="btn primary" type="submit">+ Create Order</button>
+                  </form>
+                  <div class="import-box">
+                    <label class="import-drop" for="csv-input">
+                      <span class="id-ico">⇪</span>
+                      <b>Import orders from CSV</b>
+                      <span class="muted small">Columns: name, item, value, address, city, state, zip, phone, source</span>
+                      <input type="file" id="csv-input" accept=".csv,text/csv" hidden />
+                    </label>
+                    <button class="btn sm" id="csv-template">↓ Download CSV template</button>
+                    <div id="import-result" class="muted small"></div>
+                  </div>
+                </div>
               </div>
-              <div class="ff"><label>Phone</label><input name="phone" placeholder="(937) 555-0100" /></div>
-              <button class="btn primary" type="submit">+ Create Order</button>
-            </form>
-            <div class="import-box">
-              <label class="import-drop" for="csv-input">
-                <span class="id-ico">⇪</span>
-                <b>Import orders from CSV</b>
-                <span class="muted small">Columns: name, item, value, address, city, state, zip, phone, source</span>
-                <input type="file" id="csv-input" accept=".csv,text/csv" hidden />
-              </label>
-              <button class="btn sm" id="csv-template">↓ Download CSV template</button>
-              <div id="import-result" class="muted small"></div>
+            </div>
+            <div class="tab-panel" data-panel="stream">
+              <div class="card">
+                <div class="card-head">
+                  <h2>Inbound Order Stream</h2>
+                  <div class="head-actions">
+                    <button class="btn sm" id="export-csv">↓ Export CSV</button>
+                    <button class="btn" id="pull-orders">⇣ Pull New Orders</button>
+                  </div>
+                </div>
+                <div id="ingest-feed" class="ingest-feed"></div>
+              </div>
             </div>
           </div>
-        </div>
-
-        <div class="card">
-          <div class="card-head">
-            <h2>Inbound Order Stream</h2>
-            <div class="head-actions">
-              <button class="btn sm" id="export-csv">↓ Export CSV</button>
-              <button class="btn" id="pull-orders">⇣ Pull New Orders</button>
-            </div>
-          </div>
-          <div id="ingest-feed" class="ingest-feed"></div>
         </div>
       </section>
 
@@ -418,62 +432,75 @@
 
       <!-- ============ SETTINGS ============ -->
       <section class="view" id="view-settings">
-        <div class="grid-2">
-          <div class="card">
-            <div class="card-head"><h2>Company Profile</h2><span class="muted">Printed on labels &amp; manifests</span></div>
-            <form id="settings-form" class="order-form">
-              <div class="ff"><label>Company name</label><input name="name" id="set-name" /></div>
-              <div class="ff"><label>Address</label><input name="address" id="set-address" /></div>
-              <div class="ff-row">
-                <div class="ff"><label>Phone</label><input name="phone" id="set-phone" /></div>
-                <div class="ff"><label>Email</label><input name="email" id="set-email" /></div>
-              </div>
-              <div class="ff-row">
-                <div class="ff"><label>Default carrier</label><select name="carrier" id="set-carrier"><option>UPS</option><option>FedEx</option><option>Dayton Freight</option><option>Pitt Ohio</option></select></div>
-                <div class="ff"><label>Default lane</label><select name="lane" id="set-lane"><option>Lane 1</option><option>Lane 2</option><option>Lane 3</option><option>Lane 4</option></select></div>
-              </div>
-              <button class="btn primary" type="submit">Save settings</button>
-            </form>
-          </div>
-          <div class="card">
-            <div class="card-head"><h2>Data Management</h2><span class="muted">This device</span></div>
-            <div class="import-box">
-              <button class="btn" id="backup-json">↓ Export full backup (JSON)</button>
-              <label class="import-drop" for="restore-json">
-                <span class="id-ico">⇪</span><b>Restore from backup</b>
-                <span class="muted small">Replaces all current data with a .json backup</span>
-                <input type="file" id="restore-json" accept=".json,application/json" hidden />
-              </label>
-              <p class="muted small">Data is stored locally in this browser. Export a backup to move it between devices.</p>
-            </div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-head"><h2>Cloud Sync</h2><span class="muted">Share data across devices</span></div>
-          <div class="grid-2">
-            <div class="order-form">
-              <div class="ff"><label>Provider</label>
-                <select id="cloud-provider">
-                  <option value="granite">Granite API (Node server)</option>
-                  <option value="supabase">Supabase</option>
-                </select>
-              </div>
-              <div id="grp-granite">
-                <div class="ff"><label>Server URL <span class="muted small">(blank = this server)</span></label><input id="cloud-url" placeholder="https://your-host.example.com" /></div>
-                <div class="ff"><label>API key (tenant)</label><input id="cloud-key" placeholder="granite-dev-key" /></div>
-              </div>
-              <div id="grp-supabase" style="display:none">
-                <div class="ff"><label>Supabase Project URL</label><input id="cloud-sburl" placeholder="https://xxxx.supabase.co" /></div>
-                <div class="ff"><label>Supabase anon key</label><input id="cloud-sbanon" placeholder="eyJhbGciOi…" /></div>
-                <div class="ff"><label>Workspace / tenant</label><input id="cloud-tenant" placeholder="default" /></div>
+        <div class="tabbed-layout">
+          <nav class="tab-rail">
+            <button class="tab-btn active" data-tab="profile" type="button"><span class="ico">🏢</span> Company Profile</button>
+            <button class="tab-btn" data-tab="data" type="button"><span class="ico">💾</span> Data Management</button>
+            <button class="tab-btn" data-tab="cloud" type="button"><span class="ico">☁</span> Cloud Sync</button>
+          </nav>
+          <div class="tab-panels">
+            <div class="tab-panel active" data-panel="profile">
+              <div class="card">
+                <div class="card-head"><h2>Company Profile</h2><span class="muted">Printed on labels &amp; manifests</span></div>
+                <form id="settings-form" class="order-form">
+                  <div class="ff"><label>Company name</label><input name="name" id="set-name" /></div>
+                  <div class="ff"><label>Address</label><input name="address" id="set-address" /></div>
+                  <div class="ff-row">
+                    <div class="ff"><label>Phone</label><input name="phone" id="set-phone" /></div>
+                    <div class="ff"><label>Email</label><input name="email" id="set-email" /></div>
+                  </div>
+                  <div class="ff-row">
+                    <div class="ff"><label>Default carrier</label><select name="carrier" id="set-carrier"><option>UPS</option><option>FedEx</option><option>Dayton Freight</option><option>Pitt Ohio</option></select></div>
+                    <div class="ff"><label>Default lane</label><select name="lane" id="set-lane"><option>Lane 1</option><option>Lane 2</option><option>Lane 3</option><option>Lane 4</option></select></div>
+                  </div>
+                  <button class="btn primary" type="submit">Save settings</button>
+                </form>
               </div>
             </div>
-            <div class="import-box">
-              <button class="btn primary" id="cloud-push">↑ Push to cloud</button>
-              <button class="btn" id="cloud-pull">↓ Pull from cloud</button>
-              <label class="chk"><input type="checkbox" id="cloud-auto" /> Auto-sync (push on change · pull on load)</label>
-              <div id="cloud-status" class="muted small"></div>
-              <p class="muted small"><b>Supabase:</b> run <code>supabase/schema.sql</code> in your project, then paste the Project URL + anon key. Each workspace/tenant is its own row — works on Netlify with no server.</p>
+            <div class="tab-panel" data-panel="data">
+              <div class="card">
+                <div class="card-head"><h2>Data Management</h2><span class="muted">This device</span></div>
+                <div class="import-box">
+                  <button class="btn" id="backup-json">↓ Export full backup (JSON)</button>
+                  <label class="import-drop" for="restore-json">
+                    <span class="id-ico">⇪</span><b>Restore from backup</b>
+                    <span class="muted small">Replaces all current data with a .json backup</span>
+                    <input type="file" id="restore-json" accept=".json,application/json" hidden />
+                  </label>
+                  <p class="muted small">Data is stored locally in this browser. Export a backup to move it between devices.</p>
+                </div>
+              </div>
+            </div>
+            <div class="tab-panel" data-panel="cloud">
+              <div class="card">
+                <div class="card-head"><h2>Cloud Sync</h2><span class="muted">Share data across devices</span></div>
+                <div class="grid-2">
+                  <div class="order-form">
+                    <div class="ff"><label>Provider</label>
+                      <select id="cloud-provider">
+                        <option value="granite">Granite API (Node server)</option>
+                        <option value="supabase">Supabase</option>
+                      </select>
+                    </div>
+                    <div id="grp-granite">
+                      <div class="ff"><label>Server URL <span class="muted small">(blank = this server)</span></label><input id="cloud-url" placeholder="https://your-host.example.com" /></div>
+                      <div class="ff"><label>API key (tenant)</label><input id="cloud-key" placeholder="granite-dev-key" /></div>
+                    </div>
+                    <div id="grp-supabase" style="display:none">
+                      <div class="ff"><label>Supabase Project URL</label><input id="cloud-sburl" placeholder="https://xxxx.supabase.co" /></div>
+                      <div class="ff"><label>Supabase anon key</label><input id="cloud-sbanon" placeholder="eyJhbGciOi…" /></div>
+                      <div class="ff"><label>Workspace / tenant</label><input id="cloud-tenant" placeholder="default" /></div>
+                    </div>
+                  </div>
+                  <div class="import-box">
+                    <button class="btn primary" id="cloud-push">↑ Push to cloud</button>
+                    <button class="btn" id="cloud-pull">↓ Pull from cloud</button>
+                    <label class="chk"><input type="checkbox" id="cloud-auto" /> Auto-sync (push on change · pull on load)</label>
+                    <div id="cloud-status" class="muted small"></div>
+                    <p class="muted small"><b>Supabase:</b> run <code>supabase/schema.sql</code> in your project, then paste the Project URL + anon key. Each workspace/tenant is its own row — works on Netlify with no server.</p>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -541,6 +568,18 @@
 <!-- Modal -->
 <div class="modal-backdrop" id="modal-backdrop">
   <div class="modal" id="modal"></div>
+</div>
+
+<!-- Confirm dialog (replaces native confirm() for a consistent, app-styled prompt) -->
+<div class="confirm-backdrop" id="confirm-backdrop">
+  <div class="confirm-card" role="alertdialog" aria-modal="true">
+    <h3 id="confirm-title">Are you sure?</h3>
+    <p id="confirm-message"></p>
+    <div class="confirm-actions">
+      <button class="btn block" id="confirm-cancel" type="button">Cancel</button>
+      <button class="btn primary block" id="confirm-ok" type="button">Confirm</button>
+    </div>
+  </div>
 </div>
 
 <!-- Toasts -->

@@ -1,15 +1,10 @@
-/* Granite Logistics — landing page: PWA install, tracking deep-link, hero label barcode. */
+/* Granite Logistics — landing page: PWA install, tracking deep-link. */
 (function () {
   "use strict";
   var $ = function (s) { return document.querySelector(s); };
 
   // Year
   var y = $("#year"); if (y) y.textContent = new Date().getFullYear();
-
-  // Render a real Code 128 barcode on the hero shipping label
-  if (window.Code128) {
-    $("#hero-barcode").innerHTML = Code128.toSVG("GL10428861US", { height: 74, moduleWidth: 1.9 });
-  }
 
   // ---- Toast helper ----
   function toast(msg) {
