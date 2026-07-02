@@ -8,13 +8,13 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="Granite" />
-<title>Track a Shipment — Granite Logistics</title>
-<meta name="description" content="Track your Granite Logistics shipment — real-time status, ETA, and proof of delivery from pickup to your doorstep." />
+<title>Track a Shipment: Granite Logistics</title>
+<meta name="description" content="Track your Granite Logistics shipment with real-time status, ETA, and proof of delivery from pickup to your doorstep." />
 <link rel="canonical" href="https://usegl.com/track.html" />
 <meta name="robots" content="index, follow" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="Granite Logistics" />
-<meta property="og:title" content="Track a Shipment — Granite Logistics" />
+<meta property="og:title" content="Track a Shipment: Granite Logistics" />
 <meta property="og:description" content="Real-time shipment tracking with status, ETA, and proof of delivery." />
 <meta property="og:url" content="https://usegl.com/track.html" />
 <meta property="og:image" content="https://usegl.com/assets/og-image.png" />
@@ -124,9 +124,9 @@
     var lastTs = p.history.length ? p.history[p.history.length - 1].ts : Date.now();
     var eta;
     if (deliveredTs) eta = "Delivered " + fmt(deliveredTs);
-    else if (p.promisedTs && p.promisedTs < Date.now()) eta = "Delayed — was due " + fmt(p.promisedTs);
+    else if (p.promisedTs && p.promisedTs < Date.now()) eta = "Delayed, was due " + fmt(p.promisedTs);
     else eta = "Est. delivery " + fmt(p.promisedTs || (lastTs + (4 - step) * 86400000 + 86400000));
-    var excHtml = p.exception ? '<div class="tk-exc">⚠ Delivery exception: ' + p.exception.type + (p.exception.note ? ' — ' + p.exception.note : '') + '</div>' : "";
+    var excHtml = p.exception ? '<div class="tk-exc">⚠ Delivery exception: ' + p.exception.type + (p.exception.note ? ' (' + p.exception.note + ')' : '') + '</div>' : "";
     var steps = STEPS.map(function (s, i) {
       return '<div class="tk-step ' + (i < step ? "done" : i === step ? "cur" : "") + '"><span class="tk-dot"></span><span class="tk-lbl">' + s + '</span></div>';
     }).join("");

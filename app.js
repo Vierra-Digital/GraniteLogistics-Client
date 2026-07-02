@@ -1,4 +1,4 @@
-/* Granite Logistics — Enterprise Demo App
+/* Granite Logistics: Enterprise Demo App
  * Single-page, dependency-free. Drives the full Auction Win -> Delivery Confirmed journey
  * with simulated e-commerce + UPS/FedEx integrations and a real Code 128 chain of custody. */
 (function () {
@@ -119,7 +119,7 @@
       source: d.source || "Manual Entry",
       orderRef: "#" + (10000 + rng(89999)),
       customer: {
-        name: (d.name || "—").trim(),
+        name: (d.name || "–").trim(),
         address: (d.address || "").trim(),
         city: (d.city || "").trim(),
         state: (d.state || "").trim().toUpperCase(),
@@ -161,7 +161,7 @@
         reader.onerror = function () { finish(null); };
         reader.readAsDataURL(f);
       };
-      // If the picker is dismissed (no file), the window regains focus — resolve null.
+      // If the picker is dismissed (no file), the window regains focus. Resolve null.
       var onFocus = function () {
         setTimeout(function () { if (!settled && (!photoInput.files || !photoInput.files.length)) finish(null); }, 700);
       };
@@ -263,8 +263,8 @@
     // Seed a realistic exception + an SLA breach so the Alerts panel demos well
     var inflight = state.packages.filter(function (p) { return p.status === "InTransit" || p.status === "OutforDelivery"; });
     if (inflight[0]) {
-      inflight[0].exception = { type: "Address Issue", note: "Suite number missing — courier follow-up", ts: Date.now() - 3600000 };
-      state.events.unshift({ ts: inflight[0].exception.ts, pkgId: inflight[0].id, who: inflight[0].customer.name, kind: "exception", note: "Exception: Address Issue — Suite number missing" });
+      inflight[0].exception = { type: "Address Issue", note: "Suite number missing, courier follow-up requested", ts: Date.now() - 3600000 };
+      state.events.unshift({ ts: inflight[0].exception.ts, pkgId: inflight[0].id, who: inflight[0].customer.name, kind: "exception", note: "Exception: Address Issue (Suite number missing)" });
     }
     if (inflight[1]) inflight[1].promisedTs = Date.now() - 7200000; // past due → SLA Late
     var dlv = state.packages.filter(function (p) { return p.status === "Delivered"; });
@@ -312,14 +312,14 @@
   var VIEW_META = {
     order: ["Place an Order", "Create a new shipment and track it from pickup to delivery."],
     overview: ["Executive Overview", "Real-time visibility from auction win to delivery confirmation."],
-    ingest: ["Order Ingest", "Orders pulled directly from client commerce backends — zero manual entry."],
+    ingest: ["Order Ingest", "Orders pulled directly from client commerce backends. Zero manual entry."],
     runner: ["Runner Dashboard", "Daily pickups, condition photos, and label generation."],
     presort: ["Pre-Sort & Staging", "ZIP pre-sort and load-ready consolidation before carrier handoff."],
     batch: ["Batch & Lane Routing", "Group items into carrier manifests and assign dock lanes."],
     driver: ["Driver Scan", "Scan a label to retrieve destination details instantly."],
     home: ["Home", "Your tasks at a glance."],
     tracking: ["Chain of Custody", "Tamper-evident, end-to-end package history."],
-    returns: ["Returns", "Reverse logistics — manage return requests through to receipt."],
+    returns: ["Returns", "Reverse logistics: manage return requests through to receipt."],
     reports: ["Reports & Analytics", "Operational metrics computed from your live data."],
     activity: ["Activity Log", "Tamper-evident audit trail of every event, newest first."],
     settings: ["Settings", "Company profile, defaults, and data management."]
@@ -387,7 +387,7 @@
   }
   // If the mobile drawer is left open and the viewport then grows past the
   // nav-mode breakpoint (window resize, or browser/OS zoom changing the
-  // effective layout width), force it closed — otherwise the sidebar and its
+  // effective layout width), force it closed. Otherwise the sidebar and its
   // dark backdrop can linger fixed on top of the now-desktop layout.
   (function () {
     var lastWide = window.innerWidth > 980;
@@ -424,7 +424,7 @@
   function localUsersSave(u) { try { localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(u)); } catch (e) { } }
   function localRegister(name, email, pw, role) {
     var u = localUsers(); email = (email || "").toLowerCase();
-    if (u[email]) return { ok: false, error: "That account already exists — sign in instead." };
+    if (u[email]) return { ok: false, error: "That account already exists. Sign in instead." };
     u[email] = { pw: pw, name: name || email.split("@")[0], role: role }; localUsersSave(u);
     authSave({ token: "local", user: { email: email, name: u[email].name, role: role } });
     return { ok: true, offline: true };
@@ -451,7 +451,7 @@
   function renderLoginMode() {
     var reg = loginMode === "register";
     $("#login-title").textContent = reg ? "Create your account" : "Sign in";
-    $("#login-sub").textContent = reg ? "Set up your account to place and track orders." : "Welcome back — sign in to see your orders.";
+    $("#login-sub").textContent = reg ? "Set up your account to place and track orders." : "Welcome back. Sign in to see your orders.";
     $("#login-name-field").style.display = reg ? "" : "none";
     $("#login-role-field").style.display = "none";
     $("#login-submit").textContent = reg ? "Create account" : "Sign in";
@@ -493,7 +493,7 @@
       .then(function (r) {
         if (r.status === 401) {
           logoutUser();
-          if (typeof toast === "function") toast("Your session expired — please sign in again.", "ok");
+          if (typeof toast === "function") toast("Your session expired. Please sign in again.", "ok");
           showLogin();
           return null;
         }
@@ -502,7 +502,7 @@
       .then(function (j) {
         if (j && j.ok && j.user) { authSave({ token: a.token, user: j.user }); updateRoleUI(); }
       })
-      .catch(function () { /* offline / backend unreachable — keep the cached session */ });
+      .catch(function () { /* offline / backend unreachable: keep the cached session */ });
   }
   function enterApp() {
     var u = currentUser();
@@ -533,12 +533,12 @@
     var list = [];
     state.packages.forEach(function (p) {
       if (p.exception) list.push({ kind: "exc", ts: p.exception.ts, pkgId: p.id, title: p.exception.type, sub: p.id + " · " + p.customer.name });
-      else if (p.status !== "Delivered" && slaStatus(p) === "Late") list.push({ kind: "sla", ts: p.promisedTs, pkgId: p.id, title: "SLA breach — past promised delivery", sub: p.id + " · " + p.customer.name });
+      else if (p.status !== "Delivered" && slaStatus(p) === "Late") list.push({ kind: "sla", ts: p.promisedTs, pkgId: p.id, title: "SLA breach: past promised delivery", sub: p.id + " · " + p.customer.name });
     });
     list.sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
     return list;
   }
-  // Customers get their own bell — updates on their own orders, not ops-wide alerts.
+  // Customers get their own bell: updates on their own orders, not ops-wide alerts.
   // "Seen" state is tracked per-account in localStorage so the badge clears once opened.
   function custNotifSeenKey(email) { return "gl-notifs-seen:" + email; }
   function getNotifSeenTs(email) { try { return parseInt(localStorage.getItem(custNotifSeenKey(email)) || "0", 10) || 0; } catch (e) { return 0; } }
@@ -548,7 +548,7 @@
     state.packages.forEach(function (p) {
       if (p.customerEmail !== email) return;
       (p.history || []).forEach(function (h, i) {
-        if (i === 0) return; // skip "order placed" — that's the confirmation screen, not a notification
+        if (i === 0) return; // the first entry ("order placed") is covered by the confirmation screen, not a notification
         var label = (CUST_STATUS[h.stage] || STAGE_LABEL[h.stage] || h.stage).toLowerCase();
         list.push({ ts: h.ts, pkgId: p.id, exc: false, title: "Your " + p.item.description + " is " + label });
       });
@@ -572,7 +572,7 @@
       (list.length ? list.slice(0, 15).map(function (n) {
         return '<div class="notif-item' + (n.ts > seenTs ? " unread" : "") + '" data-open="' + n.pkgId + '"><span class="notif-ico ' + (n.exc ? "exc" : "ok") + '">' + (n.exc ? "⚠" : "📦") + '</span>' +
           '<div class="notif-main"><b>' + n.title + '</b><div class="notif-time">' + fmtTime(n.ts) + '</div></div></div>';
-      }).join("") : '<div class="notif-empty">No updates yet — place an order to start tracking it here.</div>');
+      }).join("") : '<div class="notif-empty">No updates yet. Place an order to start tracking it here.</div>');
     $$("#notif-panel [data-open]").forEach(function (b) { b.addEventListener("click", function () { closeNotif(); openCustomerOrder(b.dataset.open); }); });
   }
   function renderNotifs() {
@@ -585,7 +585,7 @@
       (list.length ? list.map(function (n) {
         return '<div class="notif-item" data-open="' + n.pkgId + '"><span class="notif-ico ' + n.kind + '">' + (n.kind === "exc" ? "⚠" : "⏱") + '</span>' +
           '<div class="notif-main"><b>' + n.title + '</b><div class="notif-time">' + n.sub + '</div></div></div>';
-      }).join("") : '<div class="notif-empty">✓ All clear — no open exceptions or SLA breaches.</div>');
+      }).join("") : '<div class="notif-empty">✓ All clear. No open exceptions or SLA breaches.</div>');
     $$("#notif-panel [data-open]").forEach(function (b) { b.addEventListener("click", function () { closeNotif(); openPackage(b.dataset.open); }); });
   }
   function toggleNotif() { var p = $("#notif-panel"); if (p) p.classList.toggle("open"); }
@@ -613,7 +613,7 @@
       state.packages.filter(function (p) {
         return (p.id + " " + p.customer.name + " " + p.customer.city + " " + p.item.description).toLowerCase().indexOf(q) >= 0;
       }).slice(0, 6).forEach(function (p) {
-        cmdItems.push({ type: "pkg", id: p.id, label: p.id + " · " + p.item.description, sub: p.customer.name + " — " + STAGE_LABEL[p.status] });
+        cmdItems.push({ type: "pkg", id: p.id, label: p.id + " · " + p.item.description, sub: p.customer.name + " · " + STAGE_LABEL[p.status] });
       });
     }
     cmdItems = cmdItems.slice(0, 12); cmdSel = 0; drawCmd();
@@ -673,7 +673,7 @@
   function myOrdersPost(payload) {
     return fetch("/api/my-orders", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + authToken() }, body: JSON.stringify(payload) }).then(function (r) { return r.json(); });
   }
-  // Replace this customer's orders in local state with the authoritative server list —
+  // Replace this customer's orders in local state with the authoritative server list,
   // but keep any orders still waiting to sync (placed while offline) so a server pull
   // never silently erases them before they've had a chance to reach the server.
   function mergeCustomerOrders(serverOrders, email) {
@@ -682,8 +682,8 @@
     state.packages = state.packages.filter(function (p) { return p.customerEmail !== email; }).concat(serverOrders).concat(pending);
     save();
   }
-  // Retry any orders that were placed while offline (or the API was unreachable) —
-  // once one lands on the server, drop the local placeholder and re-merge.
+  // Retry any orders that were placed while offline (or the API was unreachable).
+  // Once one lands on the server, drop the local placeholder and re-merge.
   function syncPendingOrders(email) {
     if (!email || !hasServerAuth()) return;
     var pending = state.packages.filter(function (p) { return p.customerEmail === email && p.pendingSync; });
@@ -698,8 +698,8 @@
         mergeCustomerOrders(j.orders, email);
         renderCustomerOrderList(email);
         renderNotifs();
-        toast("Synced an offline order — now tracking " + j.order.id, "ok");
-      }).catch(function () { /* still offline — will retry next time this view loads */ });
+        toast("Synced an offline order. Now tracking " + j.order.id, "ok");
+      }).catch(function () { /* still offline. Will retry next time this view loads. */ });
     });
   }
   function renderOrder() {
@@ -712,7 +712,7 @@
     if (email && hasServerAuth()) {
       myOrdersGet().then(function (j) {
         if (j && j.ok) { mergeCustomerOrders(j.orders, email); renderCustomerOrderList(email); renderNotifs(); syncPendingOrders(email); }
-      }).catch(function () { /* offline — keep local view */ });
+      }).catch(function () { /* offline. Keep local view. */ });
     }
   }
   function renderCustomerOrderList(email) {
@@ -774,13 +774,13 @@
     return true;
   }
   function buildReview() {
-    var addr = [stepVal("address"), stepVal("city"), stepVal("state").toUpperCase(), stepVal("zip")].filter(Boolean).join(", ") || "—";
+    var addr = [stepVal("address"), stepVal("city"), stepVal("state").toUpperCase(), stepVal("zip")].filter(Boolean).join(", ") || "–";
     var rows = [
-      ["Item", stepVal("item") || "—"],
-      ["Declared value", stepVal("value") ? "$" + stepVal("value") : "—"],
-      ["Recipient", stepVal("name") || "—"],
+      ["Item", stepVal("item") || "–"],
+      ["Declared value", stepVal("value") ? "$" + stepVal("value") : "–"],
+      ["Recipient", stepVal("name") || "–"],
       ["Address", addr],
-      ["Phone", stepVal("phone") || "—"]
+      ["Phone", stepVal("phone") || "–"]
     ];
     var rs = $("#review-summary");
     if (rs) rs.innerHTML = rows.map(function (r) { return '<div><dt>' + r[0] + '</dt><dd>' + r[1] + '</dd></div>'; }).join("");
@@ -794,7 +794,7 @@
     set("city", "Columbus"); set("state", "OH"); set("zip", "43004"); set("phone", "(614) 555-0142");
     gotoStep(1);
     var card = $("#order-form-card"); if (card && card.scrollIntoView) card.scrollIntoView({ behavior: "smooth", block: "start" });
-    toast("Sample order filled in — review the steps and place it, or edit any field.", "ok");
+    toast("Sample order filled in. Review the steps and place it, or edit any field.", "ok");
   }
   var custForm = $("#cust-order-form");
   if (custForm) {
@@ -815,12 +815,12 @@
       var u = (typeof currentUser === "function") ? currentUser() : null;
       var email = u ? u.email : null;
       var payload = {
-        name: v("name") || (u && u.name) || "—", item: v("item"), value: v("value"),
+        name: v("name") || (u && u.name) || "–", item: v("item"), value: v("value"),
         address: v("address"), city: v("city"), state: v("state"), zip: v("zip"), phone: v("phone")
       };
-      var finish = function (p) { form.reset(); renderCustomerOrderList(email); showOrderSuccess(p); toast(p.pendingSync ? "Order saved — we'll sync it once you're back online." : "Order placed — tracking " + p.id, "ok"); };
+      var finish = function (p) { form.reset(); renderCustomerOrderList(email); showOrderSuccess(p); toast(p.pendingSync ? "Order saved. We'll sync it once you're back online." : "Order placed. Tracking " + p.id, "ok"); };
       // pendingSync=true means we intended to save this server-side but couldn't reach
-      // the API — it's kept and retried (see syncPendingOrders) instead of being lost.
+      // the API. It's kept and retried (see syncPendingOrders) instead of being lost.
       var placeLocal = function (pendingSync) {
         var p = makeOrderFrom(Object.assign({ source: "Customer Order" }, payload));
         p.customerEmail = email;
@@ -894,7 +894,7 @@
     $("#overview-alerts").innerHTML = alerts.length ? alerts.map(function (p) {
       var reason = p.exception ? ("Exception · " + p.exception.type) : "SLA breach · past promised delivery";
       return '<div class="alert-row" data-id="' + p.id + '"><span class="alert-dot"></span>' +
-        '<div class="alert-main"><b class="mono">' + p.id + '</b> · ' + p.customer.name + ' — ' + p.customer.city + ', ' + p.customer.state +
+        '<div class="alert-main"><b class="mono">' + p.id + '</b> · ' + p.customer.name + ' · ' + p.customer.city + ', ' + p.customer.state +
         '<div class="alert-reason">' + reason + '</div></div>' +
         '<span class="' + pillClass(p.status) + '">' + STAGE_LABEL[p.status] + '</span></div>';
     }).join("") : '<p class="muted">No open exceptions or SLA breaches. All clear.</p>';
@@ -920,10 +920,10 @@
     var rows = state.packages.slice().sort(function (a, b) { return stageIdx(b.status) - stageIdx(a.status); }).slice(0, 9);
     $("#overview-table").innerHTML =
       '<thead><tr><th>Package</th><th>Customer</th><th>Destination</th><th>Carrier</th><th>Status</th></tr></thead><tbody>' +
-      (rows.length ? "" : '<tr><td colspan="5" class="muted" style="padding:20px;text-align:center">No shipments yet — pull or add orders in Order Ingest.</td></tr>') +
+      (rows.length ? "" : '<tr><td colspan="5" class="muted" style="padding:20px;text-align:center">No shipments yet. Pull or add orders in Order Ingest.</td></tr>') +
       rows.map(function (p) {
         return '<tr data-id="' + p.id + '"><td class="mono">' + p.id + '</td><td>' + p.customer.name +
-          '</td><td>' + p.customer.city + ", " + p.customer.state + '</td><td>' + (p.carrier || "—") +
+          '</td><td>' + p.customer.city + ", " + p.customer.state + '</td><td>' + (p.carrier || "–") +
           '</td><td><span class="' + pillClass(p.status) + '">' + STAGE_LABEL[p.status] + '</span></td></tr>';
       }).join("") + '</tbody>';
     $$("#overview-table tr[data-id]").forEach(function (tr) {
@@ -967,10 +967,10 @@
         if (!Array.isArray(s.packages)) throw new Error("bad state");
         state.packages = s.packages; state.manifests = s.manifests || []; state.loadUnits = s.loadUnits || []; state.events = s.events || [];
         save();
-        if (st) st.textContent = "✓ Inbound order received via API — " + order.item + " → " + order.name;
+        if (st) st.textContent = "✓ Inbound order received via API: " + order.item + " → " + order.name;
         toast("Inbound order ingested via webhook", "api"); renderIngest();
       })
-      .catch(function () { if (st) st.textContent = "✕ Backend unreachable — run server/server.js, or set a Cloud Sync URL in Settings."; toast("Webhook backend unreachable", "ok"); });
+      .catch(function () { if (st) st.textContent = "✕ Backend unreachable. Run server/server.js, or set a Cloud Sync URL in Settings."; toast("Webhook backend unreachable", "ok"); });
   }
   function renderFeed() {
     var recent = state.packages.slice().reverse().slice(0, 8);
@@ -1000,7 +1000,7 @@
           ? '<span class="pill st-Intake">Labeled</span> <button class="btn ok sm" data-pickup="' + p.id + '">Photo &amp; Bin</button>'
           : '<button class="btn primary sm" data-label="' + p.id + '">Generate Label</button>') +
         '</div>';
-    }).join("") : '<p class="muted">All caught up — no items awaiting pickup.</p>';
+    }).join("") : '<p class="muted">All caught up. No items awaiting pickup.</p>';
 
     $$("#runner-list button[data-label]").forEach(function (b) {
       b.addEventListener("click", function () { generateLabel(b.dataset.label); });
@@ -1133,7 +1133,7 @@
     var m = state.manifests.find(function (x) { return x.id === id; }); if (!m) return;
     var ps = manifestPkgs(m);
     $("#print-root").innerHTML =
-      '<div class="pmanifest"><div class="pl-h">' + companyName().toUpperCase() + ' — OUTBOUND MANIFEST</div>' +
+      '<div class="pmanifest"><div class="pl-h">' + companyName().toUpperCase() + ' &middot; OUTBOUND MANIFEST</div>' +
       '<div class="pl-sub">' + m.id + ' &middot; ' + m.carrier + ' &middot; ' + m.lane + ' &middot; ' + fmtTime(m.ts) + '</div>' +
       '<table class="pm-tbl"><thead><tr><th>#</th><th>Package</th><th>Destination</th><th>Item</th></tr></thead><tbody>' +
       ps.map(function (p, i) {
@@ -1322,15 +1322,15 @@
   function cloudPush() {
     saveCloudInputs(); cloudStatus("Pushing…"); cloudBusy(true);
     pushState().then(function (o) { cloudStatus("✓ Pushed " + o.count + " packages · " + new Date().toLocaleTimeString()); toast("Pushed to cloud", "api"); })
-      .catch(function (e) { cloudStatus("✕ Push failed — " + (e.message || "unreachable")); toast("Push failed", "ok"); })
+      .catch(function (e) { cloudStatus("✕ Push failed: " + (e.message || "unreachable")); toast("Push failed", "ok"); })
       .finally(function () { cloudBusy(false); });
   }
   function cloudPull() {
     saveCloudInputs(); cloudStatus("Pulling…"); cloudBusy(true);
     pullState().then(function (s) {
       if (applyPulled(s)) { cocSelected = null; trackQuery = ""; cloudStatus("✓ Pulled " + state.packages.length + " packages · " + new Date().toLocaleTimeString()); toast("Pulled from cloud", "api"); applyRole(); go(allowedViews()[0]); }
-      else { cloudStatus("No data found for this workspace yet — push first."); }
-    }).catch(function (e) { cloudStatus("✕ Pull failed — " + (e.message || "unreachable")); toast("Pull failed", "ok"); })
+      else { cloudStatus("No data found for this workspace yet. Push first."); }
+    }).catch(function (e) { cloudStatus("✕ Pull failed: " + (e.message || "unreachable")); toast("Pull failed", "ok"); })
       .finally(function () { cloudBusy(false); });
   }
   function syncProviderUI() {
@@ -1341,7 +1341,7 @@
   }
 
   // ---- Operational logistics: ZIP pre-sort, palletization, transmission ----
-  function zoneOf(p) { return (p.customer.zip || "").replace(/[^0-9]/g, "").slice(0, 3) || "—"; }
+  function zoneOf(p) { return (p.customer.zip || "").replace(/[^0-9]/g, "").slice(0, 3) || "–"; }
   function recommendedLane(zone) {
     var n = 0; for (var i = 0; i < zone.length; i++) n += zone.charCodeAt(i);
     return "Lane " + (1 + (n % 4));
@@ -1370,7 +1370,7 @@
     var zones = {};
     loose.forEach(function (p) { p.sortZone = zoneOf(p); p.presortLane = recommendedLane(p.sortZone); zones[p.sortZone] = 1; });
     save();
-    toast("Pre-sorted " + loose.length + " parcels into " + Object.keys(zones).length + " ZIP zones — hub bypass enabled.", "ok");
+    toast("Pre-sorted " + loose.length + " parcels into " + Object.keys(zones).length + " ZIP zones. Hub bypass enabled.", "ok");
     renderPresort();
   });
 
@@ -1436,7 +1436,7 @@
   function renderDriver() {
     var scannable = state.packages.filter(function (p) { return p.status === "Staged" || p.status === "InTransit" || p.status === "OutforDelivery"; });
     $("#scan-select").innerHTML = scannable.map(function (p) {
-      return '<option value="' + p.id + '">' + p.id + " — " + p.item.description + " (" + STAGE_LABEL[p.status] + ")</option>";
+      return '<option value="' + p.id + '">' + p.id + " · " + p.item.description + " (" + STAGE_LABEL[p.status] + ")</option>";
     }).join("") || '<option value="">No packages staged</option>';
     $("#scan-result").innerHTML = '<p class="muted">Scan a label to retrieve package details.</p>';
   }
@@ -1452,14 +1452,14 @@
     }
     if (next === "Delivered") p.photos.delivery = placeholderPhoto(p.item.description, "DELIVERED", "#15803d");
     advance(p, next);
-    var actionLabel = next === "InTransit" ? "Picked up — In Transit" : next === "OutforDelivery" ? "Out for Delivery" : "Delivered (photo captured)";
+    var actionLabel = next === "InTransit" ? "Picked Up (In Transit)" : next === "OutforDelivery" ? "Out for Delivery" : "Delivered (photo captured)";
     toast(p.id + " → " + actionLabel, "ok");
     $("#scan-result").innerHTML =
       field("Package", p.id, true) + field("Item", p.item.description) +
       field("Deliver To", p.customer.name) +
       field("Address", p.customer.address + ", " + p.customer.city + ", " + p.customer.state + " " + p.customer.zip) +
-      field("Carrier", (p.carrier || "—") + (p.lane ? " · " + p.lane : "")) +
-      field("Tracking", p.tracking || "—", true) +
+      field("Carrier", (p.carrier || "–") + (p.lane ? " · " + p.lane : "")) +
+      field("Tracking", p.tracking || "–", true) +
       field("New Status", STAGE_LABEL[p.status]) +
       '<div style="margin-top:12px"><button class="btn sm" data-open="' + p.id + '">View Chain of Custody</button></div>';
     var btn = $("#scan-result [data-open]");
@@ -1552,7 +1552,7 @@
         (trackSelectMode ? '<input type="checkbox" class="tk-check"' + (trackSelect[p.id] ? ' checked' : '') + ' />' : '') +
         '<div class="ri-main">' +
         '<div class="ri-title">' + p.id + " · " + p.item.description + (p.exception ? ' <span class="pill sla-late">exception</span>' : '') + '</div>' +
-        '<div class="ri-sub">' + p.customer.name + " — " + p.customer.city + ", " + p.customer.state + '</div></div>' +
+        '<div class="ri-sub">' + p.customer.name + " · " + p.customer.city + ", " + p.customer.state + '</div></div>' +
         '<span class="' + pillClass(p.status) + '">' + STAGE_LABEL[p.status] + '</span>' + slaPillHtml(p) + '</div>';
     }).join("") : '<p class="muted">No packages match “' + trackQuery + '”.</p>';
     $$("#tracking-list .row-item").forEach(function (el) {
@@ -1575,7 +1575,7 @@
   function renderCoc(id) {
     var p = getPkg(id);
     var cur = stageIdx(p.status);
-    $("#coc-title").textContent = "Chain of Custody — " + p.id;
+    $("#coc-title").textContent = "Chain of Custody: " + p.id;
     var meta = '<div class="coc-meta">' +
       '<span class="chip">Source: ' + p.source + '</span>' +
       (p.carrier ? '<span class="chip">Carrier: ' + p.carrier + '</span>' : "") +
@@ -1621,7 +1621,7 @@
         '<div class="pickup-list">' + (stops.length ? stops.map(function (p) {
           var act = p.status === "InTransit" ? "Out for Delivery →" : "Mark Delivered ✓";
           return '<div class="row-item" data-open="' + p.id + '"><div class="ri-main"><div class="ri-title">' + p.id + ' · ' + p.item.description +
-            (p.exception ? ' <span class="pill sla-late">exception</span>' : '') + '</div><div class="ri-sub">' + p.customer.name + ' — ' + p.customer.address + ', ' + p.customer.city + '</div></div>' +
+            (p.exception ? ' <span class="pill sla-late">exception</span>' : '') + '</div><div class="ri-sub">' + p.customer.name + ' · ' + p.customer.address + ', ' + p.customer.city + '</div></div>' +
             '<span class="' + pillClass(p.status) + '">' + STAGE_LABEL[p.status] + '</span> <button class="btn ok sm" data-scan="' + p.id + '">' + act + '</button></div>';
         }).join("") : '<p class="muted">No active stops. Scan a staged label to begin.</p>') + '</div></div>';
     } else {
@@ -1667,7 +1667,7 @@
   }
   function flagException(id) {
     var p = getPkg(id); if (!p) return;
-    modal('<button class="close-x" data-close>×</button><h2>Flag Exception — ' + p.id + '</h2>' +
+    modal('<button class="close-x" data-close>×</button><h2>Flag Exception: ' + p.id + '</h2>' +
       '<form id="exc-form" class="order-form" style="margin-top:12px">' +
       '<div class="ff"><label>Type</label><select name="type"><option>Address Issue</option><option>Damaged in Transit</option><option>Weather Delay</option><option>Failed Delivery Attempt</option><option>Customs / Compliance Hold</option><option>Lost / Mis-sort</option></select></div>' +
       '<div class="ff"><label>Note</label><input name="note" placeholder="Optional details" /></div>' +
@@ -1676,7 +1676,7 @@
       e.preventDefault();
       var type = this.elements.namedItem("type").value, note = this.elements.namedItem("note").value.trim();
       p.exception = { type: type, note: note, ts: Date.now() };
-      logEvent(p, "exception", "Exception: " + type + (note ? " — " + note : ""));
+      logEvent(p, "exception", "Exception: " + type + (note ? " (" + note + ")" : ""));
       save(); toast("Exception flagged on " + p.id + ": " + type, "ok"); closeModal(); renderAll();
     });
   }
@@ -1691,7 +1691,7 @@
   function returnPillClass(st) { return st === "Received" ? "pill sla-ok" : st === "In Transit" ? "pill st-InTransit" : "pill sla-risk"; }
   function initiateReturn(id) {
     var p = getPkg(id); if (!p) return;
-    modal('<button class="close-x" data-close>×</button><h2>Initiate Return — ' + p.id + '</h2>' +
+    modal('<button class="close-x" data-close>×</button><h2>Initiate Return: ' + p.id + '</h2>' +
       '<p class="muted">' + p.item.description + ' → ' + p.customer.name + '</p>' +
       '<form id="ret-form" class="order-form" style="margin-top:12px">' +
       '<div class="ff"><label>Reason</label><select name="reason"><option>Damaged / Defective</option><option>Wrong Item</option><option>No Longer Wanted</option><option>Did Not Arrive</option><option>Other</option></select></div>' +
@@ -1701,7 +1701,7 @@
       e.preventDefault();
       var reason = this.elements.namedItem("reason").value, note = this.elements.namedItem("note").value.trim();
       p.return = { status: "Requested", reason: reason, note: note, ts: Date.now() };
-      logEvent(p, "return", "Return requested: " + reason + (note ? " — " + note : ""));
+      logEvent(p, "return", "Return requested: " + reason + (note ? " (" + note + ")" : ""));
       save(); toast("Return created for " + p.id, "ok"); closeModal(); renderAll();
     });
   }
@@ -1720,7 +1720,7 @@
     el.innerHTML = rets.length ? rets.map(function (p) {
       var st = p.return.status;
       return '<div class="row-item"><div class="ri-main"><div class="ri-title">' + p.id + ' · ' + p.item.description + '</div>' +
-        '<div class="ri-sub">' + p.customer.name + ' · ' + p.return.reason + (p.return.note ? ' — ' + p.return.note : '') + '</div></div>' +
+        '<div class="ri-sub">' + p.customer.name + ' · ' + p.return.reason + (p.return.note ? ' (' + p.return.note + ')' : '') + '</div></div>' +
         '<span class="' + returnPillClass(st) + '">' + st + '</span>' +
         (st !== "Received" ? ' <button class="btn ok sm" data-radv="' + p.id + '">Advance →</button>' : '') +
         ' <button class="btn sm" data-ropen="' + p.id + '">Open</button></div>';
@@ -1746,15 +1746,15 @@
       '<button class="close-x" data-close>×</button>' +
       '<span class="' + pillClass(p.status) + '">' + STAGE_LABEL[p.status] + '</span>' + slaPillHtml(p) +
       (p.return ? ' <span class="' + returnPillClass(p.return.status) + '">↩ Return: ' + p.return.status + '</span>' : '') +
-      (p.exception ? '<div class="exc-banner">⚠ ' + p.exception.type + (p.exception.note ? ' — ' + p.exception.note : '') + '</div>' : '') +
-      '<h2 style="margin-top:8px">' + p.id + " — " + p.item.description + '</h2>' +
+      (p.exception ? '<div class="exc-banner">⚠ ' + p.exception.type + (p.exception.note ? ' (' + p.exception.note + ')' : '') + '</div>' : '') +
+      '<h2 style="margin-top:8px">' + p.id + ": " + p.item.description + '</h2>' +
       '<p class="muted">' + p.source + " · order " + p.orderRef + " · " + money(p.item.value) + '</p>' +
       '<div class="modal-grid"><div>' +
       field("Customer", p.customer.name) +
       field("Address", p.customer.address + ", " + p.customer.city + ", " + p.customer.state + " " + p.customer.zip) +
       field("Phone", p.customer.phone) +
-      field("Carrier", (p.carrier || "—") + (p.lane ? " · " + p.lane : "")) +
-      field("Tracking", p.tracking || "—", true) +
+      field("Carrier", (p.carrier || "–") + (p.lane ? " · " + p.lane : "")) +
+      field("Tracking", p.tracking || "–", true) +
       '<div style="margin-top:14px">' + Code128.toSVG(p.barcode, { height: 60, moduleWidth: 1.6 }) +
       '<div class="mono small" style="text-align:center">' + p.barcode + '</div></div>' +
       '</div><div><h2 style="font-size:.95rem;margin-bottom:10px">Chain of Custody</h2>' + tl + photos + '</div></div>' +
@@ -1783,7 +1783,7 @@
     });
   }
 
-  // Customer-facing order tracker — a clean status timeline, none of the ops controls.
+  // Customer-facing order tracker: a clean status timeline, none of the ops controls.
   function custEta(p) {
     if (p.status === "Delivered") {
       var d = p.history.find(function (h) { return h.stage === "Delivered"; });
@@ -1868,7 +1868,7 @@
   $("#modal-backdrop").addEventListener("click", function (e) { if (e.target === $("#modal-backdrop")) closeModal(); });
   document.addEventListener("keydown", function (e) { if (e.key !== "Escape") return; closeModal(); closeConfirmDialog(); closeGate(); closeAccountMenu(); closeNotif(); closeWelcomeTour(); });
 
-  // Lightweight, app-styled confirmation prompt — replaces native window.confirm()
+  // Lightweight, app-styled confirmation prompt. Replaces native window.confirm()
   // so destructive actions (delete, reset, sign out) look consistent everywhere.
   var confirmActive = null;
   function confirmDialog(opts) {
@@ -1919,16 +1919,16 @@
     var p = makePackage(0);
     state.packages.push(p); save();
     go("tracking"); cocSelected = p.id;
-    toast("Live demo — " + p.customer.name + " just won an auction. Watch it reach the doorstep.", "api");
+    toast("Live demo: " + p.customer.name + " just won an auction. Watch it reach the doorstep.", "api");
 
     var steps = [
-      { v: "ingest", t: "Auction won — order pulled via API from " + p.source, k: "api", act: function () { } },
+      { v: "ingest", t: "Auction won. Order pulled via API from " + p.source, k: "api", act: function () { } },
       { v: "runner", t: "Code 128 label generated & printed", k: "ok", act: function () { advance(p, "Intake"); } },
       { v: "runner", t: "Condition photo captured · item binned", k: "ok", act: function () { p.photos.pickup = placeholderPhoto(p.item.description, "PICKUP", "#1d4ed8"); advance(p, "PickedUp"); } },
       { v: "batch", t: "Batched to " + (p.carrier = "UPS") + " manifest · Lane 2", k: "ok", act: function () { p.lane = "Lane 2"; p.batchId = "BATCH-" + (700 + rng(299)); advance(p, "Staged"); } },
       { v: "driver", t: "UPS API: shipment created · tracking issued", k: "api", act: function () { p.tracking = trackingFor("UPS"); advance(p, "InTransit"); } },
       { v: "tracking", t: "Carrier scan: Out for Delivery", k: "ok", act: function () { advance(p, "OutforDelivery"); } },
-      { v: "tracking", t: "Delivered — confirmed with condition photo ✓", k: "ok", act: function () { p.photos.delivery = placeholderPhoto(p.item.description, "DELIVERED", "#15803d"); advance(p, "Delivered"); } }
+      { v: "tracking", t: "Delivered, confirmed with condition photo ✓", k: "ok", act: function () { p.photos.delivery = placeholderPhoto(p.item.description, "DELIVERED", "#15803d"); advance(p, "Delivered"); } }
     ];
 
     var i = 0;
@@ -2025,7 +2025,7 @@
       enterApp();
       if (mode === "register") showWelcomeTour();
       else toast("Signed in", "ok");
-      if (res.offline) toast("Backend unreachable — using a local account on this device.", "ok");
+      if (res.offline) toast("Backend unreachable. Using a local account on this device.", "ok");
     });
   });
   function confirmSignOut() {
@@ -2069,7 +2069,7 @@
   var actSearch = $("#activity-search");
   if (actSearch) actSearch.addEventListener("input", function () { activityQuery = this.value.trim().toLowerCase(); renderActivity(); });
 
-  // Reusable tabbed layout (Settings, Order Ingest, …) — each .tabbed-layout
+  // Reusable tabbed layout (Settings, Order Ingest, and more). Each .tabbed-layout
   // group wires its own .tab-btn clicks to show the matching .tab-panel.
   $$(".tabbed-layout").forEach(function (group) {
     $$(".tab-btn", group).forEach(function (t) {

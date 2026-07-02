@@ -50,8 +50,8 @@ h1,h2{margin:0}
 .main{display:flex;flex-direction:column;min-width:0}
 .topbar{display:flex;align-items:center;gap:16px;padding:max(13px,env(safe-area-inset-top,0px)) 28px 13px;background:rgba(255,255,255,.86);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
 /* .menu-btn is intentionally always hidden: the sidebar is permanently visible on
-   desktop, and on mobile the bottom nav's "Menu" tab opens the drawer instead —
-   see the 980px tier below. Kept in markup in case a future layout wants it back. */
+   desktop, and on mobile the bottom nav's "Menu" tab opens the drawer instead.
+   See the 980px tier below. Kept in markup in case a future layout wants it back. */
 .menu-btn{display:none;background:transparent;border:0;font-size:1.4rem;cursor:pointer;color:var(--slate-700);padding:2px 8px;border-radius:8px;line-height:1}
 .menu-btn:hover{background:var(--slate-100)}
 .tb-titles{min-width:0}
@@ -165,7 +165,7 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .card-head h2{font-size:1rem;font-weight:700;letter-spacing:-.01em;color:var(--ink)}
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
 
-/* Reusable tabbed layout — used by Settings, Order Ingest, and anywhere a view
+/* Reusable tabbed layout, used by Settings, Order Ingest, and anywhere a view
    has several independent sections that don't need to be seen side-by-side. */
 .tabbed-layout{display:grid;grid-template-columns:220px 1fr;gap:20px;align-items:start}
 .tab-rail{display:flex;flex-direction:column;gap:3px;background:var(--card);border:1px solid var(--line);
@@ -380,7 +380,7 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 #scan-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none}
 #scan-video.on{display:block}
 
-/* Bottom tab bar (mobile) — base/default state; the 980px tier below turns it on. */
+/* Bottom tab bar (mobile): base/default state; the 980px tier below turns it on. */
 .bottom-nav{display:none}
 .bn-item{flex:1;background:0;border:0;display:flex;flex-direction:column;align-items:center;gap:3px;
   padding:6px 2px;color:var(--slate-500);font-size:.62rem;font-weight:600;cursor:pointer;border-radius:10px;min-width:0;font-family:inherit}
@@ -547,7 +547,7 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .cust-timeline .tl-node.upcoming .tl-stage{color:var(--slate-400);font-weight:600}
 .cust-timeline .tl-node.current .tl-stage{color:var(--blue-d)}
 /* Trim header chrome to a clean, focused customer experience.
-   The alerts bell stays — it's repurposed to show updates on the customer's own orders. */
+   The alerts bell stays. It's repurposed to show updates on the customer's own orders. */
 body[data-role="Customer"] #search-trigger,
 body[data-role="Customer"] #theme-btn,
 body[data-role="Customer"] #run-demo,
@@ -608,20 +608,20 @@ body[data-role="Customer"] #reset-data{display:none}
 .login-body{padding:24px 28px 28px}
 
 /* =====================================================================
-   RESPONSIVE — exactly three tiers, each declared once, placed last so
+   RESPONSIVE: exactly three tiers, each declared once, placed last so
    every override in here reliably wins its cascade tie against the base
    rule it targets. Nothing above this section should contain a
    @media(max-width) rule.
 
-   980px — nav-mode switch: sidebar becomes an off-canvas drawer and the
-           bottom tab bar takes over primary navigation (phones + narrow
-           tablets). The topbar's hamburger stays hidden the whole time —
-           the bottom nav's "Menu" tab is the one and only way to open
-           the drawer, so there is never more than one way to reach it.
-    760px — narrow content grids (Settings/Ingest tabs, the order form)
-            drop from two columns to one for readability.
-    600px — compact phone chrome: condensed header, modals/command
-            palette become bottom sheets, larger touch targets.
+   980px: nav-mode switch. Sidebar becomes an off-canvas drawer and the
+          bottom tab bar takes over primary navigation (phones and narrow
+          tablets). The topbar's hamburger stays hidden the whole time.
+          The bottom nav's "Menu" tab is the one and only way to open
+          the drawer, so there is never more than one way to reach it.
+    760px: narrow content grids (Settings/Ingest tabs, the order form)
+           drop from two columns to one for readability.
+    600px: compact phone chrome. Condensed header, modals/command
+           palette become bottom sheets, larger touch targets.
    ===================================================================== */
 
 @media(max-width:980px){

@@ -1,4 +1,4 @@
-/* Granite Logistics — landing page: PWA install, tracking deep-link. */
+/* Granite Logistics landing page: PWA install, tracking deep-link. */
 (function () {
   "use strict";
   var $ = function (s) { return document.querySelector(s); };
@@ -23,7 +23,7 @@
   var standalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
 
   if (standalone) {
-    // Already installed — repurpose the button to open the platform.
+    // Already installed. Repurpose the button to open the platform.
     installBtn.innerHTML = "Open the Platform &rarr;";
     installBtn.addEventListener("click", function () { window.location.href = "app.html"; });
   } else {
@@ -31,7 +31,7 @@
       e.preventDefault();
       deferredPrompt = e;
       installBtn.classList.add("ready");
-      hint.textContent = "Ready to install — one tap adds Granite Logistics to your device.";
+      hint.textContent = "Ready to install. One tap adds Granite Logistics to your device.";
     });
 
     installBtn.addEventListener("click", function () {
@@ -39,7 +39,7 @@
         deferredPrompt.prompt();
         deferredPrompt.userChoice.then(function (choice) {
           if (choice.outcome === "accepted") toast("Installing Granite Logistics…");
-          else toast("Install dismissed — you can do it anytime.");
+          else toast("Install dismissed. You can do it anytime.");
           deferredPrompt = null;
         });
       } else {
