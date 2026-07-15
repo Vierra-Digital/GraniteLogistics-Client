@@ -18,7 +18,6 @@
 
   // ---- PWA install ----
   var installBtn = $("#install-btn");
-  var hint = $("#install-hint");
   var deferredPrompt = null;
   var standalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
 
@@ -31,7 +30,6 @@
       e.preventDefault();
       deferredPrompt = e;
       installBtn.classList.add("ready");
-      hint.textContent = "Ready to install. One tap adds Granite Logistics to your device.";
     });
 
     installBtn.addEventListener("click", function () {
