@@ -46,7 +46,7 @@ export function makeOrder(d, state) {
   return {
     id, source: d.source || "API", orderRef: d.orderRef || ("#" + (10000 + Math.floor(Math.random() * 89999))),
     customer: {
-      name: (d.name || "—").toString().trim(), address: (d.address || "").toString().trim(),
+      name: (d.name || "–").toString().trim(), address: (d.address || "").toString().trim(),
       city: (d.city || "").toString().trim(), state: (d.state || "").toString().trim().toUpperCase(),
       zip: (d.zip || "").toString().trim(), phone: (d.phone || "").toString().trim(),
     },

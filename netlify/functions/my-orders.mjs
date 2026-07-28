@@ -22,7 +22,7 @@ function makeOrder(d, owner, orders) {
     source: "Customer Order",
     orderRef: "#" + (10000 + Math.floor(Math.random() * 89999)),
     customer: {
-      name: S(d.name) || owner.name || "—",
+      name: S(d.name) || owner.name || "–",
       address: S(d.address), city: S(d.city),
       state: S(d.state).toUpperCase(), zip: S(d.zip), phone: S(d.phone),
     },

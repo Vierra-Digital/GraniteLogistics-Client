@@ -1,4 +1,4 @@
-// GET/PUT the caller's workspace state — Netlify Blobs, key-authed.
+// GET/PUT the caller's workspace state: Netlify Blobs, key-authed.
 import { CORS, json, tenantOf, readState, writeState } from "./_lib.mjs";
 
 export default async (req) => {

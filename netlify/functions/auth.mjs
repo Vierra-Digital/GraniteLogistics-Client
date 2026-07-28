@@ -18,7 +18,7 @@ export default async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
   const s = store();
 
-  // GET — validate the current session token (Authorization: Bearer <token>)
+  // GET: validate the current session token (Authorization: Bearer <token>)
   if (req.method === "GET") {
     const p = verifyToken(bearer(req));
     if (!p) return json({ ok: false, error: "Invalid or expired session" }, 401);
@@ -36,7 +36,7 @@ export default async (req) => {
 
   if (action === "register") {
     const existing = await s.get(email, { type: "json" });
-    if (existing) return json({ ok: false, error: "That account already exists — sign in instead." }, 409);
+    if (existing) return json({ ok: false, error: "That account already exists. Sign in instead." }, 409);
     const salt = crypto.randomBytes(16).toString("hex");
     const role = VALID_ROLES.includes(d.role) ? d.role : "Customer";
     const name = String(d.name || "").trim() || email.split("@")[0];
