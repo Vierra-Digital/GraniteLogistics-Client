@@ -69,7 +69,7 @@
       <div class="w-slide" data-slide="3">
         <div class="w-ico">🔔</div>
         <h2>We'll keep you posted</h2>
-        <p>Follow every order under "Your orders," and the bell up top lights up the moment something changes, like when it's out for delivery.</p>
+        <p>Check in anytime from Home or the Orders tab, and the bell up top lights up the moment something changes, like when it's out for delivery.</p>
       </div>
     </div>
     <div class="welcome-dots" id="welcome-dots">
@@ -191,6 +191,32 @@
     </header>
 
     <div class="view-wrap">
+      <!-- ============ CUSTOMER HOME (the customer's landing screen) ============ -->
+      <section class="view" id="view-custhome">
+        <div class="chome-hero">
+          <h2 id="chome-greeting">Welcome back</h2>
+          <p class="muted" id="chome-sub">Here's what's happening with your orders.</p>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Your orders</h2><span class="muted" id="chome-count"></span></div>
+          <div id="chome-recent" class="cust-orders"></div>
+          <button class="btn ghost block" id="chome-viewall" type="button" style="display:none">View all orders →</button>
+        </div>
+        <button class="btn primary block" id="chome-place" type="button">+ Place a new order</button>
+      </section>
+
+      <!-- ============ ACCOUNT (customer: profile + sign out) ============ -->
+      <section class="view" id="view-account">
+        <div class="card">
+          <div class="acct-head">
+            <span class="acct-avatar" id="acct-avatar">U</span>
+            <div class="acct-id"><b id="acct-name">–</b><span id="acct-email">–</span></div>
+          </div>
+        </div>
+        <button class="btn danger block" id="acct-signout" type="button">⎋ Sign out</button>
+        <button class="linkbtn acct-switch" id="acct-switch" type="button">Switch workspace (ops / admin view)</button>
+      </section>
+
       <!-- ============ ORDER (customer: place + track) ============ -->
       <section class="view" id="view-order">
         <div class="order-hero">

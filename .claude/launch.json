@@ -9,7 +9,7 @@
     },
     {
       "name": "granite-demo",
-      "runtimeExecutable": "python3",
+      "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "8080"],
       "port": 8080
     }

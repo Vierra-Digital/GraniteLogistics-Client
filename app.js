@@ -310,6 +310,8 @@
 
   // ---- Navigation ----
   var VIEW_META = {
+    custhome: ["Home", "A quick look at your orders."],
+    account: ["Account", "Your profile and sign-out."],
     order: ["Place an Order", "Create a new shipment and track it from pickup to delivery."],
     overview: ["Executive Overview", "Real-time visibility from auction win to delivery confirmation."],
     ingest: ["Order Ingest", "Orders pulled directly from client commerce backends. Zero manual entry."],
@@ -327,7 +329,7 @@
 
   // ---- Role-based access (maps to the platform's user roles) ----
   var ROLE_VIEWS = {
-    Customer: ["order"],
+    Customer: ["custhome", "order", "account"],
     Admin: ["order", "overview", "ingest", "runner", "presort", "batch", "driver", "tracking", "returns", "reports", "activity", "settings"],
     Runner: ["home", "ingest", "runner", "presort", "batch", "tracking", "returns", "activity"],
     Driver: ["home", "driver", "tracking"],
@@ -511,18 +513,22 @@
     updateRoleUI(); applyRole(); go(allowedViews()[0]); renderBottomNav(); renderNotifs(); bootSync();
   }
 
-  // ---- Bottom tab bar (mobile) ----
-  var BN_LABEL = { order: "Order", overview: "Home", home: "Home", ingest: "Orders", runner: "Pickups", presort: "Pre-Sort", batch: "Manifests", driver: "Scan", tracking: "Tracking", returns: "Returns", reports: "Reports", activity: "Activity", settings: "Settings" };
+  // ---- Bottom tab bar: the customer's ONLY navigation, at every screen size.
+  // Ops roles also get it on narrow screens, alongside the sidebar drawer via "Menu". ----
+  var BN_LABEL = { custhome: "Home", order: "Orders", account: "Account", overview: "Home", home: "Home", ingest: "Orders", runner: "Pickups", presort: "Pre-Sort", batch: "Manifests", driver: "Scan", tracking: "Tracking", returns: "Returns", reports: "Reports", activity: "Activity", settings: "Settings" };
+  var BN_ICON = { custhome: "🏠", order: "🛒", account: "👤" };
   function renderBottomNav() {
     var el = $("#bottom-nav"); if (!el) return;
     var allowed = allowedViews();
+    var isCustomer = currentRole() === "Customer";
     var primary = allowed.length > 4 ? allowed.slice(0, 4) : allowed.slice();
     var active = $(".nav-item.active") ? $(".nav-item.active").dataset.view : allowed[0];
     var html = primary.map(function (v) {
-      var ico = (document.querySelector('.nav-item[data-view="' + v + '"] .ico') || {}).textContent || "•";
+      var ico = BN_ICON[v] || (document.querySelector('.nav-item[data-view="' + v + '"] .ico') || {}).textContent || "•";
       return '<button class="bn-item' + (v === active ? " active" : "") + '" data-bn="' + v + '"><span class="bn-ico">' + ico + '</span><span>' + (BN_LABEL[v] || v) + '</span></button>';
     }).join("");
-    html += '<button class="bn-item" data-bnmore="1"><span class="bn-ico">☰</span><span>Menu</span></button>';
+    // Customers have no sidebar drawer to open, so there's nothing for a "Menu" tab to do.
+    if (!isCustomer) html += '<button class="bn-item" data-bnmore="1"><span class="bn-ico">☰</span><span>Menu</span></button>';
     el.innerHTML = html;
     $$("#bottom-nav [data-bn]").forEach(function (b) { b.addEventListener("click", function () { go(b.dataset.bn); }); });
     var more = $("#bottom-nav [data-bnmore]"); if (more) more.addEventListener("click", function () { toggleSidebar(true); });
@@ -643,7 +649,9 @@
 
   // ---- Renderers ----
   function render(view) {
-    if (view === "order") renderOrder();
+    if (view === "custhome") renderCustHome();
+    else if (view === "account") renderAccountView();
+    else if (view === "order") renderOrder();
     else if (view === "home") renderHome();
     else if (view === "overview") renderOverview();
     else if (view === "ingest") renderIngest();
@@ -701,6 +709,41 @@
         toast("Synced an offline order. Now tracking " + j.order.id, "ok");
       }).catch(function () { /* still offline. Will retry next time this view loads. */ });
     });
+  }
+  // Customer's Home tab: a real landing screen, separate from the ordering flow.
+  function renderCustHome() {
+    var u = (typeof currentUser === "function") ? currentUser() : null;
+    var email = u ? u.email : null;
+    var greet = $("#chome-greeting");
+    if (greet) greet.textContent = "Welcome back" + (u && u.name ? ", " + u.name.split(" ")[0] : "");
+    var mine = state.packages.filter(function (p) { return email && p.customerEmail === email; });
+    var cc = $("#chome-count"); if (cc) cc.textContent = mine.length ? (mine.length + (mine.length === 1 ? " order" : " orders")) : "";
+    var box = $("#chome-recent");
+    var viewAll = $("#chome-viewall");
+    if (viewAll) viewAll.style.display = mine.length ? "" : "none";
+    if (!box) return;
+    if (!mine.length) {
+      box.innerHTML = '<div class="empty-state"><div class="es-ico">📦</div><b>No orders yet</b>' +
+        '<span>Place your first order and it\'ll show up here so you can follow it the whole way.</span></div>';
+      return;
+    }
+    box.innerHTML = mine.slice().reverse().slice(0, 3).map(function (p) {
+      var eta = p.status === "Delivered" ? "Delivered"
+        : ("Est. " + new Date(p.promisedTs).toLocaleDateString(undefined, { month: "short", day: "numeric" }));
+      var pill = p.pendingSync ? '<span class="pill sla-risk">⟲ Syncing…</span>' : '<span class="' + pillClass(p.status) + '">' + (CUST_STATUS[p.status] || STAGE_LABEL[p.status]) + '</span>';
+      return '<button class="cust-order" data-id="' + p.id + '">' +
+        '<div class="co-main"><b>' + p.item.description + '</b>' +
+        '<span class="co-meta">' + p.id + ' · ' + eta + '</span></div>' +
+        pill + '</button>';
+    }).join("");
+    $$("#chome-recent [data-id]").forEach(function (b) { b.addEventListener("click", function () { openCustomerOrder(b.dataset.id); }); });
+  }
+  // Customer's Account tab: profile + sign out, replacing the header account dropdown.
+  function renderAccountView() {
+    var u = (typeof currentUser === "function") ? currentUser() : null;
+    var av = $("#acct-avatar"); if (av) av.textContent = ((u && (u.name || u.email)) || "U").charAt(0).toUpperCase();
+    var nm = $("#acct-name"); if (nm) nm.textContent = u ? (u.name || u.email) : "Guest";
+    var em = $("#acct-email"); if (em) em.textContent = u ? u.email : "";
   }
   function renderOrder() {
     if (typeof resetOrderForm === "function") resetOrderForm();
@@ -2159,6 +2202,12 @@
   var amTheme = $("#am-theme"); if (amTheme) amTheme.addEventListener("click", function () { closeAccountMenu(); state.settings.theme = (state.settings.theme === "dark") ? "light" : "dark"; save(); applyTheme(); });
   var amSignout = $("#am-signout"); if (amSignout) amSignout.addEventListener("click", function () { closeAccountMenu(); confirmSignOut(); });
   document.addEventListener("click", function (e) { var w = $(".account-wrap"); if (w && !w.contains(e.target)) closeAccountMenu(); });
+
+  // Customer Home + Account tabs
+  var chomePlace = $("#chome-place"); if (chomePlace) chomePlace.addEventListener("click", function () { go("order"); });
+  var chomeViewAll = $("#chome-viewall"); if (chomeViewAll) chomeViewAll.addEventListener("click", function () { go("order"); });
+  var acctSignout = $("#acct-signout"); if (acctSignout) acctSignout.addEventListener("click", confirmSignOut);
+  var acctSwitch = $("#acct-switch"); if (acctSwitch) acctSwitch.addEventListener("click", openGate);
 
   // Mobile drawer
   var menuBtn = $("#menu-btn"); if (menuBtn) menuBtn.addEventListener("click", function () { toggleSidebar(); });
