@@ -26,7 +26,7 @@ function getStore({ name }) {
   };
 }
 
-let authFn, ordersFn, stateFn, trackFn, sign;
+let authFn, ordersFn, stateFn, trackFn, healthFn, sign;
 // Tokens for the operator-granted ops accounts. /api/state authorizes by role now, not by
 // the public demo key, so these tests have to sign in the way a real ops user does.
 let adminToken, viewerToken;
@@ -44,6 +44,7 @@ before(async () => {
   ordersFn = (await import("../netlify/functions/my-orders.mjs")).default;
   stateFn = (await import("../netlify/functions/state.mjs")).default;
   trackFn = (await import("../netlify/functions/track.mjs")).default;
+  healthFn = (await import("../netlify/functions/health.mjs")).default;
   sign = (await import("../netlify/functions/_auth.mjs")).sign;
 
   adminToken = await register(ADMIN_EMAIL, "pass1234", "Ops Admin");
@@ -311,6 +312,49 @@ test("legacy per-customer orders are migrated into the shared workspace", async 
   const opsView = await body(await stateFn(asOps()));
   assert.ok(opsView.packages.find((p) => p.id === "GL-8001"));
   assert.equal(blobs.get(k("granite-customer-orders", "legacy@example.com")), undefined);
+});
+
+// ---- deployment readiness ----
+//
+// /api/health is public, so the readiness report must say whether each secret is
+// configured without ever disclosing a value or which accounts hold privileges.
+
+test("health reports what is missing, and leaks no secret values", async () => {
+  const saved = { admins: process.env.GL_ADMIN_EMAILS, roles: process.env.GL_ROLES, secret: process.env.GL_AUTH_SECRET, key: process.env.GL_RESEND_KEY, from: process.env.GL_MAIL_FROM, tenants: process.env.GL_TENANTS };
+  const restore = () => Object.entries({ GL_ADMIN_EMAILS: saved.admins, GL_ROLES: saved.roles, GL_AUTH_SECRET: saved.secret, GL_RESEND_KEY: saved.key, GL_MAIL_FROM: saved.from, GL_TENANTS: saved.tenants })
+    .forEach(([k, v]) => { if (v === undefined) delete process.env[k]; else process.env[k] = v; });
+
+  try {
+    // Nothing configured: both blocking checks must fail.
+    delete process.env.GL_ADMIN_EMAILS; delete process.env.GL_ROLES;
+    delete process.env.GL_AUTH_SECRET; delete process.env.GL_RESEND_KEY;
+    delete process.env.GL_MAIL_FROM; delete process.env.GL_TENANTS;
+    let j = await body(await healthFn(new Request("https://x/api/health")));
+    assert.equal(j.readiness.ready, false);
+    assert.deepEqual(j.readiness.blocking.sort(), ["authSecret", "opsAccess"]);
+    assert.match(j.readiness.checks.opsAccess.detail, /locked out/);
+
+    // Fully configured: ready, and the counts are right.
+    process.env.GL_AUTH_SECRET = "s3cr3t-value-must-not-appear";
+    process.env.GL_ADMIN_EMAILS = "boss@example.com,second@example.com";
+    process.env.GL_ROLES = JSON.stringify({ "dana@example.com": "Runner", "nobody@example.com": "NotARole" });
+    process.env.GL_RESEND_KEY = "re_live_must_not_appear";
+    process.env.GL_MAIL_FROM = "Granite <no-reply@example.com>";
+    process.env.GL_TENANTS = JSON.stringify({ "tenant-key-must-not-appear": "acme" });
+    j = await body(await healthFn(new Request("https://x/api/health")));
+    assert.equal(j.readiness.ready, true);
+    assert.deepEqual(j.readiness.blocking, []);
+    // 2 admins + 1 valid named ops role; the bogus role must not be counted.
+    assert.match(j.readiness.checks.opsAccess.detail, /^3 account\(s\)/);
+
+    // The response must not contain any secret value, or any privileged email.
+    const raw = JSON.stringify(j);
+    ["s3cr3t-value-must-not-appear", "re_live_must_not_appear", "tenant-key-must-not-appear",
+     "boss@example.com", "second@example.com", "dana@example.com", "no-reply@example.com"]
+      .forEach((secret) => assert.ok(!raw.includes(secret), "health leaked: " + secret));
+  } finally {
+    restore();
+  }
 });
 
 // ---- order rate limiting ----
