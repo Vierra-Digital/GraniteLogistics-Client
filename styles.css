@@ -7,6 +7,24 @@
   --shadow:0 1px 2px rgba(16,24,40,.04);
   --shadow-lg:0 16px 48px rgba(16,24,40,.16);
   --radius:14px; --radius-sm:10px; --sidebar-w:256px;
+
+  /* ---- Motion identity ----
+     One personality for the whole product: Corporate. This is software people use to
+     move other people's property, so motion here is calm and decisive, never bouncy.
+     Three durations and three curves, used everywhere; nothing invents its own.
+
+     --ease      on-screen moves and state changes (the signature curve, ~80% of uses)
+     --ease-out  entrances: fast start, gentle landing
+     --ease-in   exits: gentle start, quick departure
+
+     Entrances are deliberately longer than exits: people care about what arrives. */
+  --dur-quick:140ms;  /* press, hover, toggle: must feel instant */
+  --dur:240ms;        /* the default: rows, pills, tabs, state changes */
+  --dur-slow:360ms;   /* modals and view changes: a shift of focus */
+  --ease:cubic-bezier(.2,0,0,1);
+  --ease-out:cubic-bezier(.05,.7,.1,1);
+  --ease-in:cubic-bezier(.3,0,1,1);
+  --rise:10px;        /* the single entrance offset, so everything enters alike */
 }
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
@@ -155,9 +173,12 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .rg-card>span:last-child{font-size:.86rem;color:#9fb0c2;line-height:1.45}
 
 /* Views */
-.view{display:none;animation:fade .25s ease}
+.view{display:none}
 .view.active{display:block}
-@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+/* The app's single entrance: rise and fade. Everything that enters uses this one
+   keyframe so arrivals are recognisably the same gesture. Timing comes from the motion
+   tokens; see the MOTION section near the end of this file. */
+@keyframes fade{from{opacity:0;transform:translateY(var(--rise))}to{opacity:1;transform:none}}
 
 /* Cards / layout */
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;box-shadow:var(--shadow);margin-bottom:18px}
@@ -644,6 +665,128 @@ body[data-role="Customer"] .view-wrap{padding-bottom:calc(74px + env(safe-area-i
 .login-hero{background:radial-gradient(130% 120% at 50% 0,#1d3a55,transparent 62%),#0f1b2c;padding:30px 24px 26px;text-align:center}
 .login-hero-logo{width:min(220px,66%);height:auto;display:inline-block;filter:drop-shadow(0 8px 20px rgba(0,0,0,.45))}
 .login-body{padding:24px 28px 28px}
+
+/* =====================================================================
+   MOTION
+   Placed here, after every component rule and before RESPONSIVE, so these
+   transitions attach to finished components without outranking the
+   responsive overrides below.
+
+   Personality is Corporate throughout (see the tokens in :root). Three
+   layers are in play: primary (the thing that moves), secondary (shadow
+   and icon shifts that follow it), and a restrained ambient layer for
+   states that are genuinely ongoing, like a parcel in transit.
+
+   Everything here is switched off wholesale under prefers-reduced-motion
+   at the end of this section.
+   ===================================================================== */
+
+/* View change. The `fade` keyframe declared up in the Views section is the one entrance
+   gesture; this only supplies the timing. Only the newly activated view animates, and
+   only on an actual navigation: .view-enter is added by go() and removed once it has
+   played, so the ops workspace re-rendering every 1.5s on sync never re-triggers it. */
+.view.view-enter{animation:fade var(--dur-slow) var(--ease-out) both}
+
+/* List rows cascade in behind the view. A micro cascade (30ms) capped at eight
+   rows keeps the whole sequence under ~240ms; beyond that a long list would feel
+   like it was loading rather than arriving. */
+.view-enter .row-item{animation:fade var(--dur) var(--ease-out) both}
+.view-enter .row-item:nth-child(1){animation-delay:0ms}
+.view-enter .row-item:nth-child(2){animation-delay:30ms}
+.view-enter .row-item:nth-child(3){animation-delay:60ms}
+.view-enter .row-item:nth-child(4){animation-delay:90ms}
+.view-enter .row-item:nth-child(5){animation-delay:120ms}
+.view-enter .row-item:nth-child(6){animation-delay:150ms}
+.view-enter .row-item:nth-child(7){animation-delay:180ms}
+.view-enter .row-item:nth-child(8){animation-delay:210ms}
+.view-enter .row-item:nth-child(n+9){animation-delay:210ms}
+
+/* Cards stagger too, but slower and fewer: they are bigger, so they read as panels
+   settling rather than a list filling. */
+.view-enter .card{animation:fade var(--dur-slow) var(--ease-out) both}
+.view-enter .card:nth-of-type(2){animation-delay:60ms}
+.view-enter .card:nth-of-type(3){animation-delay:120ms}
+.view-enter .card:nth-of-type(n+4){animation-delay:150ms}
+
+/* ---- Interactive feedback ----
+   Press is the one place a Corporate personality still needs to feel physical:
+   the surface goes down under the finger and the shadow tightens with it. */
+.btn{transition:background var(--dur-quick) var(--ease),border-color var(--dur-quick) var(--ease),
+     color var(--dur-quick) var(--ease),box-shadow var(--dur-quick) var(--ease),transform var(--dur-quick) var(--ease)}
+.btn:active{transform:translateY(1px) scale(.985)}
+.btn.primary:hover{box-shadow:0 4px 14px rgba(47,155,214,.32)}
+.icon-btn{transition:background var(--dur-quick) var(--ease),transform var(--dur-quick) var(--ease)}
+.icon-btn:active{transform:scale(.92)}
+
+/* Rows lift very slightly toward the cursor. Secondary layer: the shadow arrives
+   with the lift, which is what makes it read as depth instead of a colour change. */
+.row-item{transition:background var(--dur-quick) var(--ease),box-shadow var(--dur) var(--ease),transform var(--dur) var(--ease)}
+.row-item.selectable:hover{transform:translateX(2px);box-shadow:var(--shadow)}
+.row-item.selectable:active{transform:translateX(2px) scale(.995)}
+
+/* Status pills recolour rather than jump; a parcel changing state should not shove
+   the layout it sits in. */
+.pill{transition:background var(--dur) var(--ease),color var(--dur) var(--ease)}
+
+/* ---- Bottom nav ----
+   The active tab is the customer's sense of place, so it gets a real transition
+   while the icon takes the press. */
+.bottom-nav .bn-item{transition:color var(--dur) var(--ease)}
+.bottom-nav .bn-item .bn-ico{transition:transform var(--dur) var(--ease-out)}
+.bottom-nav .bn-item:active .bn-ico{transform:scale(.88)}
+.bottom-nav .bn-item.active .bn-ico{transform:translateY(-2px)}
+
+/* ---- Modals ----
+   Heavy weight: a modal is a shift of focus, so it takes the slow duration and
+   scales from just under full size. The backdrop leads by fading first, which is
+   what makes the panel feel like it arrives in front of something. */
+@keyframes modal-in{from{opacity:0;transform:translateY(12px) scale(.97)}to{opacity:1;transform:none}}
+@keyframes backdrop-in{from{opacity:0}to{opacity:1}}
+.modal-backdrop.open{animation:backdrop-in var(--dur) var(--ease-out) both}
+.modal-backdrop.open .modal{animation:modal-in var(--dur-slow) var(--ease-out) both}
+/* Exit is quicker than entry and accelerates away. .closing is set by the close path in
+   app.js, which keeps the backdrop displayed for the length of the animation before
+   actually hiding it. */
+@keyframes modal-out{from{opacity:1;transform:none}to{opacity:0;transform:translateY(6px) scale(.985)}}
+.modal-backdrop.closing{display:flex;animation:backdrop-in var(--dur) var(--ease-in) reverse both}
+.modal-backdrop.closing .modal{animation:modal-out var(--dur) var(--ease-in) both}
+
+/* ---- Toasts ---- */
+@keyframes toast-out{to{opacity:0;transform:translateX(20px)}}
+.toast{transition:opacity var(--dur) var(--ease-in),transform var(--dur) var(--ease-in)}
+.toast.leaving{animation:toast-out var(--dur) var(--ease-in) both}
+
+/* ---- Ambient layer ----
+   Reserved for states that are actually ongoing. A parcel in transit is moving in
+   the real world, so its indicator breathes; everything at rest stays still. This
+   is the only looping animation in the app, and it is deliberately almost
+   imperceptible. */
+@keyframes breathe{0%,100%{opacity:1}50%{opacity:.72}}
+/* Reuses the dot .pill::before already draws, rather than adding a second one, so an
+   in-transit pill is identical to the others except that its dot is alive. */
+.pill.st-InTransit::before,.pill.st-OutforDelivery::before{animation:breathe 2.4s var(--ease) infinite}
+
+/* Loading shimmer for content that is genuinely being fetched. */
+@keyframes shimmer{from{background-position:-200% 0}to{background-position:200% 0}}
+.skeleton{
+  background:linear-gradient(90deg,var(--slate-100) 25%,var(--slate-200) 37%,var(--slate-100) 63%);
+  background-size:200% 100%;animation:shimmer 1.4s linear infinite;
+  border-radius:var(--radius-sm);color:transparent;min-height:14px
+}
+
+/* ---- Accessibility ----
+   An explicit opt-out, not a partial dial-down: someone who sets this may do so
+   because motion makes them ill. Feedback still happens, just instantly.
+   Kept at the end of the motion section so it wins against everything above. */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{
+    animation-duration:.01ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:.01ms !important;
+    scroll-behavior:auto !important;
+  }
+  .btn:active,.icon-btn:active,.row-item.selectable:hover,.row-item.selectable:active{transform:none}
+}
 
 /* =====================================================================
    RESPONSIVE: exactly three tiers, each declared once, placed last so

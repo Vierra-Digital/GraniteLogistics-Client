@@ -329,7 +329,9 @@
     el.appendChild(ico); el.appendChild(body);
     $("#toasts").appendChild(el);
     var hold = Math.max(1200, ms || 3200);
-    setTimeout(function () { el.style.opacity = "0"; el.style.transform = "translateX(20px)"; el.style.transition = ".3s"; }, hold);
+    // Exit is a class so the curve and duration come from the motion tokens rather than
+    // being hard-coded here.
+    setTimeout(function () { el.classList.add("leaving"); }, hold);
     setTimeout(function () { el.remove(); }, hold + 400);
   }
 
@@ -740,15 +742,35 @@
     $$("#cmd-results .cmd-item").forEach(function (el2) { el2.addEventListener("click", function () { activateCmd(cmdItems[+el2.dataset.i]); }); });
   }
   function activateCmd(it) { if (!it) return; closeCmd(); if (it.type === "view") go(it.view); else openPackage(it.id); }
+  // Adds the entrance class for exactly one play. The timeout is the animation budget
+  // (slow duration + the longest row stagger) plus a little slack; leaving the class on
+  // would make the next re-render animate again.
+  var viewEnterTimer = null;
+  function animateViewEntrance(el) {
+    if (!el) return;
+    clearTimeout(viewEnterTimer);
+    el.classList.remove("view-enter");
+    // Reading offsetWidth forces a reflow so re-adding the class restarts the animation
+    // rather than being coalesced into a no-op.
+    void el.offsetWidth;
+    el.classList.add("view-enter");
+    viewEnterTimer = setTimeout(function () { el.classList.remove("view-enter"); }, 700);
+  }
+
   function go(view) {
     if (typeof stopScan === "function") stopScan(); // release camera when navigating
     if (typeof toggleSidebar === "function") toggleSidebar(false); // close mobile drawer
     $$(".nav-item").forEach(function (b) { b.classList.toggle("active", b.dataset.view === view); });
-    $$(".view").forEach(function (v) { v.classList.remove("active"); });
-    $("#view-" + view).classList.add("active");
+    $$(".view").forEach(function (v) { v.classList.remove("active", "view-enter"); });
+    var target = $("#view-" + view);
+    target.classList.add("active");
     $("#view-title").textContent = VIEW_META[view][0];
     $("#view-sub").textContent = VIEW_META[view][1];
     render(view);
+    // Entrance animation belongs to navigation, not to rendering. The ops workspace
+    // re-renders on every sync (~1.5s), and animating that would make the queue flicker
+    // constantly, so the class is added here and dropped once it has played.
+    animateViewEntrance(target);
     if (typeof renderBottomNav === "function") renderBottomNav();
   }
   $$(".nav-item").forEach(function (b) { b.addEventListener("click", function () { go(b.dataset.view); }); });
@@ -2236,16 +2258,28 @@
 
   function modal(html) {
     $("#modal").innerHTML = html;
+    // Cancel any in-flight close, otherwise .closing would still be set and its exit
+    // animation would win the cascade over .open, hiding the modal we just opened.
+    clearTimeout(modalCloseTimer);
+    $("#modal-backdrop").classList.remove("closing");
     $("#modal-backdrop").classList.add("open");
     var x = $("#modal [data-close]");
     if (x) x.addEventListener("click", closeModal);
     trapFocus($("#modal"));
   }
+  var modalCloseTimer = null;
   function closeModal() {
     var bd = $("#modal-backdrop");
     if (!bd.classList.contains("open")) return; // avoid stealing focus when already shut
     bd.classList.remove("open");
+    // Focus goes back immediately: the animation is decoration, and waiting for it would
+    // leave a keyboard user stranded on a panel that is on its way out.
     releaseFocus($("#modal"));
+    // .closing keeps the backdrop displayed just long enough to animate out. The timeout
+    // matches --dur (240ms); if another modal opens first, .open wins and this is a no-op.
+    bd.classList.add("closing");
+    clearTimeout(modalCloseTimer);
+    modalCloseTimer = setTimeout(function () { bd.classList.remove("closing"); }, 240);
   }
   $("#modal-backdrop").addEventListener("click", function (e) { if (e.target === $("#modal-backdrop")) closeModal(); });
   document.addEventListener("keydown", function (e) { if (e.key !== "Escape") return; closeModal(); closeConfirmDialog(); closeGate(); closeAccountMenu(); closeNotif(); closeWelcomeTour(); });
