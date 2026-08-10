@@ -856,15 +856,38 @@
   function renderCustHome() {
     var u = (typeof currentUser === "function") ? currentUser() : null;
     var email = u ? u.email : null;
-    renderCustHomeList(email);
+    var fetching = email && hasServerAuth();
+    // Show placeholders only when there is nothing local to show. If we already have this
+    // customer's orders cached, real data beats a shimmer, and swapping it out for
+    // skeletons on every visit would make a working app look like a loading one.
+    var showSkeleton = fetching && !state.packages.some(function (p) { return p.customerEmail === email; });
+    if (showSkeleton) renderCustHomeSkeleton();
+    else renderCustHomeList(email);
     if (typeof renderNotifs === "function") renderNotifs();
-    if (email && hasServerAuth()) {
+    if (fetching) {
       myOrdersGet().then(function (j) {
         if (j && j.ok) { mergeCustomerOrders(j.orders, email); renderCustHomeList(email); renderNotifs(); syncPendingOrders(email); }
-      }).catch(function () { /* offline. Keep local view. */ });
+        else if (showSkeleton) renderCustHomeList(email); // replace placeholders with the real empty state
+      }).catch(function () {
+        // Offline: keep the local view, but never leave skeletons shimmering forever.
+        if (showSkeleton) renderCustHomeList(email);
+      });
     }
   }
+  // Placeholder rows shaped like the real ones, so the layout doesn't jump when the
+  // orders arrive. aria-hidden and aria-busy keep a screen reader from announcing them.
+  function renderCustHomeSkeleton() {
+    var box = $("#chome-recent");
+    if (!box) return;
+    box.setAttribute("aria-busy", "true");
+    var row = '<div class="cust-order skel-row" aria-hidden="true">' +
+      '<div class="co-main"><span class="skeleton skel-title"></span>' +
+      '<span class="skeleton skel-meta"></span></div>' +
+      '<span class="skeleton skel-pill"></span></div>';
+    box.innerHTML = row + row;
+  }
   function renderCustHomeList(email) {
+    var sbox = $("#chome-recent"); if (sbox) sbox.removeAttribute("aria-busy");
     var u = (typeof currentUser === "function") ? currentUser() : null;
     var greet = $("#chome-greeting");
     if (greet) greet.textContent = "Welcome back" + (u && u.name ? ", " + u.name.split(" ")[0] : "");
