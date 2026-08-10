@@ -25,7 +25,7 @@ function readiness() {
     // Without this nobody can reach the ops workspace at all.
     opsAccess: { ok: opsUsers > 0, detail: opsUsers > 0 ? opsUsers + " account(s) granted an ops role" : "no ops roles granted; set GL_ADMIN_EMAILS or the ops platform is locked out" },
     // Optional: reset links simply report "not set up" without it.
-    passwordReset: { ok: emailConfigured(), detail: emailConfigured() ? "configured" : "GL_RESEND_KEY / GL_MAIL_FROM not set; password reset returns a clear error instead of sending" },
+    passwordReset: { ok: emailConfigured(), detail: emailConfigured() ? "configured" : "GL_BREVO_KEY / GL_MAIL_FROM not set; password reset returns a clear error instead of sending" },
     // Optional: only needed for machine callers that read a workspace.
     machineApiKeys: { ok: true, detail: tenants() ? "GL_TENANTS configured; the public demo keys are disabled" : "using the public demo keys, which are valid for /api/orders ingest only" },
   };

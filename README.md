@@ -36,11 +36,11 @@ being offline. To exercise the real API, deploy to Netlify or run `netlify dev`.
 npm test
 ```
 
-59 tests, no network and no browser required, in two layers:
+73 tests, no network and no browser required, in two layers:
 
 - **Unit** (`test/functions.test.mjs`) covers the pure logic: workspace merging, id
   allocation, session tokens, tenant and api-key resolution, role assignment, the public
-  tracking sanitizer, and email degradation.
+  tracking sanitizer, order rate limiting, and the outbound email payload.
 - **Integration** (`test/integration.test.mjs`) drives the **real function handlers**
   with `@netlify/blobs` swapped for an in-memory store, so it verifies the pieces
   actually fit together. Most importantly it proves the end-to-end loop: a customer
@@ -49,7 +49,8 @@ npm test
   rules, stale-push protection, tombstoned deletions, forged and expired tokens,
   password-change session invalidation, the legacy order migration, and the authorization
   rules on the ops workspace (customer sessions refused, demo keys refused, `Viewer`
-  read-only, no self-granted roles).
+  read-only, no self-granted roles), per-account order rate limiting, and that the public
+  `/api/health` readiness report never discloses a secret value.
 
 The integration layer needs `--experimental-test-module-mocks`, which the npm script
 already passes.
@@ -65,7 +66,7 @@ there is no database to provision.
 | Variable | Required | Purpose |
 |---|---|---|
 | `GL_AUTH_SECRET` | **Yes, for production** | HMAC secret for session tokens. Without it a public fallback constant is used, which means anyone reading this repo could forge a session. Use a 32-byte random hex string. |
-| `GL_RESEND_KEY` | For password reset | [Resend](https://resend.com) API key. Without it the reset endpoint returns a clear "not set up" error instead of failing silently. |
+| `GL_BREVO_KEY` | For password reset | [Brevo](https://www.brevo.com) API key (starts `xkeysib-`), from **SMTP & API > API keys**. Without it the reset endpoint returns a clear "not set up" error instead of failing silently. Sent over Brevo's transactional HTTP endpoint rather than SMTP, so no SMTP client is bundled and no socket is held open inside a function invocation. |
 | `GL_MAIL_FROM` | For password reset | Verified sender, e.g. `Granite Logistics <no-reply@usegl.com>`. |
 | `GL_ADMIN_EMAILS` | To use the ops platform | Comma-separated emails granted the `Admin` role, e.g. `you@co.com,ops@co.com`. Without this, every account is a Customer and nobody can reach the ops workspace. |
 | `GL_ROLES` | Optional | JSON map of email to a non-Admin ops role, e.g. `{"dana@co.com":"Runner"}`. Valid roles are `Admin`, `Runner`, `Driver`, `Viewer`. |

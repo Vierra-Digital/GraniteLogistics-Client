@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { mergePushedPackages, nextId, tenantOf, resolveKey, makeOrder, EMPTY, publicTrackingView, orderRateLimit, orderCreatedAt, ORDER_LIMITS } from "../netlify/functions/_lib.mjs";
 import { roleFor, OPS_ROLES, WRITE_ROLES } from "../netlify/functions/_auth.mjs";
 import { sign, verifyToken, bearer, sessionSuperseded } from "../netlify/functions/_auth.mjs";
-import { emailConfigured, sendEmail, resetEmail } from "../netlify/functions/_email.mjs";
+import { emailConfigured, sendEmail, resetEmail, parseSender } from "../netlify/functions/_email.mjs";
 
 const opsPkg = (id, status = "Won") => ({ id, status });
 const custPkg = (id, status = "Won", email = "jane@x.com") => ({ id, status, customerEmail: email });
@@ -253,6 +253,27 @@ test("the burst window is tighter than the hourly one", () => {
   assert.ok(burst.max < hourly.max);
 });
 
+// ---------------------------------------------------------------------------
+// Brevo needs the sender as {name, email}, so GL_MAIL_FROM has to be split.
+// Getting this wrong means every reset email is rejected at send time.
+// ---------------------------------------------------------------------------
+test("parseSender splits a display-name sender", () => {
+  assert.deepEqual(parseSender("Granite Logistics <no-reply@usegl.com>"),
+    { name: "Granite Logistics", email: "no-reply@usegl.com" });
+  // Quoted display name, and stray whitespace.
+  assert.deepEqual(parseSender('  "Granite Logistics"  <  no-reply@usegl.com  >  '),
+    { name: "Granite Logistics", email: "no-reply@usegl.com" });
+});
+
+test("parseSender accepts a bare address and degrades safely", () => {
+  assert.deepEqual(parseSender("no-reply@usegl.com"), { email: "no-reply@usegl.com" });
+  assert.deepEqual(parseSender("  no-reply@usegl.com  "), { email: "no-reply@usegl.com" });
+  // Angle brackets with no display name must not produce name:"".
+  assert.deepEqual(parseSender("<no-reply@usegl.com>"), { name: undefined, email: "no-reply@usegl.com" });
+  assert.deepEqual(parseSender(""), { email: "" });
+  assert.deepEqual(parseSender(undefined), { email: "" });
+});
+
 test("Viewer is an ops role but not a writing one", () => {
   assert.ok(OPS_ROLES.includes("Viewer"));
   assert.ok(!WRITE_ROLES.includes("Viewer"));
@@ -357,6 +378,53 @@ test("email reports not-configured without provider keys", async () => {
   const r = await sendEmail({ to: "a@b.com", subject: "x", html: "y" });
   assert.equal(r.ok, false);
   assert.equal(r.reason, "not-configured");
+});
+
+test("sendEmail posts the shape Brevo expects", async () => {
+  const saved = { key: process.env.GL_BREVO_KEY, from: process.env.GL_MAIL_FROM, fetch: globalThis.fetch };
+  process.env.GL_BREVO_KEY = "xkeysib-test";
+  process.env.GL_MAIL_FROM = "Granite Logistics <no-reply@usegl.com>";
+  let seen = null;
+  globalThis.fetch = async (url, init) => {
+    seen = { url, init, body: JSON.parse(init.body) };
+    return new Response("{}", { status: 201 });
+  };
+  try {
+    const r = await sendEmail({ to: "jane@example.com", subject: "Reset", html: "<b>hi</b>", text: "hi" });
+    assert.equal(r.ok, true);
+    assert.equal(seen.url, "https://api.brevo.com/v3/smtp/email");
+    // Brevo authenticates with an api-key header, not a Bearer token.
+    assert.equal(seen.init.headers["api-key"], "xkeysib-test");
+    assert.ok(!("Authorization" in seen.init.headers));
+    // Field names are Brevo's, not Resend's: sender/to[].email/htmlContent/textContent.
+    assert.deepEqual(seen.body.sender, { name: "Granite Logistics", email: "no-reply@usegl.com" });
+    assert.deepEqual(seen.body.to, [{ email: "jane@example.com" }]);
+    assert.equal(seen.body.htmlContent, "<b>hi</b>");
+    assert.equal(seen.body.textContent, "hi");
+    assert.equal(seen.body.subject, "Reset");
+  } finally {
+    globalThis.fetch = saved.fetch;
+    if (saved.key === undefined) delete process.env.GL_BREVO_KEY; else process.env.GL_BREVO_KEY = saved.key;
+    if (saved.from === undefined) delete process.env.GL_MAIL_FROM; else process.env.GL_MAIL_FROM = saved.from;
+  }
+});
+
+test("sendEmail reports a provider rejection instead of throwing", async () => {
+  const saved = { key: process.env.GL_BREVO_KEY, from: process.env.GL_MAIL_FROM, fetch: globalThis.fetch };
+  process.env.GL_BREVO_KEY = "xkeysib-test";
+  process.env.GL_MAIL_FROM = "no-reply@usegl.com";
+  globalThis.fetch = async () => new Response('{"message":"sender not verified"}', { status: 400 });
+  try {
+    const r = await sendEmail({ to: "a@b.com", subject: "x", html: "y" });
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, "send-failed");
+    assert.equal(r.status, 400);
+    assert.match(r.detail, /sender not verified/);
+  } finally {
+    globalThis.fetch = saved.fetch;
+    if (saved.key === undefined) delete process.env.GL_BREVO_KEY; else process.env.GL_BREVO_KEY = saved.key;
+    if (saved.from === undefined) delete process.env.GL_MAIL_FROM; else process.env.GL_MAIL_FROM = saved.from;
+  }
 });
 
 test("the reset email includes the link and no stray em dashes", () => {

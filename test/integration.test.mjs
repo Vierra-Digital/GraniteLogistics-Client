@@ -320,14 +320,14 @@ test("legacy per-customer orders are migrated into the shared workspace", async 
 // configured without ever disclosing a value or which accounts hold privileges.
 
 test("health reports what is missing, and leaks no secret values", async () => {
-  const saved = { admins: process.env.GL_ADMIN_EMAILS, roles: process.env.GL_ROLES, secret: process.env.GL_AUTH_SECRET, key: process.env.GL_RESEND_KEY, from: process.env.GL_MAIL_FROM, tenants: process.env.GL_TENANTS };
-  const restore = () => Object.entries({ GL_ADMIN_EMAILS: saved.admins, GL_ROLES: saved.roles, GL_AUTH_SECRET: saved.secret, GL_RESEND_KEY: saved.key, GL_MAIL_FROM: saved.from, GL_TENANTS: saved.tenants })
+  const saved = { admins: process.env.GL_ADMIN_EMAILS, roles: process.env.GL_ROLES, secret: process.env.GL_AUTH_SECRET, key: process.env.GL_BREVO_KEY, from: process.env.GL_MAIL_FROM, tenants: process.env.GL_TENANTS };
+  const restore = () => Object.entries({ GL_ADMIN_EMAILS: saved.admins, GL_ROLES: saved.roles, GL_AUTH_SECRET: saved.secret, GL_BREVO_KEY: saved.key, GL_MAIL_FROM: saved.from, GL_TENANTS: saved.tenants })
     .forEach(([k, v]) => { if (v === undefined) delete process.env[k]; else process.env[k] = v; });
 
   try {
     // Nothing configured: both blocking checks must fail.
     delete process.env.GL_ADMIN_EMAILS; delete process.env.GL_ROLES;
-    delete process.env.GL_AUTH_SECRET; delete process.env.GL_RESEND_KEY;
+    delete process.env.GL_AUTH_SECRET; delete process.env.GL_BREVO_KEY;
     delete process.env.GL_MAIL_FROM; delete process.env.GL_TENANTS;
     let j = await body(await healthFn(new Request("https://x/api/health")));
     assert.equal(j.readiness.ready, false);
@@ -338,7 +338,7 @@ test("health reports what is missing, and leaks no secret values", async () => {
     process.env.GL_AUTH_SECRET = "s3cr3t-value-must-not-appear";
     process.env.GL_ADMIN_EMAILS = "boss@example.com,second@example.com";
     process.env.GL_ROLES = JSON.stringify({ "dana@example.com": "Runner", "nobody@example.com": "NotARole" });
-    process.env.GL_RESEND_KEY = "re_live_must_not_appear";
+    process.env.GL_BREVO_KEY = "xkeysib-must-not-appear";
     process.env.GL_MAIL_FROM = "Granite <no-reply@example.com>";
     process.env.GL_TENANTS = JSON.stringify({ "tenant-key-must-not-appear": "acme" });
     j = await body(await healthFn(new Request("https://x/api/health")));
@@ -349,7 +349,7 @@ test("health reports what is missing, and leaks no secret values", async () => {
 
     // The response must not contain any secret value, or any privileged email.
     const raw = JSON.stringify(j);
-    ["s3cr3t-value-must-not-appear", "re_live_must_not_appear", "tenant-key-must-not-appear",
+    ["s3cr3t-value-must-not-appear", "xkeysib-must-not-appear", "tenant-key-must-not-appear",
      "boss@example.com", "second@example.com", "dana@example.com", "no-reply@example.com"]
       .forEach((secret) => assert.ok(!raw.includes(secret), "health leaked: " + secret));
   } finally {
