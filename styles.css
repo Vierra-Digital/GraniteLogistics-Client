@@ -277,6 +277,9 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .row-item .ri-main{flex:1;min-width:0}
 .row-item .ri-title{font-weight:700;font-size:.92rem}
 .row-item .ri-sub{font-size:.8rem;color:var(--slate-500);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* The account that placed a self-serve order: present but visually subordinate to the
+   recipient, since ops scans by recipient first. */
+.row-item .ri-acct{color:var(--blue-d);font-variant-numeric:tabular-nums}
 .row-item.selectable{cursor:pointer}
 .row-item.selectable:hover{border-color:var(--blue);background:var(--blue-soft)}
 .row-item.selected{border-color:var(--blue);background:var(--blue-soft);box-shadow:inset 0 0 0 1px var(--blue)}

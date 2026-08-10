@@ -1813,8 +1813,11 @@
     var pkgs = state.packages.slice().sort(function (a, b) { return stageIdx(b.status) - stageIdx(a.status); });
     if (trackQuery) {
       pkgs = pkgs.filter(function (p) {
+        // The account email is searchable so a support request from an address can be
+        // traced straight to the package.
         return (p.id + " " + p.customer.name + " " + p.customer.city + " " + p.customer.state + " " +
-          p.item.description + " " + stageLabelFor(p) + " " + (p.tracking || "") + " " + (p.carrier || ""))
+          p.item.description + " " + stageLabelFor(p) + " " + (p.tracking || "") + " " + (p.carrier || "") +
+          " " + (p.customerEmail || ""))
           .toLowerCase().indexOf(trackQuery) >= 0;
       });
     }
@@ -1823,7 +1826,8 @@
         (trackSelectMode ? '<input type="checkbox" class="tk-check"' + (trackSelect[p.id] ? ' checked' : '') + ' />' : '') +
         '<div class="ri-main">' +
         '<div class="ri-title">' + p.id + " · " + p.item.description + (p.exception ? ' <span class="pill sla-late">exception</span>' : '') + '</div>' +
-        '<div class="ri-sub">' + p.customer.name + " · " + p.customer.city + ", " + p.customer.state + '</div></div>' +
+        '<div class="ri-sub">' + p.customer.name + " · " + p.customer.city + ", " + p.customer.state +
+        (p.customerEmail ? ' · <span class="ri-acct">' + p.customerEmail + '</span>' : '') + '</div></div>' +
         '<span class="' + pillClass(p.status) + '">' + stageLabelFor(p) + '</span>' + slaPillHtml(p) + '</div>';
     }).join("") : '<p class="muted">No packages match “' + trackQuery + '”.</p>';
     $$("#tracking-list .row-item").forEach(function (el) {
@@ -2022,6 +2026,9 @@
       '<p class="muted">' + p.source + " · order " + p.orderRef + " · " + money(p.item.value) + '</p>' +
       '<div class="modal-grid"><div>' +
       field("Customer", p.customer.name) +
+      // Self-serve orders carry the account that placed them. Ops needs this to answer
+      // "who is asking about GL-1043?" and to reach the right person on an exception.
+      (p.customerEmail ? field("Account", p.customerEmail) : "") +
       field("Address", p.customer.address + ", " + p.customer.city + ", " + p.customer.state + " " + p.customer.zip) +
       field("Phone", p.customer.phone) +
       field("Carrier", (p.carrier || "–") + (p.lane ? " · " + p.lane : "")) +
