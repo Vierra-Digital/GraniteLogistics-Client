@@ -1,4 +1,4 @@
-/* Code 128 (Set B) → inline SVG — Node port of barcode.js (no DOM). */
+/* Code 128 (Set B) to inline SVG. Node port of barcode.js (no DOM). */
 "use strict";
 var PATTERNS = [
   "212222","222122","222221","121223","121322","131222","122213","122312","132212","221213",

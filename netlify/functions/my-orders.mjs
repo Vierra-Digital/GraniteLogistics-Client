@@ -1,22 +1,21 @@
-// Per-customer orders, scoped to the authenticated account.
-// Requires a valid Bearer session token (from /api/auth); the customer's email
-// comes from the token, so a user can only read/write their own orders.
-// Stored in Netlify Blobs: store "granite-customer-orders", key = email -> [orders].
+// A customer's own orders, authenticated by their session token.
+//
+// These live in the SHARED workspace state (the same Blobs record the ops platform
+// reads and writes via /api/state), not a separate per-customer store. That's what
+// makes the product coherent: a customer places an order, ops sees that exact
+// package in their queue, ops advances it, and the customer sees the new status.
+// The customer's email comes from the verified token, so callers can only ever
+// read or change their own rows out of the shared state.
 import { getStore } from "@netlify/blobs";
 import { CORS, json, verifyToken, bearer } from "./_auth.mjs";
+import { readState, writeState, nextId } from "./_lib.mjs";
 
-function store() { return getStore({ name: "granite-customer-orders", consistency: "strong" }); }
-
-function nextId(orders) {
-  let max = 1040;
-  (orders || []).forEach((o) => { const m = /GL-(\d+)/.exec(o.id || ""); if (m) max = Math.max(max, +m[1]); });
-  return "GL-" + (max + 1);
-}
-
+// Single-company platform for now, so every customer order lands in one workspace.
+const TENANT = "default";
 const S = (v) => (v == null ? "" : String(v)).trim();
 
-function makeOrder(d, owner, orders) {
-  const id = nextId(orders), now = Date.now();
+function makeCustomerOrder(d, owner, state) {
+  const id = nextId(state), now = Date.now();
   return {
     id,
     source: "Customer Order",
@@ -40,25 +39,63 @@ function makeOrder(d, owner, orders) {
   };
 }
 
+// Earlier builds kept customer orders in their own "granite-customer-orders" store,
+// invisible to ops. Fold any of those into the shared workspace once, then drop them
+// so nobody's existing order is lost in the move.
+async function migrateLegacyOrders(email, state) {
+  try {
+    const legacy = getStore({ name: "granite-customer-orders", consistency: "strong" });
+    const old = await legacy.get(email, { type: "json" });
+    if (!Array.isArray(old) || !old.length) return false;
+    const known = new Set((state.packages || []).map((p) => p.id));
+    let added = 0;
+    old.forEach((o) => {
+      if (o && o.id && !known.has(o.id)) { state.packages.push({ ...o, customerEmail: email }); added++; }
+    });
+    await legacy.delete(email);
+    return added > 0;
+  } catch (e) { return false; }
+}
+
 export default async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
   const p = verifyToken(bearer(req));
   if (!p || !p.email) return json({ ok: false, error: "Sign in required." }, 401);
 
-  const s = store();
-  const key = p.email;
-  const orders = (await s.get(key, { type: "json" })) || [];
+  const state = await readState(TENANT);
+  if (!Array.isArray(state.packages)) state.packages = [];
+  const migrated = await migrateLegacyOrders(p.email, state);
+  const mine = () => state.packages.filter((o) => o.customerEmail === p.email);
 
-  if (req.method === "GET") return json({ ok: true, orders });
+  if (req.method === "GET") {
+    if (migrated) await writeState(TENANT, state);
+    return json({ ok: true, orders: mine() });
+  }
 
   if (req.method === "POST") {
     let d = {};
     try { d = await req.json(); } catch (e) {}
     if (!S(d.item)) return json({ ok: false, error: "An item description is required." }, 400);
-    const order = makeOrder(d, { email: p.email, name: p.name }, orders);
-    orders.push(order);
-    await s.setJSON(key, orders);
-    return json({ ok: true, order, orders });
+    const order = makeCustomerOrder(d, { email: p.email, name: p.name }, state);
+    state.packages.push(order);
+    await writeState(TENANT, state);
+    return json({ ok: true, order, orders: mine() });
+  }
+
+  // Cancel one of the caller's own orders. Only allowed while the parcel is still
+  // at "Won" (nothing physical has happened yet), so a shipment already moving
+  // through the network can't be pulled out from under ops.
+  if (req.method === "DELETE") {
+    const id = new URL(req.url).searchParams.get("id");
+    if (!id) return json({ ok: false, error: "An order id is required." }, 400);
+    const target = state.packages.find((o) => o.id === id && o.customerEmail === p.email);
+    if (!target) return json({ ok: false, error: "Order not found." }, 404);
+    if (target.status !== "Won") {
+      return json({ ok: false, error: "This order is already on its way and can no longer be cancelled." }, 409);
+    }
+    state.packages = state.packages.filter((o) => o.id !== id);
+    await writeState(TENANT, state);
+    return json({ ok: true, cancelled: id, orders: mine() });
   }
 
   return json({ ok: false, error: "Method not allowed" }, 405);

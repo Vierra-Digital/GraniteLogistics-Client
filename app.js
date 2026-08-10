@@ -10,6 +10,14 @@
     Won: "Auction Win", Intake: "Intake & Label", PickedUp: "Picked Up",
     Staged: "Staged at Dock", InTransit: "In Transit", OutforDelivery: "Out for Delivery", Delivered: "Delivered"
   };
+  // The first stage is an auction win for auction-sourced intake, but customer orders
+  // now flow into the same pipeline, where "Auction Win" would read as wrong. Use the
+  // package to pick the right wording; falls back to the generic stage label.
+  function stageLabelFor(p, stage) {
+    var s = stage || (p && p.status);
+    if (s === "Won" && p && p.customerEmail) return "Order Placed";
+    return STAGE_LABEL[s] || s;
+  }
   var STAGE_NOTE = {
     Won: "Order pulled automatically from client commerce backend via API.",
     Intake: "Code 128 tracking label generated and printed.",
@@ -225,13 +233,17 @@
     return {
       company: { name: "Granite Logistics", address: "", phone: "", email: "" },
       defaultCarrier: "UPS", defaultLane: "Lane 1", role: "Customer", roleChosen: false, theme: "light",
-      cloud: { url: "", key: "granite-dev-key", autoSync: false }
+      // Auto-sync on by default so ops sees customer orders (which now land in the
+      // same shared workspace) without anyone having to flip a switch in Settings.
+      cloud: { url: "", key: "granite-dev-key", autoSync: true }
     };
   }
   var state = { packages: [], manifests: [], loadUnits: [], events: [], settings: defaultSettings() };
   function companyName() { return (state.settings && state.settings.company && state.settings.company.name) || "Granite Logistics"; }
   function save() {
-    try { localStorage.setItem(STORE_KEY, JSON.stringify({ packages: state.packages, manifests: state.manifests, loadUnits: state.loadUnits, events: state.events, settings: state.settings, seq: seq })); } catch (e) { /* quota / private mode */ }
+    // tombstones must persist: a deletion made while offline has to survive a reload,
+    // or the server-side merge would resurrect the order on the next successful push.
+    try { localStorage.setItem(STORE_KEY, JSON.stringify({ packages: state.packages, manifests: state.manifests, loadUnits: state.loadUnits, events: state.events, settings: state.settings, seq: seq, tombstones: state.tombstones || [] })); } catch (e) { /* quota / private mode */ }
     if (typeof scheduleAutoPush === "function") scheduleAutoPush();
   }
   // Derive manifest records by grouping packages that share a batchId.
@@ -285,6 +297,8 @@
       state.settings = Object.assign(defaultSettings(), data.settings || {});
       if (data.settings && data.settings.company) state.settings.company = Object.assign(defaultSettings().company, data.settings.company);
       if (typeof data.seq === "number") seq = data.seq;
+      state.tombstones = Array.isArray(data.tombstones) ? data.tombstones : [];
+      syncSeqFromPackages(); // guard against a stale seq vs. server-numbered orders
       if (!state.manifests.length) rebuildManifests();
       return true;
     } catch (e) { return false; }
@@ -299,13 +313,24 @@
   var money = function (n) { return "$" + n.toLocaleString(); };
 
   // ---- Toasts ----
-  function toast(msg, kind) {
+  var TOAST_ICONS = { api: "⇄", warn: "⚠", ok: "✓" };
+  // ms overrides how long it stays up; a warning worth interrupting for needs longer than
+  // a routine confirmation.
+  function toast(msg, kind, ms) {
     var el = document.createElement("div");
     el.className = "toast " + (kind || "ok");
-    el.innerHTML = '<span class="t-ico">' + (kind === "api" ? "⇄" : "✓") + '</span><span>' + msg + '</span>';
+    // Built as nodes, not interpolated HTML: toast text now includes server-supplied
+    // messages, and textContent can't be coerced into markup.
+    var ico = document.createElement("span");
+    ico.className = "t-ico";
+    ico.textContent = TOAST_ICONS[kind] || TOAST_ICONS.ok;
+    var body = document.createElement("span");
+    body.textContent = String(msg);
+    el.appendChild(ico); el.appendChild(body);
     $("#toasts").appendChild(el);
-    setTimeout(function () { el.style.opacity = "0"; el.style.transform = "translateX(20px)"; el.style.transition = ".3s"; }, 3200);
-    setTimeout(function () { el.remove(); }, 3600);
+    var hold = Math.max(1200, ms || 3200);
+    setTimeout(function () { el.style.opacity = "0"; el.style.transform = "translateX(20px)"; el.style.transition = ".3s"; }, hold);
+    setTimeout(function () { el.remove(); }, hold + 400);
   }
 
   // ---- Navigation ----
@@ -342,7 +367,13 @@
     Driver: { label: "Carrier Driver", ico: "◎", tag: "Field" },
     Viewer: { label: "Viewer", ico: "⊶", tag: "Read-only" }
   };
-  function currentRole() { return (state.settings && state.settings.role) || "Customer"; }
+  // Mobile is the customer app. The ops roles (Admin/Runner/Driver/Viewer) are
+  // desktop-only for now, so a narrow viewport always renders the Customer
+  // experience regardless of the saved role. savedRole() is the stored value;
+  // currentRole() is what the UI should actually show.
+  function isMobileViewport() { var w = window.innerWidth; return w > 0 && w <= 980; }
+  function savedRole() { return (state.settings && state.settings.role) || "Customer"; }
+  function currentRole() { return isMobileViewport() ? "Customer" : savedRole(); }
   function allowedViews() { return ROLE_VIEWS[currentRole()] || ROLE_VIEWS.Customer; }
   function updateRoleUI() {
     var m = ROLE_META[currentRole()] || ROLE_META.Admin;
@@ -373,11 +404,21 @@
     var active = $(".nav-item.active") ? $(".nav-item.active").dataset.view : null;
     if (allowed.indexOf(active) < 0) go(allowed[0]);
   }
-  function openGate() { var g = $("#role-gate"); if (g) g.classList.add("open"); }
-  function closeGate() { var g = $("#role-gate"); if (g) g.classList.remove("open"); }
+  function openGate() {
+    var g = $("#role-gate"); if (!g) return;
+    g.classList.add("open");
+    trapFocus(g);
+  }
+  function closeGate() {
+    var g = $("#role-gate");
+    if (!g || !g.classList.contains("open")) return;
+    g.classList.remove("open");
+    releaseFocus(g);
+  }
   function setRole(role) {
     if (!ROLE_VIEWS[role]) return;
     state.settings.role = role; state.settings.roleChosen = true; save();
+    resetSyncBlock(); // a different role may well be allowed to sync
     closeGate(); applyRole(); go(allowedViews()[0]);
     toast("Workspace: " + ROLE_META[role].label, "ok");
   }
@@ -387,16 +428,19 @@
     if (sb) sb.classList.toggle("open", willOpen);
     if (bd) bd.classList.toggle("open", willOpen);
   }
-  // If the mobile drawer is left open and the viewport then grows past the
-  // nav-mode breakpoint (window resize, or browser/OS zoom changing the
-  // effective layout width), force it closed. Otherwise the sidebar and its
-  // dark backdrop can linger fixed on top of the now-desktop layout.
+  // Crossing the nav-mode breakpoint (window resize, or browser/OS zoom changing
+  // the effective layout width) has two consequences:
+  //  1. A mobile drawer left open would linger fixed over the desktop layout.
+  //  2. The effective role changes for ops users, since mobile is customer-only,
+  //     so the nav and active view have to be rebuilt for the new role.
   (function () {
     var lastWide = window.innerWidth > 980;
     window.addEventListener("resize", function () {
       var wide = window.innerWidth > 980;
-      if (wide && !lastWide) toggleSidebar(false);
+      if (wide === lastWide) return;
       lastWide = wide;
+      toggleSidebar(false);
+      if (savedRole() !== "Customer" && currentUser()) { applyRole(); renderBottomNav(); }
     });
   })();
   function applyTheme() {
@@ -415,7 +459,21 @@
   function authSave(a) { try { localStorage.setItem(AUTH_KEY, JSON.stringify(a)); localStorage.setItem("gl-onboarded", "1"); } catch (e) { } }
   function currentUser() { var a = authData(); return a.user ? Object.assign({}, a.user) : null; }
   function authToken() { return authData().token; }
-  function logoutUser() { try { localStorage.removeItem(AUTH_KEY); } catch (e) { } }
+  function logoutUser() {
+    // Don't leave one customer's order details sitting in local storage for whoever
+    // uses this browser next. The public tracker falls back to local state when the
+    // API is unreachable, so a stale order here is reachable by tracking number.
+    //
+    // Only purge when the server holds a copy (a real session). Local-only accounts,
+    // used offline or with no backend, keep theirs; losing someone's orders outright
+    // would be worse than the risk. Ops roles keep their cached workspace, which is
+    // their own working data, and the server-side merge restores anything a push drops.
+    if (currentRole() === "Customer" && hasServerAuth()) {
+      state.packages = state.packages.filter(function (p) { return !p.customerEmail; });
+      save();
+    }
+    try { localStorage.removeItem(AUTH_KEY); } catch (e) { }
+  }
 
   function postAuth(action, body) {
     return fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.assign({ action: action }, body)) })
@@ -461,6 +519,7 @@
     $("#login-alt").innerHTML = reg
       ? 'Already have an account? <button type="button" id="login-toggle" class="linkbtn">Sign in</button>'
       : 'New here? <button type="button" id="login-toggle" class="linkbtn">Create an account</button>';
+    var fg = $("#login-forgot"); if (fg) fg.style.display = reg ? "none" : "";
     var tg = $("#login-toggle");
     if (tg) tg.addEventListener("click", function () { loginMode = reg ? "signin" : "register"; $("#login-err").textContent = ""; renderLoginMode(); });
   }
@@ -470,6 +529,42 @@
     var ls = $("#login-screen"); if (ls) ls.classList.add("open");
   }
   function hideLogin() { var ls = $("#login-screen"); if (ls) ls.classList.remove("open"); }
+
+  // ---- Password reset ----
+  // Step 1: email a reset link. Step 2 (below) redeems the token from that link.
+  function requestPasswordReset() {
+    var emailEl = $("#login-email");
+    var email = (emailEl.value || "").trim();
+    var err = $("#login-err");
+    if (!email) { err.textContent = "Enter your email address first, then tap “Forgot your password?”"; emailEl.focus(); return; }
+    var btn = $("#forgot-btn"); if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
+    postAuth("reset-request", { email: email })
+      .then(function (j) {
+        if (btn) { btn.disabled = false; btn.textContent = "Forgot your password?"; }
+        if (j && j.ok) { err.textContent = ""; toast("If that email has an account, a reset link is on its way.", "ok"); }
+        else { err.textContent = (j && j.error) || "Could not start a password reset."; }
+      })
+      .catch(function () {
+        if (btn) { btn.disabled = false; btn.textContent = "Forgot your password?"; }
+        err.textContent = "Could not reach the server. Check your connection and try again.";
+      });
+  }
+  // Shows the "set a new password" form instead of the sign-in form.
+  var resetToken = null;
+  function showResetForm(token) {
+    resetToken = token;
+    var lb = $(".login-body"); if (lb) lb.style.display = "none";
+    var rb = $("#reset-body"); if (rb) rb.style.display = "";
+    var ls = $("#login-screen"); if (ls) ls.classList.add("open");
+  }
+  function hideResetForm() {
+    resetToken = null;
+    var rb = $("#reset-body"); if (rb) rb.style.display = "none";
+    var lb = $(".login-body"); if (lb) lb.style.display = "";
+    // Drop the token from the URL so a refresh doesn't reopen this form.
+    try { history.replaceState(null, "", location.pathname); } catch (e) { }
+    showLogin();
+  }
 
   // ---- Welcome tour: a short, skippable walkthrough shown once, right after
   // a brand-new account is created (never on sign-in, never again after dismissed). ----
@@ -484,8 +579,14 @@
     welcomeStep = 1;
     renderWelcomeStep();
     var b = $("#welcome-backdrop"); if (b) b.classList.add("open");
+    trapFocus($(".welcome-card"));
   }
-  function closeWelcomeTour() { var b = $("#welcome-backdrop"); if (b) b.classList.remove("open"); }
+  function closeWelcomeTour() {
+    var b = $("#welcome-backdrop");
+    if (!b || !b.classList.contains("open")) return;
+    b.classList.remove("open");
+    releaseFocus($(".welcome-card"));
+  }
   // Validate the session token against the server so a login on one device is honored
   // (and expired/tampered tokens rejected) on any other. Local/offline accounts skip this.
   function verifySession() {
@@ -508,6 +609,9 @@
   }
   function enterApp() {
     var u = currentUser();
+    // A fresh sign-in carries a fresh role, so a previous "no ops access" latch no longer
+    // applies to this session.
+    resetSyncBlock();
     if (u) { state.settings.role = u.role || state.settings.role; state.settings.roleChosen = true; save(); }
     hideLogin();
     updateRoleUI(); applyRole(); go(allowedViews()[0]); renderBottomNav(); renderNotifs(); bootSync();
@@ -525,7 +629,9 @@
     var active = $(".nav-item.active") ? $(".nav-item.active").dataset.view : allowed[0];
     var html = primary.map(function (v) {
       var ico = BN_ICON[v] || (document.querySelector('.nav-item[data-view="' + v + '"] .ico') || {}).textContent || "•";
-      return '<button class="bn-item' + (v === active ? " active" : "") + '" data-bn="' + v + '"><span class="bn-ico">' + ico + '</span><span>' + (BN_LABEL[v] || v) + '</span></button>';
+      var on = v === active;
+      return '<button class="bn-item' + (on ? " active" : "") + '" data-bn="' + v + '"' + (on ? ' aria-current="page"' : '') +
+        '><span class="bn-ico" aria-hidden="true">' + ico + '</span><span>' + (BN_LABEL[v] || v) + '</span></button>';
     }).join("");
     // Customers have no sidebar drawer to open, so there's nothing for a "Menu" tab to do.
     if (!isCustomer) html += '<button class="bn-item" data-bnmore="1"><span class="bn-ico">☰</span><span>Menu</span></button>';
@@ -619,7 +725,7 @@
       state.packages.filter(function (p) {
         return (p.id + " " + p.customer.name + " " + p.customer.city + " " + p.item.description).toLowerCase().indexOf(q) >= 0;
       }).slice(0, 6).forEach(function (p) {
-        cmdItems.push({ type: "pkg", id: p.id, label: p.id + " · " + p.item.description, sub: p.customer.name + " · " + STAGE_LABEL[p.status] });
+        cmdItems.push({ type: "pkg", id: p.id, label: p.id + " · " + p.item.description, sub: p.customer.name + " · " + stageLabelFor(p) });
       });
     }
     cmdItems = cmdItems.slice(0, 12); cmdSel = 0; drawCmd();
@@ -672,6 +778,7 @@
     Won: "Order received", Intake: "Preparing", PickedUp: "Picked up",
     Staged: "Ready to ship", InTransit: "In transit", OutforDelivery: "Out for delivery", Delivered: "Delivered"
   };
+  var custQuery = ""; // current filter on the customer's own order list
   // Server-scoped orders: when signed in with a real (non-local) session, a customer's
   // orders live under their account in Netlify Blobs and follow them across devices.
   function hasServerAuth() { var t = (typeof authToken === "function") ? authToken() : null; return !!t && t !== "local"; }
@@ -688,6 +795,7 @@
     if (!email || !Array.isArray(serverOrders)) return;
     var pending = state.packages.filter(function (p) { return p.customerEmail === email && p.pendingSync; });
     state.packages = state.packages.filter(function (p) { return p.customerEmail !== email; }).concat(serverOrders).concat(pending);
+    syncSeqFromPackages(); // server-numbered orders must not collide with local ids
     save();
   }
   // Retry any orders that were placed while offline (or the API was unreachable).
@@ -705,15 +813,28 @@
         state.packages = state.packages.filter(function (x) { return x.id !== p.id; });
         mergeCustomerOrders(j.orders, email);
         renderCustomerOrderList(email);
+        renderCustHomeList(email);
         renderNotifs();
         toast("Synced an offline order. Now tracking " + j.order.id, "ok");
       }).catch(function () { /* still offline. Will retry next time this view loads. */ });
     });
   }
   // Customer's Home tab: a real landing screen, separate from the ordering flow.
+  // Pulls the authoritative list on open so status changes made by ops show up here,
+  // not only on the Orders tab.
   function renderCustHome() {
     var u = (typeof currentUser === "function") ? currentUser() : null;
     var email = u ? u.email : null;
+    renderCustHomeList(email);
+    if (typeof renderNotifs === "function") renderNotifs();
+    if (email && hasServerAuth()) {
+      myOrdersGet().then(function (j) {
+        if (j && j.ok) { mergeCustomerOrders(j.orders, email); renderCustHomeList(email); renderNotifs(); syncPendingOrders(email); }
+      }).catch(function () { /* offline. Keep local view. */ });
+    }
+  }
+  function renderCustHomeList(email) {
+    var u = (typeof currentUser === "function") ? currentUser() : null;
     var greet = $("#chome-greeting");
     if (greet) greet.textContent = "Welcome back" + (u && u.name ? ", " + u.name.split(" ")[0] : "");
     var mine = state.packages.filter(function (p) { return email && p.customerEmail === email; });
@@ -730,7 +851,7 @@
     box.innerHTML = mine.slice().reverse().slice(0, 3).map(function (p) {
       var eta = p.status === "Delivered" ? "Delivered"
         : ("Est. " + new Date(p.promisedTs).toLocaleDateString(undefined, { month: "short", day: "numeric" }));
-      var pill = p.pendingSync ? '<span class="pill sla-risk">⟲ Syncing…</span>' : '<span class="' + pillClass(p.status) + '">' + (CUST_STATUS[p.status] || STAGE_LABEL[p.status]) + '</span>';
+      var pill = p.pendingSync ? '<span class="pill sla-risk">⟲ Syncing…</span>' : '<span class="' + pillClass(p.status) + '">' + (CUST_STATUS[p.status] || stageLabelFor(p)) + '</span>';
       return '<button class="cust-order" data-id="' + p.id + '">' +
         '<div class="co-main"><b>' + p.item.description + '</b>' +
         '<span class="co-meta">' + p.id + ' · ' + eta + '</span></div>' +
@@ -759,10 +880,21 @@
     }
   }
   function renderCustomerOrderList(email) {
-    var mine = state.packages.filter(function (p) { return email && p.customerEmail === email; });
-    var cc = $("#cust-count"); if (cc) cc.textContent = mine.length ? (mine.length + (mine.length === 1 ? " order" : " orders")) : "";
+    var all = state.packages.filter(function (p) { return email && p.customerEmail === email; });
+    var cc = $("#cust-count"); if (cc) cc.textContent = all.length ? (all.length + (all.length === 1 ? " order" : " orders")) : "";
     var box = $("#cust-orders"); if (!box) return;
-    if (!mine.length) {
+    var search = $("#cust-search"); if (search) search.style.display = all.length > 1 ? "" : "none";
+    // Filter by tracking number, carrier tracking, item, or status.
+    var mine = !custQuery ? all : all.filter(function (p) {
+      return (p.id + " " + (p.tracking || "") + " " + p.item.description + " " +
+        (CUST_STATUS[p.status] || stageLabelFor(p) || "")).toLowerCase().indexOf(custQuery) >= 0;
+    });
+    if (all.length && !mine.length) {
+      box.innerHTML = '<div class="empty-state"><div class="es-ico">🔍</div><b>No matches</b>' +
+        '<span>Nothing matches “' + custQuery + '”. Try a tracking number or item name.</span></div>';
+      return;
+    }
+    if (!all.length) {
       box.innerHTML = '<div class="empty-state"><div class="es-ico">📦</div><b>No orders yet</b>' +
         '<span>Create your first shipment in three quick steps. We\'ll move it from pickup to your door and keep you posted along the way.</span>' +
         '<div class="es-steps">' +
@@ -779,7 +911,7 @@
     box.innerHTML = mine.slice().reverse().map(function (p) {
       var eta = p.status === "Delivered" ? "Delivered"
         : ("Est. " + new Date(p.promisedTs).toLocaleDateString(undefined, { month: "short", day: "numeric" }));
-      var pill = p.pendingSync ? '<span class="pill sla-risk">⟲ Syncing…</span>' : '<span class="' + pillClass(p.status) + '">' + (CUST_STATUS[p.status] || STAGE_LABEL[p.status]) + '</span>';
+      var pill = p.pendingSync ? '<span class="pill sla-risk">⟲ Syncing…</span>' : '<span class="' + pillClass(p.status) + '">' + (CUST_STATUS[p.status] || stageLabelFor(p)) + '</span>';
       return '<button class="cust-order" data-id="' + p.id + '">' +
         '<div class="co-main"><b>' + p.item.description + '</b>' +
         '<span class="co-meta">' + p.id + ' · ' + eta + '</span></div>' +
@@ -939,7 +1071,7 @@
       return '<div class="alert-row" data-id="' + p.id + '"><span class="alert-dot"></span>' +
         '<div class="alert-main"><b class="mono">' + p.id + '</b> · ' + p.customer.name + ' · ' + p.customer.city + ', ' + p.customer.state +
         '<div class="alert-reason">' + reason + '</div></div>' +
-        '<span class="' + pillClass(p.status) + '">' + STAGE_LABEL[p.status] + '</span></div>';
+        '<span class="' + pillClass(p.status) + '">' + stageLabelFor(p) + '</span></div>';
     }).join("") : '<p class="muted">No open exceptions or SLA breaches. All clear.</p>';
     $$("#overview-alerts .alert-row").forEach(function (r) { r.addEventListener("click", function () { openPackage(r.dataset.id); }); });
 
@@ -967,7 +1099,7 @@
       rows.map(function (p) {
         return '<tr data-id="' + p.id + '"><td class="mono">' + p.id + '</td><td>' + p.customer.name +
           '</td><td>' + p.customer.city + ", " + p.customer.state + '</td><td>' + (p.carrier || "–") +
-          '</td><td><span class="' + pillClass(p.status) + '">' + STAGE_LABEL[p.status] + '</span></td></tr>';
+          '</td><td><span class="' + pillClass(p.status) + '">' + stageLabelFor(p) + '</span></td></tr>';
       }).join("") + '</tbody>';
     $$("#overview-table tr[data-id]").forEach(function (tr) {
       tr.addEventListener("click", function () { openPackage(tr.dataset.id); });
@@ -999,12 +1131,14 @@
     var st = $("#webhook-status");
     var item = pick(ITEMS), city = pick(CITIES);
     var order = { name: pick(FIRST) + " " + pick(LAST), item: item[0], value: item[1], address: (100 + rng(8900)) + " " + pick(STREETS), city: city[0], state: city[1], zip: city[2], source: "Shopify (webhook)" };
-    var hdr = { "Content-Type": "application/json", "x-api-key": c.key };
+    var hdr = cloudHeaders(c, true);
     if (st) st.textContent = "Pushing current state…";
     fetch(base + "/api/state", { method: "PUT", headers: hdr, body: JSON.stringify({ packages: state.packages, manifests: state.manifests, loadUnits: state.loadUnits, events: state.events, settings: state.settings }) })
+      // Surface an auth failure here rather than continuing and failing confusingly later.
+      .then(function (r) { return r.ok ? null : r.json().catch(function () { return {}; }).then(function (j) { throw new Error(j.hint || j.error || r.status); }); })
       .then(function () { if (st) st.textContent = "POSTing order to /api/orders…"; return fetch(base + "/api/orders", { method: "POST", headers: hdr, body: JSON.stringify(order) }); })
       .then(function (r) { return r.json(); })
-      .then(function (j) { if (!j.ok) throw new Error(j.error || "failed"); if (st) st.textContent = "Pulling updated state…"; return fetch(base + "/api/state", { headers: { "x-api-key": c.key } }); })
+      .then(function (j) { if (!j.ok) throw new Error(j.error || "failed"); if (st) st.textContent = "Pulling updated state…"; return fetch(base + "/api/state", { headers: cloudHeaders(c, false) }); })
       .then(function (r) { return r.json(); })
       .then(function (s) {
         if (!Array.isArray(s.packages)) throw new Error("bad state");
@@ -1249,7 +1383,7 @@
     var events = [];
     state.packages.forEach(function (p) {
       (p.history || []).forEach(function (h) {
-        events.push({ ts: h.ts, pkgId: p.id, kind: "stage", label: STAGE_LABEL[h.stage], pill: pillClass(h.stage), note: h.note, who: p.customer.name });
+        events.push({ ts: h.ts, pkgId: p.id, kind: "stage", label: stageLabelFor(p, h.stage), pill: pillClass(h.stage), note: h.note, who: p.customer.name });
       });
     });
     (state.events || []).forEach(function (e) {
@@ -1309,14 +1443,66 @@
       sbUrl: v("#cloud-sburl", ""), sbAnon: v("#cloud-sbanon", ""), tenant: v("#cloud-tenant", "default"),
       autoSync: !!(($("#cloud-auto") || {}).checked)
     };
+    resetSyncBlock(); // new url/key/provider deserves a fresh attempt
     save();
   }
-  function fullState() { return { packages: state.packages, manifests: state.manifests, loadUnits: state.loadUnits, events: state.events, settings: state.settings }; }
+  // `deleted` carries ids this client removed on purpose. The server preserves any
+  // customer order missing from `packages` (it was probably created after our last
+  // pull), so without these tombstones an ops deletion would resurrect on next push.
+  function fullState() {
+    return {
+      packages: state.packages, manifests: state.manifests, loadUnits: state.loadUnits,
+      events: state.events, settings: state.settings, deleted: state.tombstones || []
+    };
+  }
+  // Record an intentional deletion so it survives the server-side merge. Kept for a
+  // week, which is far longer than any client stays out of sync.
+  function addTombstone(id) {
+    if (!Array.isArray(state.tombstones)) state.tombstones = [];
+    var weekAgo = Date.now() - 7 * 86400000;
+    state.tombstones = state.tombstones.filter(function (t) { return t && t.ts > weekAgo && t.id !== id; });
+    state.tombstones.push({ id: id, ts: Date.now() });
+  }
+  // Local ids come from `seq`, but customer orders are numbered on the server and
+  // arrive via a pull, so `seq` has to catch up or the next locally-created package
+  // would reuse an id that already exists in the workspace.
+  function syncSeqFromPackages() {
+    var max = 1040;
+    state.packages.forEach(function (p) {
+      var m = /GL-(\d+)/.exec((p && p.id) || "");
+      if (m) max = Math.max(max, +m[1]);
+    });
+    if (seq <= max) seq = max + 1;
+  }
   function applyPulled(s) {
     if (!s || !Array.isArray(s.packages)) return false;
     state.packages = s.packages; state.manifests = s.manifests || []; state.loadUnits = s.loadUnits || []; state.events = s.events || [];
+    syncSeqFromPackages();
     save(); return true;
   }
+  // Headers for the Granite workspace API.
+  //
+  // The session token is what actually authorizes /api/state now: the server checks the
+  // signed-in user's role, because the tenant key ships in this bundle and so is public.
+  // x-api-key is still sent for the self-hosted Node server, which authorizes by key.
+  function cloudHeaders(c, withBody) {
+    var h = withBody ? { "Content-Type": "application/json" } : {};
+    if (c.key) h["x-api-key"] = c.key;
+    if (hasServerAuth()) h["Authorization"] = "Bearer " + authToken();
+    return h;
+  }
+
+  // Turn a failed workspace response into an Error that carries the status and the
+  // server's hint, so callers can tell "you are offline" (retry) apart from "this account
+  // has no ops access" (stop and say so).
+  function workspaceError(r) {
+    return r.json().catch(function () { return {}; }).then(function (j) {
+      var e = new Error(j.hint || j.error || ("HTTP " + r.status));
+      e.status = r.status;
+      return Promise.reject(e);
+    });
+  }
+
   // Returns a Promise resolving to {count}; rejects on error.
   function pushState() {
     var c = cloudCfg();
@@ -1327,8 +1513,11 @@
         body: JSON.stringify({ tenant: c.tenant, data: fullState(), updated_at: new Date().toISOString() })
       }).then(function (r) { if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); }); return { count: state.packages.length }; });
     }
-    return fetch(c.url + "/api/state", { method: "PUT", headers: { "Content-Type": "application/json", "x-api-key": c.key }, body: JSON.stringify(fullState()) })
-      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || r.status); return { count: j.packages }; }); });
+    return fetch(c.url + "/api/state", { method: "PUT", headers: cloudHeaders(c, true), body: JSON.stringify(fullState()) })
+      .then(function (r) {
+        if (!r.ok) return workspaceError(r);
+        return r.json().then(function (j) { return { count: j.packages }; });
+      });
   }
   // Returns a Promise resolving to a state object (or null if none).
   function pullState() {
@@ -1338,42 +1527,81 @@
         .then(function (r) { if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); }); return r.json(); })
         .then(function (rows) { return (rows && rows[0]) ? rows[0].data : null; });
     }
-    return fetch(c.url + "/api/state", { headers: { "x-api-key": c.key } })
-      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); });
+    return fetch(c.url + "/api/state", { headers: cloudHeaders(c, false) })
+      .then(function (r) { return r.ok ? r.json() : workspaceError(r); });
   }
 
   // Auto-sync: debounced push on change, pull-or-seed on load.
+  // Ops roles only. A customer's orders travel through /api/my-orders (which reads and
+  // writes just their own rows of the shared workspace); letting a customer push their
+  // whole local state with the tenant key would clobber everyone else's packages.
   var autoPushTimer = null, syncing = false;
-  function scheduleAutoPush() {
+  // The server authorizes /api/state by the signed-in user's role. If it says this
+  // account has no ops access, retrying every 1.5s will never help, so latch it off and
+  // tell the user once. Silence here used to mean working all day in a local-only
+  // workspace while believing it was syncing.
+  var syncBlocked = null;
+  function workspaceSyncAllowed() {
     var cl = state.settings && state.settings.cloud;
-    if (!cl || !cl.autoSync || syncing) return;
+    return !!(cl && cl.autoSync) && currentRole() !== "Customer" && !syncBlocked;
+  }
+  // Auth failures are permanent until something changes; anything else (offline, 500,
+  // DNS) is transient and stays quiet so a flaky connection isn't noisy.
+  function syncFailed(e) {
+    var permanent = e && (e.status === 401 || e.status === 403);
+    if (!permanent) { cloudStatus("Offline · will retry"); return; }
+    if (syncBlocked) return;
+    syncBlocked = e.message || "Not authorized";
+    cloudStatus("⚠ Cloud sync off: " + syncBlocked);
+    toast("Cloud sync stopped: " + syncBlocked, "warn", 9000);
+  }
+  // Called after sign-in or a settings change, so a fixed permission is picked up
+  // without making the user reload.
+  function resetSyncBlock() { syncBlocked = null; }
+  // A button press deserves a specific message, unlike a background attempt. Still runs
+  // syncFailed so an auth failure latches auto-sync off rather than retrying forever.
+  function manualSyncFailed(e, what) {
+    var reason = (e && e.message) || "unreachable";
+    var permanent = e && (e.status === 401 || e.status === 403);
+    syncFailed(e);
+    cloudStatus("✕ " + what + " failed: " + reason);
+    if (!permanent) toast(what + " failed: " + reason, "warn");
+  }
+  function scheduleAutoPush() {
+    if (!workspaceSyncAllowed() || syncing) return;
     clearTimeout(autoPushTimer);
     autoPushTimer = setTimeout(autoPush, 1500);
   }
-  function autoPush() { pushState().then(function () { cloudStatus("✓ Auto-synced · " + new Date().toLocaleTimeString()); }).catch(function () { }); }
+  function autoPush() {
+    pushState()
+      .then(function () { cloudStatus("✓ Auto-synced · " + new Date().toLocaleTimeString()); })
+      .catch(syncFailed);
+  }
   function bootSync() {
-    if (!(state.settings && state.settings.cloud && state.settings.cloud.autoSync)) return;
+    if (!workspaceSyncAllowed()) return;
     syncing = true;
     pullState().then(function (s) {
       if (s && Array.isArray(s.packages) && s.packages.length) { applyPulled(s); applyRole(); go(allowedViews()[0]); toast("Synced from cloud", "api"); }
       else { autoPush(); }
       syncing = false;
-    }).catch(function () { syncing = false; });
+    }).catch(function (e) { syncing = false; syncFailed(e); });
   }
   function cloudStatus(msg) { var el = $("#cloud-status"); if (el) el.textContent = msg; }
   function cloudBusy(on) { ["#cloud-push", "#cloud-pull"].forEach(function (id) { var b = $(id); if (b) b.disabled = on; }); }
+  // The manual buttons are an explicit retry, so they clear the auth latch first and
+  // restore auto-sync if the permission has since been granted.
   function cloudPush() {
-    saveCloudInputs(); cloudStatus("Pushing…"); cloudBusy(true);
+    saveCloudInputs(); resetSyncBlock(); cloudStatus("Pushing…"); cloudBusy(true);
     pushState().then(function (o) { cloudStatus("✓ Pushed " + o.count + " packages · " + new Date().toLocaleTimeString()); toast("Pushed to cloud", "api"); })
-      .catch(function (e) { cloudStatus("✕ Push failed: " + (e.message || "unreachable")); toast("Push failed", "ok"); })
+      .catch(function (e) { manualSyncFailed(e, "Push"); })
       .finally(function () { cloudBusy(false); });
   }
   function cloudPull() {
-    saveCloudInputs(); cloudStatus("Pulling…"); cloudBusy(true);
+    saveCloudInputs(); resetSyncBlock(); cloudStatus("Pulling…"); cloudBusy(true);
     pullState().then(function (s) {
       if (applyPulled(s)) { cocSelected = null; trackQuery = ""; cloudStatus("✓ Pulled " + state.packages.length + " packages · " + new Date().toLocaleTimeString()); toast("Pulled from cloud", "api"); applyRole(); go(allowedViews()[0]); }
       else { cloudStatus("No data found for this workspace yet. Push first."); }
-    }).catch(function (e) { cloudStatus("✕ Pull failed: " + (e.message || "unreachable")); toast("Pull failed", "ok"); })
+    }).catch(function (e) { manualSyncFailed(e, "Pull"); })
       .finally(function () { cloudBusy(false); });
   }
   function syncProviderUI() {
@@ -1479,7 +1707,7 @@
   function renderDriver() {
     var scannable = state.packages.filter(function (p) { return p.status === "Staged" || p.status === "InTransit" || p.status === "OutforDelivery"; });
     $("#scan-select").innerHTML = scannable.map(function (p) {
-      return '<option value="' + p.id + '">' + p.id + " · " + p.item.description + " (" + STAGE_LABEL[p.status] + ")</option>";
+      return '<option value="' + p.id + '">' + p.id + " · " + p.item.description + " (" + stageLabelFor(p) + ")</option>";
     }).join("") || '<option value="">No packages staged</option>';
     $("#scan-result").innerHTML = '<p class="muted">Scan a label to retrieve package details.</p>';
   }
@@ -1503,7 +1731,7 @@
       field("Address", p.customer.address + ", " + p.customer.city + ", " + p.customer.state + " " + p.customer.zip) +
       field("Carrier", (p.carrier || "–") + (p.lane ? " · " + p.lane : "")) +
       field("Tracking", p.tracking || "–", true) +
-      field("New Status", STAGE_LABEL[p.status]) +
+      field("New Status", stageLabelFor(p)) +
       '<div style="margin-top:12px"><button class="btn sm" data-open="' + p.id + '">View Chain of Custody</button></div>';
     var btn = $("#scan-result [data-open]");
     if (btn) btn.addEventListener("click", function () { openPackage(p.id); });
@@ -1586,7 +1814,7 @@
     if (trackQuery) {
       pkgs = pkgs.filter(function (p) {
         return (p.id + " " + p.customer.name + " " + p.customer.city + " " + p.customer.state + " " +
-          p.item.description + " " + STAGE_LABEL[p.status] + " " + (p.tracking || "") + " " + (p.carrier || ""))
+          p.item.description + " " + stageLabelFor(p) + " " + (p.tracking || "") + " " + (p.carrier || ""))
           .toLowerCase().indexOf(trackQuery) >= 0;
       });
     }
@@ -1596,7 +1824,7 @@
         '<div class="ri-main">' +
         '<div class="ri-title">' + p.id + " · " + p.item.description + (p.exception ? ' <span class="pill sla-late">exception</span>' : '') + '</div>' +
         '<div class="ri-sub">' + p.customer.name + " · " + p.customer.city + ", " + p.customer.state + '</div></div>' +
-        '<span class="' + pillClass(p.status) + '">' + STAGE_LABEL[p.status] + '</span>' + slaPillHtml(p) + '</div>';
+        '<span class="' + pillClass(p.status) + '">' + stageLabelFor(p) + '</span>' + slaPillHtml(p) + '</div>';
     }).join("") : '<p class="muted">No packages match “' + trackQuery + '”.</p>';
     $$("#tracking-list .row-item").forEach(function (el) {
       el.addEventListener("click", function () {
@@ -1628,7 +1856,7 @@
     var tl = '<div class="timeline">' + STAGES.map(function (s, i) {
       var h = p.history.find(function (x) { return x.stage === s; });
       var cls = i < cur ? "done" : i === cur ? "current" : "";
-      return '<div class="tl-node ' + cls + '"><div class="tl-stage">' + STAGE_LABEL[s] + '</div>' +
+      return '<div class="tl-node ' + cls + '"><div class="tl-stage">' + stageLabelFor(p, s) + '</div>' +
         (h ? '<div class="tl-time">' + fmtTime(h.ts) + '</div><div class="tl-note">' + h.note + '</div>'
            : '<div class="tl-note muted">Pending</div>') + '</div>';
     }).join("") + '</div>';
@@ -1665,7 +1893,7 @@
           var act = p.status === "InTransit" ? "Out for Delivery →" : "Mark Delivered ✓";
           return '<div class="row-item" data-open="' + p.id + '"><div class="ri-main"><div class="ri-title">' + p.id + ' · ' + p.item.description +
             (p.exception ? ' <span class="pill sla-late">exception</span>' : '') + '</div><div class="ri-sub">' + p.customer.name + ' · ' + p.customer.address + ', ' + p.customer.city + '</div></div>' +
-            '<span class="' + pillClass(p.status) + '">' + STAGE_LABEL[p.status] + '</span> <button class="btn ok sm" data-scan="' + p.id + '">' + act + '</button></div>';
+            '<span class="' + pillClass(p.status) + '">' + stageLabelFor(p) + '</span> <button class="btn ok sm" data-scan="' + p.id + '">' + act + '</button></div>';
         }).join("") : '<p class="muted">No active stops. Scan a staged label to begin.</p>') + '</div></div>';
     } else {
       $("#view-title").textContent = "Runner Home";
@@ -1778,7 +2006,7 @@
     var cur = stageIdx(p.status);
     var tl = '<div class="timeline">' + STAGES.slice(0, cur + 1).map(function (s, i) {
       var h = p.history.find(function (x) { return x.stage === s; });
-      return '<div class="tl-node ' + (i === cur ? "current" : "done") + '"><div class="tl-stage">' + STAGE_LABEL[s] +
+      return '<div class="tl-node ' + (i === cur ? "current" : "done") + '"><div class="tl-stage">' + stageLabelFor(p, s) +
         '</div><div class="tl-time">' + (h ? fmtTime(h.ts) : "") + '</div></div>';
     }).join("") + '</div>';
     var photos = (p.photos.pickup || p.photos.delivery)
@@ -1787,7 +2015,7 @@
       : '<p class="muted small">No condition photos yet.</p>';
     modal(
       '<button class="close-x" data-close>×</button>' +
-      '<span class="' + pillClass(p.status) + '">' + STAGE_LABEL[p.status] + '</span>' + slaPillHtml(p) +
+      '<span class="' + pillClass(p.status) + '">' + stageLabelFor(p) + '</span>' + slaPillHtml(p) +
       (p.return ? ' <span class="' + returnPillClass(p.return.status) + '">↩ Return: ' + p.return.status + '</span>' : '') +
       (p.exception ? '<div class="exc-banner">⚠ ' + p.exception.type + (p.exception.note ? ' (' + p.exception.note + ')' : '') + '</div>' : '') +
       '<h2 style="margin-top:8px">' + p.id + ": " + p.item.description + '</h2>' +
@@ -1848,7 +2076,7 @@
     modal(
       '<button class="close-x" data-close>×</button>' +
       '<div class="cust-detail-head">' +
-      '<span class="' + pillClass(p.status) + '">' + (CUST_STATUS[p.status] || STAGE_LABEL[p.status]) + '</span>' +
+      '<span class="' + pillClass(p.status) + '">' + (CUST_STATUS[p.status] || stageLabelFor(p)) + '</span>' +
       '<h2>' + p.item.description + '</h2>' +
       '<p class="muted">Tracking ' + p.id + ' · ' + custEta(p) + '</p>' +
       '</div>' +
@@ -1859,8 +2087,54 @@
       (addr ? '<div><dt>Address</dt><dd>' + addr + '</dd></div>' : '') +
       '<div><dt>Declared value</dt><dd>' + money(p.item.value) + '</dd></div>' +
       (p.tracking ? '<div><dt>Carrier tracking</dt><dd>' + p.tracking + '</dd></div>' : '') +
-      '</dl>'
+      '</dl>' +
+      '<div class="cust-detail-actions">' +
+      '<button class="btn block" id="cust-copy-link" type="button">🔗 Copy tracking link</button>' +
+      // Cancelling is only offered before anything physical has happened to the parcel.
+      (stageIdx(p.status) === 0 && !p.pendingSync
+        ? '<button class="btn danger block" id="cust-cancel" type="button">Cancel this order</button>'
+        : '') +
+      '</div>'
     );
+    var cl = $("#cust-copy-link");
+    if (cl) cl.addEventListener("click", function () {
+      var url = location.href.replace(/[^\/]*$/, "track.html?n=" + encodeURIComponent(p.id)).replace(/#.*$/, "");
+      var done = function () { toast("Tracking link copied", "ok"); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, function () { toast(url, "ok"); });
+      else toast(url, "ok");
+    });
+    var cx = $("#cust-cancel");
+    if (cx) cx.addEventListener("click", function () { cancelCustomerOrder(p.id); });
+  }
+  // Customers can cancel their own order while it's still just "Order received".
+  function cancelCustomerOrder(id) {
+    var p = getPkg(id); if (!p) return;
+    confirmDialog({
+      title: "Cancel this order?",
+      message: "We'll stop " + p.item.description + " (" + p.id + ") from being picked up. This can't be undone.",
+      confirmLabel: "Cancel order", danger: true
+    }).then(function (ok) {
+      if (!ok) return;
+      var u = (typeof currentUser === "function") ? currentUser() : null;
+      var email = u ? u.email : null;
+      var applyLocal = function () {
+        state.packages = state.packages.filter(function (x) { return x.id !== id; });
+        save(); closeModal();
+        renderCustomerOrderList(email); renderCustHomeList(email); renderNotifs();
+        toast(id + " cancelled", "ok");
+      };
+      if (hasServerAuth()) {
+        fetch("/api/my-orders?id=" + encodeURIComponent(id), { method: "DELETE", headers: { "Authorization": "Bearer " + authToken() } })
+          .then(function (r) { return r.json(); })
+          .then(function (j) {
+            if (j && j.ok) { mergeCustomerOrders(j.orders, email); closeModal(); renderCustomerOrderList(email); renderCustHomeList(email); renderNotifs(); toast(id + " cancelled", "ok"); }
+            else { toast((j && j.error) || "Could not cancel that order.", "ok"); }
+          })
+          .catch(function () { applyLocal(); });
+      } else {
+        applyLocal();
+      }
+    });
   }
 
   function attr(s) { return String(s == null ? "" : s).replace(/"/g, "&quot;"); }
@@ -1894,6 +2168,7 @@
   function deletePackage(id) {
     confirmDialog({ title: "Delete " + id + "?", message: "This cannot be undone.", confirmLabel: "Delete", danger: true }).then(function (ok) {
       if (!ok) return;
+      addTombstone(id); // so the server merge doesn't bring it back on the next push
       state.packages = state.packages.filter(function (p) { return p.id !== id; });
       rebuildManifests(); save(); closeModal();
       if (cocSelected === id) cocSelected = null;
@@ -1901,13 +2176,56 @@
     });
   }
 
+  // ---- Dialog focus handling ----
+  // Without this, opening a dialog leaves the keyboard behind it: Tab walks the page
+  // underneath and the dialog is unreachable. Move focus in, keep Tab inside, and put
+  // focus back where it started on close. Stacked so a dialog opened from a dialog
+  // (a confirm on top of the package modal) unwinds in the right order.
+  var focusTraps = [];
+  function focusableIn(el) {
+    if (!el) return [];
+    return $$('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])', el)
+      .filter(function (n) { return n.offsetWidth > 0 || n.offsetHeight > 0; });
+  }
+  function trapFocus(container) {
+    if (!container) return;
+    var entry = { container: container, prev: document.activeElement };
+    entry.onKey = function (e) {
+      if (e.key !== "Tab") return;
+      var f = focusableIn(container);
+      if (!f.length) return;
+      var first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", entry.onKey, true);
+    focusTraps.push(entry);
+    setTimeout(function () { var f = focusableIn(container); (f[0] || container).focus(); }, 0);
+  }
+  function releaseFocus(container) {
+    for (var i = focusTraps.length - 1; i >= 0; i--) {
+      if (focusTraps[i].container === container) {
+        var entry = focusTraps.splice(i, 1)[0];
+        document.removeEventListener("keydown", entry.onKey, true);
+        if (entry.prev && entry.prev.focus) { try { entry.prev.focus(); } catch (e) { } }
+        return;
+      }
+    }
+  }
+
   function modal(html) {
     $("#modal").innerHTML = html;
     $("#modal-backdrop").classList.add("open");
     var x = $("#modal [data-close]");
     if (x) x.addEventListener("click", closeModal);
+    trapFocus($("#modal"));
   }
-  function closeModal() { $("#modal-backdrop").classList.remove("open"); }
+  function closeModal() {
+    var bd = $("#modal-backdrop");
+    if (!bd.classList.contains("open")) return; // avoid stealing focus when already shut
+    bd.classList.remove("open");
+    releaseFocus($("#modal"));
+  }
   $("#modal-backdrop").addEventListener("click", function (e) { if (e.target === $("#modal-backdrop")) closeModal(); });
   document.addEventListener("keydown", function (e) { if (e.key !== "Escape") return; closeModal(); closeConfirmDialog(); closeGate(); closeAccountMenu(); closeNotif(); closeWelcomeTour(); });
 
@@ -1923,9 +2241,11 @@
     okBtn.className = "btn block " + (opts.danger ? "danger" : "primary");
     cancelBtn.textContent = opts.cancelLabel || "Cancel";
     bd.classList.add("open");
+    trapFocus($(".confirm-card"));
     return new Promise(function (resolve) {
       function cleanup(result) {
         bd.classList.remove("open");
+        releaseFocus($(".confirm-card"));
         okBtn.removeEventListener("click", onOk);
         cancelBtn.removeEventListener("click", onCancel);
         confirmActive = null;
@@ -2050,6 +2370,32 @@
   if (searchInput) searchInput.addEventListener("input", function () { trackQuery = this.value.trim().toLowerCase(); renderTracking(); });
 
   // Login + sign out
+  var forgotBtn = $("#forgot-btn"); if (forgotBtn) forgotBtn.addEventListener("click", requestPasswordReset);
+  var resetCancel = $("#reset-cancel"); if (resetCancel) resetCancel.addEventListener("click", hideResetForm);
+  var resetForm = $("#reset-form");
+  if (resetForm) resetForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var pw = $("#reset-pw").value || "";
+    var err = $("#reset-err"); err.textContent = "";
+    if (pw.length < 4) { err.textContent = "Password must be at least 4 characters."; return; }
+    var btn = $("#reset-submit"); btn.disabled = true; btn.textContent = "Saving…";
+    postAuth("reset-confirm", { token: resetToken, pw: pw })
+      .then(function (j) {
+        btn.disabled = false; btn.textContent = "Save new password";
+        if (!(j && j.ok)) { err.textContent = (j && j.error) || "Could not set that password."; return; }
+        authSave({ token: j.token, user: j.user });
+        try { history.replaceState(null, "", location.pathname); } catch (e2) { }
+        var rb = $("#reset-body"); if (rb) rb.style.display = "none";
+        var lb = $(".login-body"); if (lb) lb.style.display = "";
+        enterApp();
+        toast("Password updated. You're signed in.", "ok");
+      })
+      .catch(function () {
+        btn.disabled = false; btn.textContent = "Save new password";
+        err.textContent = "Could not reach the server. Check your connection and try again.";
+      });
+  });
+
   var loginForm = $("#login-form");
   if (loginForm) loginForm.addEventListener("submit", function (e) {
     e.preventDefault();
@@ -2208,6 +2554,17 @@
   var chomeViewAll = $("#chome-viewall"); if (chomeViewAll) chomeViewAll.addEventListener("click", function () { go("order"); });
   var acctSignout = $("#acct-signout"); if (acctSignout) acctSignout.addEventListener("click", confirmSignOut);
   var acctSwitch = $("#acct-switch"); if (acctSwitch) acctSwitch.addEventListener("click", openGate);
+  var acctTour = $("#acct-tour"); if (acctTour) acctTour.addEventListener("click", showWelcomeTour);
+  var acctSupport = $("#acct-support");
+  if (acctSupport) acctSupport.addEventListener("click", function () {
+    window.location.href = "mailto:ken@usegl.com?subject=" + encodeURIComponent("Granite Logistics support");
+  });
+  var custSearch = $("#cust-search");
+  if (custSearch) custSearch.addEventListener("input", function () {
+    custQuery = this.value.trim().toLowerCase();
+    var u = (typeof currentUser === "function") ? currentUser() : null;
+    renderCustomerOrderList(u ? u.email : null);
+  });
 
   // Mobile drawer
   var menuBtn = $("#menu-btn"); if (menuBtn) menuBtn.addEventListener("click", function () { toggleSidebar(); });
@@ -2281,7 +2638,12 @@
   applyTheme();
   updateRoleUI();
   renderBottomNav();
-  if (currentUser()) {
+  // Arriving from a password-reset email takes priority over any cached session.
+  var bootReset = null;
+  try { bootReset = new URLSearchParams(location.search).get("reset"); } catch (e) { }
+  if (bootReset) {
+    showResetForm(bootReset);
+  } else if (currentUser()) {
     state.settings.role = currentUser().role || state.settings.role;
     state.settings.roleChosen = true;
     if (!applyHash()) go(allowedViews()[0]);

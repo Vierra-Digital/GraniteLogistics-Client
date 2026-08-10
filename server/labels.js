@@ -1,4 +1,4 @@
-/* Puppeteer label rendering — turns a package into a printable 4x6 PDF label.
+/* Puppeteer label rendering: turns a package into a printable 4x6 PDF label.
  * Uses a system Chromium (Chrome/Edge) since the bundled download may be blocked.
  * Lazy/graceful: throws a clear error if no browser is available. */
 "use strict";
@@ -32,7 +32,7 @@ function labelInner(pkg, company) {
     '<div class="to">' + esc(c.name || "") + '<br>' + esc(c.address || "") + '<br>' + esc(c.city || "") + ', ' + esc(c.state || "") + ' ' + esc(c.zip || "") + '</div>' +
     '<div class="bc">' + bc + '</div>' +
     '<div class="key">' + esc(pkg.barcode || pkg.id || "") + '</div>' +
-    '<div class="meta"><span>' + esc(pkg.id || "") + '</span><span>WT ' + ((pkg.item && pkg.item.weight) || "—") + ' LB</span></div>' +
+    '<div class="meta"><span>' + esc(pkg.id || "") + '</span><span>WT ' + ((pkg.item && pkg.item.weight) || "–") + ' LB</span></div>' +
     '</div>';
 }
 var STYLE = '<style>*{margin:0;box-sizing:border-box}@page{size:4in 6in;margin:0}' +
@@ -51,7 +51,7 @@ var _browser = null;
 async function getBrowser() {
   if (_browser && _browser.isConnected && _browser.isConnected()) return _browser;
   var exe = findBrowser();
-  if (!exe) throw new Error("No Chrome/Edge found — set GL_CHROME to a Chromium executable path.");
+  if (!exe) throw new Error("No Chrome/Edge found. Set GL_CHROME to a Chromium executable path.");
   var puppeteer = require("puppeteer");
   _browser = await puppeteer.launch({ headless: "new", executablePath: exe, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
   return _browser;

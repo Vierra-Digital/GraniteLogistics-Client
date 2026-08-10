@@ -109,19 +109,33 @@
   var fmt = function (ts) { return new Date(ts).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }); };
 
   function load() { try { var d = JSON.parse(localStorage.getItem(STORE) || "null"); return d && Array.isArray(d.packages) ? d.packages : []; } catch (e) { return []; } }
-  function lookup(q) { var n = norm(q); return load().find(function (p) { return norm(p.id) === n || norm(p.barcode) === n; }); }
+  // Local fallback: works for packages created in this browser, and keeps the page
+  // useful offline or under a plain static server with no /api.
+  function localLookup(q) {
+    var n = norm(q);
+    return load().find(function (p) { return norm(p.id) === n || norm(p.barcode) === n || norm(p.tracking) === n; });
+  }
+  // Shared tracking links have to resolve for the recipient, who has none of this in
+  // their own storage, so the public API is the primary source.
+  function apiLookup(q) {
+    return fetch("/api/track?n=" + encodeURIComponent(q))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { return (j && j.ok && j.shipment) ? j.shipment : null; })
+      .catch(function () { return null; });
+  }
 
   function render(p, q) {
     var box = document.getElementById("result");
     if (!q) { box.innerHTML = ""; return; }
     if (!p) {
       box.innerHTML = '<div class="tk-card tk-empty"><b>No shipment found for “' + q + '”.</b>' +
-        '<p class="muted">Double-check the tracking number. In this demo, packages created in the platform on this device appear here.</p></div>';
+        '<p class="muted">Double-check the tracking number. It can take a few minutes for a brand-new order to appear here.</p></div>';
       return;
     }
     var step = STATUS_STEP[p.status] || 0;
-    var deliveredTs = (p.history.find(function (h) { return h.stage === "Delivered"; }) || {}).ts;
-    var lastTs = p.history.length ? p.history[p.history.length - 1].ts : Date.now();
+    var hist = p.history || [];
+    var deliveredTs = (hist.find(function (h) { return h.stage === "Delivered"; }) || {}).ts;
+    var lastTs = hist.length ? hist[hist.length - 1].ts : Date.now();
     var eta;
     if (deliveredTs) eta = "Delivered " + fmt(deliveredTs);
     else if (p.promisedTs && p.promisedTs < Date.now()) eta = "Delayed, was due " + fmt(p.promisedTs);
@@ -134,17 +148,30 @@
       ? '<div class="tk-photos">' + (p.photos.pickup ? '<img src="' + p.photos.pickup + '" alt="condition photo">' : "") +
         (p.photos.delivery ? '<img src="' + p.photos.delivery + '" alt="delivery photo">' : "") + "</div>"
       : "";
+    // The public API withholds contents and recipient details, so only render the rows
+    // we actually have. The local fallback carries the full object and shows more.
+    var dest = p.destination || p.customer || {};
+    var destText = [dest.city, dest.state].filter(Boolean).join(", ");
+    var itemDesc = p.item && p.item.description;
     box.innerHTML = '<div class="tk-card">' +
       '<div class="tk-top"><div><div class="tk-id">' + p.id + '</div><div class="tk-status">' + (STATUS_LABEL[p.status] || p.status) + '</div></div>' +
       '<div class="tk-eta">' + eta + '</div></div>' +
       excHtml +
       '<div class="tk-steps">' + steps + '</div>' +
       '<div class="tk-grid">' +
-      '<div><b>Item</b><span>' + p.item.description + '</span></div>' +
-      '<div><b>Destination</b><span>' + p.customer.city + ", " + p.customer.state + '</span></div>' +
+      (itemDesc ? '<div><b>Item</b><span>' + itemDesc + '</span></div>' : '') +
+      (destText ? '<div><b>Destination</b><span>' + destText + '</span></div>' : '') +
       '<div><b>Carrier</b><span>' + (p.carrier || "Granite Logistics") + '</span></div>' +
-      '<div><b>Tracking #</b><span class="mono">' + (p.tracking || p.barcode) + '</span></div>' +
+      '<div><b>Tracking #</b><span class="mono">' + (p.tracking || p.barcode || p.id) + '</span></div>' +
       '</div>' + photos + '</div>';
+  }
+
+  // Ask the API first, fall back to whatever this device knows.
+  function show(q) {
+    var box = document.getElementById("result");
+    if (!q) { box.innerHTML = ""; return; }
+    box.innerHTML = '<div class="tk-card tk-empty"><b>Looking up ' + q + '…</b></div>';
+    apiLookup(q).then(function (hit) { render(hit || localLookup(q), q); });
   }
 
   var input = document.getElementById("tk-input");
@@ -152,11 +179,11 @@
     e.preventDefault();
     var q = input.value.trim();
     history.replaceState(null, "", q ? "?n=" + encodeURIComponent(q) : location.pathname);
-    render(lookup(q), q);
+    show(q);
   });
   var y = document.getElementById("year"); if (y) y.textContent = new Date().getFullYear();
   var n = new URLSearchParams(location.search).get("n");
-  if (n) { input.value = n; render(lookup(n), n); }
+  if (n) { input.value = n; show(n); }
 })();
 </script>
 </body>

@@ -1,4 +1,4 @@
-/* Granite Logistics — zero-dependency backend (multi-tenant).
+/* Granite Logistics zero-dependency backend (multi-tenant).
  * Serves the static PWA AND a key-authed JSON API. Each API key maps to a tenant
  * with isolated state; inbound order webhooks support optional HMAC signatures.
  * No npm install required. Run: node server/server.js
@@ -45,7 +45,7 @@ function makeOrder(d, state) {
   var id = nextId(state), now = Date.now();
   return {
     id: id, source: d.source || "API", orderRef: d.orderRef || ("#" + (10000 + Math.floor(Math.random() * 89999))),
-    customer: { name: (d.name || "—").toString().trim(), address: (d.address || "").toString().trim(), city: (d.city || "").toString().trim(), state: (d.state || "").toString().trim().toUpperCase(), zip: (d.zip || "").toString().trim(), phone: (d.phone || "").toString().trim() },
+    customer: { name: (d.name || "–").toString().trim(), address: (d.address || "").toString().trim(), city: (d.city || "").toString().trim(), state: (d.state || "").toString().trim().toUpperCase(), zip: (d.zip || "").toString().trim(), phone: (d.phone || "").toString().trim() },
     item: { description: (d.item || "Item").toString().trim(), value: Math.max(0, parseInt(d.value, 10) || 0), weight: Math.max(1, parseInt(d.weight, 10) || (2 + Math.floor(Math.random() * 38))) },
     barcode: id.replace(/-/g, ""), carrier: null, lane: null, batchId: null, tracking: null, photos: {},
     history: [{ stage: "Won", ts: now, note: "Order received via API webhook." }],

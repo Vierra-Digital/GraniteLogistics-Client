@@ -332,6 +332,10 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .toast .t-ico{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:.8rem;flex-shrink:0}
 .toast.ok .t-ico{background:var(--emerald)}
 .toast.api .t-ico{background:var(--blue)}
+/* A warning stays up longer (see toast() in app.js) and reads as something to act on,
+   not a routine confirmation. Wider, since it carries a reason rather than two words. */
+.toast.warn{max-width:420px;align-items:flex-start}
+.toast.warn .t-ico{background:var(--amber);color:var(--slate-900)}
 @keyframes slideIn{from{transform:translateX(20px);opacity:0}to{transform:none;opacity:1}}
 
 /* Order intake form + CSV import */
@@ -461,6 +465,7 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .login-card .ff{margin-bottom:13px}
 .login-err{color:#b91c1c;font-size:.85rem;min-height:1.1em;margin-bottom:8px}
 .login-submit{width:100%;justify-content:center;padding:12px;font-size:.95rem}
+.login-forgot{margin-top:12px;text-align:center}
 .login-alt{margin-top:16px;text-align:center;font-size:.86rem;color:var(--slate-500)}
 .linkbtn{background:0;border:0;color:var(--blue-d);font-weight:700;cursor:pointer;font-size:.86rem;font-family:inherit}
 .linkbtn:hover{text-decoration:underline}
@@ -486,6 +491,11 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .acct-id b{display:block;color:var(--ink);font-size:1.05rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .acct-id span{font-size:.86rem;color:var(--slate-500);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
 .acct-switch{display:block;width:100%;text-align:center;margin-top:16px;font-size:.82rem}
+
+/* Customer order search + tracker actions */
+.cust-search{width:100%;min-width:0;margin-bottom:12px}
+.cust-detail-actions{display:flex;flex-direction:column;gap:8px;margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}
+.cust-detail-actions .btn{margin-top:0}
 
 /* ===== Customer ordering flow (default experience) ===== */
 .order-hero{margin-bottom:20px}
@@ -664,6 +674,9 @@ body[data-role="Customer"] .view-wrap{padding-bottom:calc(74px + env(safe-area-i
 
   .bottom-nav{display:flex}
   .view-wrap{padding-bottom:calc(74px + env(safe-area-inset-bottom,0px))}
+  /* Mobile is the customer app: the ops workspaces are desktop-only, so there's
+     nothing to switch to from here (see isMobileViewport() in app.js). */
+  .acct-switch{display:none}
 }
 
 @media(max-width:760px){

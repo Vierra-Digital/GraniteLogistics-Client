@@ -47,14 +47,27 @@
       <div id="login-err" class="login-err"></div>
       <button class="btn primary login-submit" type="submit" id="login-submit">Sign in</button>
     </form>
+    <div class="login-forgot" id="login-forgot"><button type="button" class="linkbtn" id="forgot-btn">Forgot your password?</button></div>
     <div class="login-alt" id="login-alt"></div>
+    </div>
+
+    <!-- Set a new password (shown when the app is opened from a reset link) -->
+    <div class="login-body" id="reset-body" style="display:none">
+      <h1>Set a new password</h1>
+      <p class="login-sub">Choose a new password for your account.</p>
+      <form id="reset-form" autocomplete="on">
+        <div class="ff"><label>New password</label><input id="reset-pw" type="password" autocomplete="new-password" required placeholder="••••••••" /></div>
+        <div id="reset-err" class="login-err"></div>
+        <button class="btn primary login-submit" type="submit" id="reset-submit">Save new password</button>
+      </form>
+      <div class="login-alt"><button type="button" class="linkbtn" id="reset-cancel">Back to sign in</button></div>
     </div>
   </div>
 </div>
 
 <!-- Welcome tour (shown once, right after a new account is created) -->
 <div id="welcome-backdrop" class="welcome-backdrop">
-  <div class="welcome-card">
+  <div class="welcome-card" role="dialog" aria-modal="true" aria-label="Welcome to Granite Logistics" tabindex="-1">
     <div id="welcome-slides">
       <div class="w-slide active" data-slide="1">
         <div class="w-ico">🛒</div>
@@ -85,7 +98,7 @@
 </div>
 
 <!-- Workspace picker (switch which role's tools you see) -->
-<div id="role-gate" class="role-gate">
+<div id="role-gate" class="role-gate" role="dialog" aria-modal="true" aria-label="Choose your workspace" tabindex="-1">
   <button class="rg-close" id="rg-close" aria-label="Close">×</button>
   <div class="rg-inner">
     <div class="rg-brand">
@@ -213,6 +226,11 @@
             <div class="acct-id"><b id="acct-name">–</b><span id="acct-email">–</span></div>
           </div>
         </div>
+        <div class="card">
+          <div class="card-head"><h2>Help</h2></div>
+          <button class="btn block" id="acct-tour" type="button">▶ Show me how it works</button>
+          <button class="btn block" id="acct-support" type="button">✉ Contact support</button>
+        </div>
         <button class="btn danger block" id="acct-signout" type="button">⎋ Sign out</button>
         <button class="linkbtn acct-switch" id="acct-switch" type="button">Switch workspace (ops / admin view)</button>
       </section>
@@ -274,6 +292,7 @@
           </div>
           <div class="card order-card">
             <div class="card-head"><h2>Your orders</h2><span class="muted" id="cust-count"></span></div>
+            <input id="cust-search" class="search-input cust-search" type="search" aria-label="Search your orders by tracking number or item" placeholder="Search tracking # or item…" />
             <div id="cust-orders" class="cust-orders"></div>
           </div>
         </div>
@@ -625,12 +644,12 @@
 
 <!-- Modal -->
 <div class="modal-backdrop" id="modal-backdrop">
-  <div class="modal" id="modal"></div>
+  <div class="modal" id="modal" role="dialog" aria-modal="true" aria-label="Shipment details" tabindex="-1"></div>
 </div>
 
 <!-- Confirm dialog (replaces native confirm() for a consistent, app-styled prompt) -->
 <div class="confirm-backdrop" id="confirm-backdrop">
-  <div class="confirm-card" role="alertdialog" aria-modal="true">
+  <div class="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message" tabindex="-1">
     <h3 id="confirm-title">Are you sure?</h3>
     <p id="confirm-message"></p>
     <div class="confirm-actions">
@@ -641,7 +660,9 @@
 </div>
 
 <!-- Toasts -->
-<div class="toast-stack" id="toasts"></div>
+<!-- Toasts carry real feedback ("Order placed", "Cancelled"), so they have to be
+     announced rather than only shown. -->
+<div class="toast-stack" id="toasts" role="status" aria-live="polite"></div>
 
 <!-- Print target (hidden on screen, shown only when printing a label) -->
 <div id="print-root" class="print-root"></div>

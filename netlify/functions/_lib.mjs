@@ -16,12 +16,29 @@ export function json(obj, status = 200) {
 export function tenants() {
   try { return process.env.GL_TENANTS ? JSON.parse(process.env.GL_TENANTS) : null; } catch (e) { return null; }
 }
-export function tenantOf(req) {
+
+// These are published in this repo and shipped in the client bundle, so they are public
+// knowledge. They stay usable for /api/orders, which is write-only ingest, but they must
+// never unlock a read of the whole workspace. See resolveKey's `source`.
+export const DEMO_KEYS = { "granite-dev-key": "default", "acme-key": "acme", "globex-key": "globex" };
+
+// Resolve an api key to a tenant, and say where the key came from.
+//   source "config" = operator-configured via GL_TENANTS, i.e. actually secret
+//   source "demo"   = one of the public DEMO_KEYS above
+// Callers that expose data must require "config".
+export function resolveKey(req) {
   const url = new URL(req.url);
   const key = req.headers.get("x-api-key") || url.searchParams.get("key") || "";
-  const map = tenants() || { "granite-dev-key": "default", "acme-key": "acme", "globex-key": "globex" };
-  return map[key] || null;
+  if (!key) return { tenant: null, source: null };
+  // GL_TENANTS replaces the demo keys rather than extending them, so configuring it
+  // switches the public keys off completely.
+  const configured = tenants();
+  if (configured) {
+    return configured[key] ? { tenant: configured[key], source: "config" } : { tenant: null, source: null };
+  }
+  return DEMO_KEYS[key] ? { tenant: DEMO_KEYS[key], source: "demo" } : { tenant: null, source: null };
 }
+export function tenantOf(req) { return resolveKey(req).tenant; }
 
 export const EMPTY = { packages: [], manifests: [], loadUnits: [], events: [], settings: {} };
 
@@ -34,6 +51,45 @@ export async function readState(tenant) {
 }
 export async function writeState(tenant, data) {
   await store().setJSON(tenant, { ...data, updatedAt: new Date().toISOString() });
+}
+
+// What a public tracking link is allowed to reveal.
+//
+// Tracking numbers are sequential, so anyone can enumerate them. This returns only
+// what carriers themselves publish: where it is, when it's due, and where it's headed
+// at city level. Recipient name, street address, email, contents, declared value and
+// condition photos are all withheld, as is the internal note on an exception.
+export function publicTrackingView(p) {
+  if (!p) return null;
+  return {
+    id: p.id,
+    status: p.status,
+    barcode: p.barcode || null,
+    carrier: p.carrier || null,
+    tracking: p.tracking || null,
+    promisedTs: p.promisedTs || null,
+    history: (p.history || []).map((h) => ({ stage: h.stage, ts: h.ts })),
+    destination: p.customer ? { city: p.customer.city || "", state: p.customer.state || "" } : null,
+    exception: p.exception ? { type: p.exception.type } : null,
+  };
+}
+
+// Merge an ops client's pushed workspace with what's already stored.
+//
+// Ops clients push their entire local state, which may be minutes stale, while
+// customers write orders straight into the same record via /api/my-orders. A blind
+// replace would delete any order placed since that client's last pull, so customer
+// orders missing from the payload are preserved. `deleted` carries ids the client
+// removed on purpose, which are allowed through so real deletions still stick.
+// Pure function, kept here so it can be unit tested without the Blobs runtime.
+export function mergePushedPackages(currentPackages, pushedPackages, deleted) {
+  const pushed = Array.isArray(pushedPackages) ? pushedPackages : [];
+  const pushedIds = new Set(pushed.map((p) => p && p.id));
+  const tombstoned = new Set((Array.isArray(deleted) ? deleted : []).map((t) => (t && t.id) || t));
+  const preserved = (currentPackages || []).filter(
+    (p) => p && p.customerEmail && !pushedIds.has(p.id) && !tombstoned.has(p.id)
+  );
+  return { packages: preserved.length ? pushed.concat(preserved) : pushed, preserved: preserved.length };
 }
 
 export function nextId(state) {

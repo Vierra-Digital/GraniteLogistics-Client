@@ -1,183 +1,198 @@
-# Granite Logistics — Enterprise Platform (Demo)
+# Granite Logistics
 
-A high-fidelity, installable PWA demo of the Granite Logistics enterprise vision:
-the full **Auction Win → Delivery Confirmed** journey, with API-first order ingest,
-UPS/FedEx carrier integration, a real Code 128 chain-of-custody, and condition photos.
+An installable PWA covering the full **order to delivery-confirmed** journey: a
+customer-facing ordering app, an operations platform, API-first order ingest, a real
+Code 128 chain of custody, and condition photos.
 
-Built for executive pitches. **All external integrations are simulated** (no real
-carrier/e-commerce credentials required) so it runs anywhere, offline, with zero setup.
+Two audiences share one codebase:
 
-## Run it
+- **Customers** get a focused three-tab app (Home / Orders / Account) with real
+  accounts, order placement, tracking, and cancellation.
+- **Ops** (Admin / Runner / Driver / Viewer) get the dense platform: ingest, labels,
+  pre-sort, manifests, driver scan, returns, reports, and an audit log.
 
-It's static files — no build step.
+Mobile is customer-only for now. On a viewport of 980px or narrower the app always
+renders the customer experience, whatever role is saved, because the ops tools assume
+a desktop-sized screen.
+
+## Run it locally
+
+Static files, no build step:
 
 ```bash
-# from this folder, any static server works:
 python -m http.server 8080
-# then open http://localhost:8080
+# open http://localhost:8080
 ```
 
-(Service worker / install prompt need a server, not a `file://` open.)
+A server (not `file://`) is required for the service worker and install prompt.
+
+Note that `/api/*` does not exist under a plain static server, so the app falls back to
+local-only accounts and local order storage. That fallback is deliberate and also covers
+being offline. To exercise the real API, deploy to Netlify or run `netlify dev`.
+
+## Tests
+
+```bash
+npm test
+```
+
+59 tests, no network and no browser required, in two layers:
+
+- **Unit** (`test/functions.test.mjs`) covers the pure logic: workspace merging, id
+  allocation, session tokens, tenant and api-key resolution, role assignment, the public
+  tracking sanitizer, and email degradation.
+- **Integration** (`test/integration.test.mjs`) drives the **real function handlers**
+  with `@netlify/blobs` swapped for an in-memory store, so it verifies the pieces
+  actually fit together. Most importantly it proves the end-to-end loop: a customer
+  places an order, ops sees that package in the shared workspace, ops advances it, and
+  the customer sees the new status. It also covers cross-account isolation, cancellation
+  rules, stale-push protection, tombstoned deletions, forged and expired tokens,
+  password-change session invalidation, the legacy order migration, and the authorization
+  rules on the ops workspace (customer sessions refused, demo keys refused, `Viewer`
+  read-only, no self-granted roles).
+
+The integration layer needs `--experimental-test-module-mocks`, which the npm script
+already passes.
+
+## Deploy (Netlify)
+
+Connect the repo. `netlify.toml` needs no build command; the functions in
+`netlify/functions/` are picked up automatically and storage is Netlify Blobs, so
+there is no database to provision.
+
+### Environment variables
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `GL_AUTH_SECRET` | **Yes, for production** | HMAC secret for session tokens. Without it a public fallback constant is used, which means anyone reading this repo could forge a session. Use a 32-byte random hex string. |
+| `GL_RESEND_KEY` | For password reset | [Resend](https://resend.com) API key. Without it the reset endpoint returns a clear "not set up" error instead of failing silently. |
+| `GL_MAIL_FROM` | For password reset | Verified sender, e.g. `Granite Logistics <no-reply@usegl.com>`. |
+| `GL_ADMIN_EMAILS` | To use the ops platform | Comma-separated emails granted the `Admin` role, e.g. `you@co.com,ops@co.com`. Without this, every account is a Customer and nobody can reach the ops workspace. |
+| `GL_ROLES` | Optional | JSON map of email to a non-Admin ops role, e.g. `{"dana@co.com":"Runner"}`. Valid roles are `Admin`, `Runner`, `Driver`, `Viewer`. |
+| `GL_TENANTS` | Optional | JSON map of api key to tenant, e.g. `{"my-key":"my-tenant"}`. Setting it **replaces** the built-in demo keys rather than adding to them, which switches the public keys off. |
+
+Changing `GL_AUTH_SECRET` invalidates every existing session, which is the correct
+behaviour when rotating it.
+
+### Roles are assigned by the operator, never by the client
+
+A role is derived from `GL_ADMIN_EMAILS` / `GL_ROLES` on every login, and the role stored
+on the account is not trusted. That means granting or revoking ops access is a config
+change that takes effect at the next sign-in, and it also revokes any ops role an account
+picked up before this was enforced. Sign up first, then add the address and sign in again.
+
+### The built-in api keys are public
+
+`granite-dev-key` and friends appear in this repo and in the client bundle, so they are
+not secrets. They stay valid for `POST /api/orders`, which only writes, and they are
+rejected by `/api/state`, which reads. For a real machine integration set `GL_TENANTS`.
+
+## API
+
+| Endpoint | Auth | Notes |
+|---|---|---|
+| `GET /api/health` | none | Liveness and storage backend. |
+| `GET /api/track?n=` | none | Public shipment lookup behind shareable tracking links. Returns a deliberately minimal view (status, dates, destination city, carrier) because tracking numbers are sequential and guessable. No recipient details, contents, or photos. |
+| `POST /api/auth` | none | `register`, `login`, `reset-request`, `reset-confirm`. |
+| `GET /api/auth` | Bearer token | Validates a session and returns the current user. |
+| `GET/POST/DELETE /api/my-orders` | Bearer token | A customer's own orders. Email comes from the verified token, so callers can only reach their own rows. `DELETE` cancels, and only before pickup. |
+| `GET/PUT /api/state` | Bearer token with an ops role, or a `GL_TENANTS` key | An ops client's whole workspace. Every recipient's name, address and phone lives here, so this is the one endpoint with real authorization: a Customer session gets 403, `Viewer` may read but not `PUT`, and the public demo keys are refused. |
+| `POST /api/orders` | `x-api-key` | Webhook ingest, single order or `{orders:[...]}`. Write-only, so a demo key here means at worst junk orders, not disclosure. |
+
+Passwords are salted and scrypt-hashed. Sessions are HMAC-signed, stateless, and carry
+an issued-at so that a password change invalidates every session minted before it.
+
+## Storage model, and why it matters
+
+Everything for one tenant lives in a single Netlify Blobs record. Customer orders are
+rows in that same record, tagged with `customerEmail`. That is what makes a customer
+order visible to ops, and an ops status change visible to the customer.
+
+Two consequences worth knowing before changing this code:
+
+1. **Ops clients push their entire local workspace.** That state can be minutes old, so
+   `PUT /api/state` does not blindly replace. It preserves any customer order missing
+   from the payload (created since that client last pulled) unless the client explicitly
+   tombstoned it in `deleted`. Without this, a routine ops push would delete recent
+   customer orders. See `mergePushedPackages` in `netlify/functions/_lib.mjs`.
+2. **Ids are allocated across the whole workspace.** Customer orders are numbered
+   server-side, so clients call `syncSeqFromPackages()` whenever server-numbered
+   packages arrive, otherwise a local package could reuse an existing id.
+
+Customers never push the whole workspace; they only ever go through `/api/my-orders`.
+
+**Known limitation:** `@netlify/blobs` v8 has no conditional writes, so there is no
+compare-and-swap. Two customers ordering inside the same read-modify-write window can
+still lose one order. The fix is per-package writes instead of whole-state pushes, which
+is a larger redesign.
+
+## Cloud sync providers
+
+**Settings → Cloud Sync** offers two providers for the ops workspace:
+
+- **Granite API** (default): the Netlify Functions above, or the bundled Node server.
+  Leave Server URL blank for same origin. Auto-sync is on by default for ops roles. The
+  client sends both its session token and the api key, because Netlify authorizes by role
+  while the bundled Node server authorizes by key. On Netlify you must be **signed in as
+  an ops user** for sync to work; the key alone is no longer enough.
+- **Supabase**: browser-to-Postgres, for a fully static deploy. Run
+  `supabase/schema.sql`, then paste the Project URL and anon key. The anon key is
+  public, so use a non-guessable workspace name for a pilot and add Auth plus RLS
+  (commented in the schema) for production.
+
+## Self-hosted Node server (optional)
+
+`server/server.js` is a zero-dependency server that hosts both the app and the API,
+useful for label rendering:
+
+```bash
+node server/server.js   # http://localhost:8080
+```
+
+It adds `GET /api/label/:id` and `GET /api/manifest/:id/labels`, which render real
+4x6 PDF labels via Puppeteer. `npm install` pulls Puppeteer; if the bundled Chromium
+download is blocked it auto-detects system Chrome or Edge, or set `GL_CHROME`. Labels
+render server-side, so the package must already exist on the server. `POST /api/orders`
+also accepts an optional `x-signature` HMAC of the body using `GL_WEBHOOK_SECRET`.
 
 ## Pages
 
-- **`index.html`** — public marketing landing: a single shipping-themed hero with a
-  working **Install the App** (PWA) button and a **Track a shipment** bar.
-- **`track.html`** — public, customer-facing tracking page (status stepper, ETA,
-  condition photos). The landing's track bar routes here (`track.html?n=GL-1042`).
-- **`app.html`** — the operations platform (the demo dashboard). Installing the
-  PWA opens straight to this page.
+- `index.html` public landing: one hero section, PWA install, track bar.
+- `track.html` public tracking lookup (status stepper, ETA, condition photos).
+- `app.html` the app itself. Installing the PWA opens here.
 
-## Deploy to a live URL
+## What works for real
 
-Drop the folder onto any static host — Netlify, Vercel, GitHub Pages, Cloudflare Pages,
-or an S3 bucket. No backend needed for the demo.
+- Real accounts with hashed passwords, cross-device sessions, and password reset.
+- Customer ordering: a three-step guided form, order list with search, a clean status
+  tracker, shareable tracking links, and cancellation before pickup.
+- Orders placed offline are kept and retried, and survive a later server pull.
+- Order intake by manual form, CSV import, and webhook.
+- Condition photos from the device camera, downscaled and timestamped.
+- Live barcode scanning via `BarcodeDetector` where supported, with a dropdown fallback.
+- Label printing (4 inch label via the browser) and PDF labels via the Node server.
+- ZIP pre-sort, palletized load units, manifests with SCAC and ASN-style payloads.
+- SLA tracking (on-time / at-risk / late) and delivery exceptions.
+- Returns through Requested, In Transit, Received.
+- Reports computed live from chain-of-custody timestamps.
+- Role-based navigation, in-app notifications, dark mode, command palette (Ctrl/Cmd-K),
+  JSON backup and restore, and a searchable audit log.
 
-## What's in the demo
+## What is still simulated
 
-| View | Shows the pitch story for… |
-|------|----------------------------|
-| **Executive Overview** | KPIs, live pipeline funnel, carrier mix, active shipments |
-| **Order Ingest** | Orders pulled automatically from Shopify / WooCommerce / MacBid — no manual entry |
-| **Runner Dashboard** | Condition photos + Code 128 label generation/printing |
-| **Batch & Lane Routing** | Grouping items into a carrier manifest at a dock lane |
-| **Driver Scan** | Scan-to-retrieve, status updates, carrier tracking numbers |
-| **Chain of Custody** | Tamper-evident, end-to-end timeline per package |
-
-**▶ Run Live Demo** (bottom-left) auto-walks one package through the entire journey
-with nar/toast callouts — the one-click pitch flow.
-
-## Real functionality (not just simulated)
-
-These work for real, no backend required:
-
-- **Local persistence** — every order and status change is saved to the device
-  (localStorage) and survives reloads. **Reset demo data** restores the seed.
-- **Manual order intake** — a real form on *Order Ingest* creates orders.
-- **CSV import** — upload a CSV of orders (with a downloadable template); rows
-  become live packages.
-- **CSV export** — download all shipments as a CSV.
-- **Real condition photos** — *Photo & Bin* and delivery use the device camera /
-  file picker (downscaled + timestamp-stamped); falls back to a placeholder.
-- **Live barcode scanning** — *Driver Scan* uses the browser `BarcodeDetector` +
-  camera where supported (Chromium/Android); the dropdown is the fallback.
-- **Label printing** — the label dialog prints a clean 4" label via the browser.
-- **Search** — filter the chain-of-custody list by id, customer, city, etc.
-- **Reports & Analytics** — a dashboard with KPIs (avg transit time, delivery rate,
-  value delivered) and charts computed live from the chain-of-custody timestamps.
-- **Manifests** — batches are recorded as manifests you can **print** or **export
-  to CSV** for the carrier.
-- **Edit / delete packages** — full CRUD from the package detail dialog.
-- **Customer tracking page** (`track.html`) — public status lookup with a delivery
-  stepper, ETA, and condition photos.
-- **Role-based access** — a workspace picker (Admin / Runner / Driver / Viewer) on
-  entry; grouped navigation shows only the tools each role should see, with a role
-  badge + one-click "Switch".
-- **Field mode** — Runner and Driver land on a focused, big-button **Home** (task
-  tiles + large actions / a scan CTA), distinct from the admin's data-dense overview.
-- **Notifications** — a top-bar alerts bell with a live count of open exceptions and
-  SLA breaches; click any alert to jump straight to the package.
-- **Dark mode** — a platform-wide light/dark toggle that persists per device.
-- **Returns / reverse logistics** — initiate a return on any delivered package and
-  move it through Requested → In Transit → Received, with a dedicated Returns queue.
-- **Command palette** — Ctrl/⌘-K to jump to any view or open any package fast.
-- **Settings** — editable company profile that flows onto printed labels &
-  manifests, default carrier/lane, and **full JSON backup / restore** to move data
-  between devices.
-- **Activity Log** — a tamper-evident audit trail of every chain-of-custody event,
-  searchable, newest first.
-- **Operational logistics** (facility prep before carrier handoff):
-  - **ZIP-code pre-sort** — groups outbound parcels by destination ZIP zone and
-    routes each to a dock lane to bypass initial hub handling.
-  - **Palletized / load-ready staging** — consolidates parcels into standardized
-    load units with weight + density metrics.
-  - **Streamlined manifesting** — transmits a manifest to the carrier as a
-    structured ASN / EDI-214-style payload (with SCAC), and prints/exports it.
-- **Exceptions & SLA** — every package has a promised-delivery (SLA) date with
-  live On-time / At-risk / Late status; delivery exceptions (address issue, damage,
-  weather, failed attempt, customs hold) can be flagged and resolved. Open
-  exceptions and SLA breaches surface in an **Alerts** panel, on the customer
-  tracking page, and in the Reports on-time rate.
-
-## Backend & cloud sync (optional)
-
-The app runs fully standalone (localStorage). To share data across devices, there's
-a **zero-dependency Node backend** (`server/server.js`, no npm install):
-
-```bash
-node server/server.js     # serves the app AND the API on http://localhost:8080
-# API key defaults to "granite-dev-key" (override with GL_API_KEY=...)
-```
-
-API (all but health require header `x-api-key`):
-- `GET /api/health` — open status (reports tenant count)
-- `GET / PUT /api/state` — read / replace the caller's workspace
-- `GET /api/packages` — list packages
-- `POST /api/orders` — **API-first ingest** (single or `{orders:[...]}`); supports an
-  optional `x-signature` HMAC-SHA256 of the body (secret = `GL_WEBHOOK_SECRET`)
-- `GET /api/label/:id` — **Puppeteer-rendered 4×6 PDF shipping label** (Code 128)
-- `GET /api/manifest/:id/labels` — every label in a manifest as one multi-page PDF
-
-**Labels (Puppeteer):** `npm install` (root) pulls Puppeteer. The bundled Chromium
-download may be blocked; the label service auto-detects a system **Chrome or Edge**,
-or set `GL_CHROME` to a Chromium executable path. Labels are rendered server-side, so
-the package must exist on the server (via Cloud Sync push / auto-sync, or `POST /api/orders`).
-These endpoints also accept the key as `?key=` so a label opens as a normal link.
-
-**DB options (no cloud API):** the server stores per-tenant JSON files under `server/data/`.
-For an embedded database with no external service, swap that for **SQLite** (Node 24 ships
-`node:sqlite`); for a pure-browser/static deploy, **IndexedDB** is the zero-infra store.
-
-**Multi-tenant:** each API key maps to an isolated tenant (default keys:
-`granite-dev-key`→default, `acme-key`→acme, `globex-key`→globex; override with
-`GL_TENANTS='{"key":"tenant"}'`). State persists per tenant under `server/data/`.
-
-In the platform, **Settings → Cloud Sync**: pick a **provider**, then **Push** / **Pull**
-— or enable **Auto-sync** (debounced push on change, pull on load).
-
-### Run free on Netlify + Supabase (no server)
-The app can sync straight to Supabase from the browser, so the whole thing is static:
-1. **Supabase** → create a free project; SQL Editor → run `supabase/schema.sql`.
-2. **Netlify** → deploy this repo (drag-drop the folder, or connect the repo; `netlify.toml`
-   needs no build step).
-3. In the deployed app: **Settings → Cloud Sync → Provider: Supabase**, paste your
-   **Project URL** + **anon key**, set a **workspace** name, and Push / enable Auto-sync.
-
-Security note: the anon key is public, so the default schema lets anyone with it + the
-workspace name read/write that row — fine for a pilot (use a non-guessable workspace
-name); harden with Supabase Auth + RLS (commented in `schema.sql`) for production.
-The bundled Node server (and `POST /api/orders` webhooks) is the alternative provider
-for self-hosting.
-
-### Run free on Netlify + Neon (serverless functions)
-Everything on Netlify — functions are the API, Neon is free Postgres (no separate server,
-and `DATABASE_URL` never touches the browser):
-1. **Neon** → create a free project, copy the connection string.
-2. **Netlify** → deploy this repo, then Site settings → Environment variables:
-   - `DATABASE_URL` = your Neon connection string (required)
-   - `GL_TENANTS` = `{"your-key":"your-tenant"}` (optional; defaults include `granite-dev-key`)
-3. In the app: **Settings → Cloud Sync → Provider: Granite API**, leave **Server URL blank**
-   (same origin), set **API key** to a tenant key, then Push / enable **Auto-sync**.
-
-The functions (`netlify/functions/`) serve `/api/health`, `/api/state` (GET/PUT) and
-`/api/orders` (POST) — multi-tenant by API key, auto-creating the `workspaces` table on
-first call. Because they reuse the same `/api/*` contract as the Node server, the existing
-"Granite API" Cloud Sync provider talks to them with no client change.
-
-GitHub Pages is static-only, so it serves the PWA; for live cloud sync, host
-`server/server.js` on any Node host (Render, Railway, Fly, a VM) and point the
-Cloud Sync URL at it.
+Carrier (UPS/FedEx) and e-commerce calls are mocked, so tracking numbers and carrier
+scans are generated locally rather than fetched. There are no payments, and no push
+notifications: status changes happen in the ops user's browser, so there is no
+server-side event to push from. Each of these needs a commercial account or a
+server-side status pipeline before it can be real.
 
 ## Files
 
-- `index.html` + `landing.css` + `landing.js` — public hero landing + PWA install
-- `app.html` + `styles.css` — the operations platform shell / all views
-- `app.js` — state machine, demo data, simulated integrations, navigation, deep-links
-- `barcode.js` — pure-JS Code 128 (Set B) generator → SVG (scannable)
-- `manifest.webmanifest` + `sw.js` — installable, offline-capable PWA
-
-## Note on "simulated"
-
-Carrier (UPS/FedEx) and e-commerce calls are mocked to demonstrate UX. The real
-versions are buildable against carrier sandboxes and platform order APIs once the
-commercial accounts/partnerships are in place — see the architecture roadmap.
+- `index.html`, `landing.css`, `landing.js` public landing
+- `app.html`, `styles.css`, `app.js` the app shell and all views
+- `netlify/functions/` the API (auth, customer orders, workspace state, ingest, health)
+- `test/` regression tests for the function logic
+- `barcode.js` pure-JS Code 128 (Set B) to SVG
+- `manifest.webmanifest`, `sw.js` installable, offline-capable PWA
+- `server/` optional self-hosted Node server and Puppeteer label rendering
+- `supabase/schema.sql` schema for the Supabase sync provider
