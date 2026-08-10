@@ -800,6 +800,14 @@
     Won: "Order received", Intake: "Preparing", PickedUp: "Picked up",
     Staged: "Ready to ship", InTransit: "In transit", OutforDelivery: "Out for delivery", Delivered: "Delivered"
   };
+  // The status pill for one of a customer's own orders. A queued order says so; one the
+  // server refused says that instead, because leaving it on "Syncing" would promise a
+  // delivery that is never going to happen.
+  function custStatusPill(p) {
+    if (p.syncRejected) return '<span class="pill sla-late" title="' + String(p.syncRejected).replace(/"/g, "&quot;") + '">⚠ Needs attention</span>';
+    if (p.pendingSync) return '<span class="pill sla-risk">⟲ Syncing…</span>';
+    return '<span class="' + pillClass(p.status) + '">' + (CUST_STATUS[p.status] || stageLabelFor(p)) + '</span>';
+  }
   var custQuery = ""; // current filter on the customer's own order list
   // Server-scoped orders: when signed in with a real (non-local) session, a customer's
   // orders live under their account in Netlify Blobs and follow them across devices.
@@ -831,24 +839,66 @@
   }
   // Retry any orders that were placed while offline (or the API was unreachable).
   // Once one lands on the server, drop the local placeholder and re-merge.
+  // Send orders that were placed offline, one at a time.
+  //
+  // Sequential rather than parallel on purpose: order creation is rate limited per
+  // account, so firing a queue of them at once would guarantee that most get refused.
+  // The batch also stops at the first refusal instead of retrying every order on every
+  // view load, which otherwise turns a full queue into a hot loop against a limited
+  // endpoint. Anything still queued is picked up on the next visit.
+  var pendingSyncRunning = false;
   function syncPendingOrders(email) {
-    if (!email || !hasServerAuth()) return;
-    var pending = state.packages.filter(function (p) { return p.customerEmail === email && p.pendingSync; });
-    pending.forEach(function (p) {
+    if (!email || !hasServerAuth() || pendingSyncRunning) return;
+    var queue = state.packages.filter(function (p) {
+      return p.customerEmail === email && p.pendingSync && !p.syncRejected;
+    });
+    if (!queue.length) return;
+    pendingSyncRunning = true;
+
+    var synced = 0;
+    var step = function (i) {
+      if (i >= queue.length) return finish();
+      var p = queue[i];
       var payload = {
         name: p.customer.name, item: p.item.description, value: p.item.value,
         address: p.customer.address, city: p.customer.city, state: p.customer.state, zip: p.customer.zip, phone: p.customer.phone
       };
-      myOrdersPost(payload).then(function (j) {
-        if (!(j && j.ok && j.order)) return;
-        state.packages = state.packages.filter(function (x) { return x.id !== p.id; });
-        mergeCustomerOrders(j.orders, email);
+      return myOrdersPost(payload).then(function (j) {
+        if (j && j.ok && j.order) {
+          state.packages = state.packages.filter(function (x) { return x.id !== p.id; });
+          mergeCustomerOrders(j.orders, email);
+          synced++;
+          return step(i + 1);
+        }
+        var status = j && j._status;
+        // Rate limited, or the session is gone: stop and try again later. Both resolve
+        // on their own (the window moves; the user signs back in).
+        if (status === 429 || status === 401) return finish(status === 429 ? j.error : null);
+        // Any other definite rejection will never succeed on retry, so stop asking.
+        // The order is kept and flagged so the customer can see it needs attention.
+        if (status >= 400 && status < 500) {
+          p.syncRejected = (j && j.error) || "This order was refused by the server.";
+          return finish();
+        }
+        return finish(); // 5xx or unparseable: leave queued, stay quiet
+      }).catch(function () { finish(); }); // offline: leave queued, stay quiet
+    };
+    var finish = function (message) {
+      pendingSyncRunning = false;
+      save();
+      if (synced) {
         renderCustomerOrderList(email);
         renderCustHomeList(email);
-        renderNotifs();
-        toast("Synced an offline order. Now tracking " + j.order.id, "ok");
-      }).catch(function () { /* still offline. Will retry next time this view loads. */ });
-    });
+        if (typeof renderNotifs === "function") renderNotifs();
+        toast(synced === 1 ? "Synced an offline order." : "Synced " + synced + " offline orders.", "ok");
+      }
+      if (message) toast(message, "warn", 8000);
+      else if (!synced && queue.some(function (p) { return p.syncRejected; })) {
+        renderCustomerOrderList(email);
+        renderCustHomeList(email);
+      }
+    };
+    step(0);
   }
   // Customer's Home tab: a real landing screen, separate from the ordering flow.
   // Pulls the authoritative list on open so status changes made by ops show up here,
@@ -905,7 +955,7 @@
     box.innerHTML = mine.slice().reverse().slice(0, 3).map(function (p) {
       var eta = p.status === "Delivered" ? "Delivered"
         : ("Est. " + new Date(p.promisedTs).toLocaleDateString(undefined, { month: "short", day: "numeric" }));
-      var pill = p.pendingSync ? '<span class="pill sla-risk">⟲ Syncing…</span>' : '<span class="' + pillClass(p.status) + '">' + (CUST_STATUS[p.status] || stageLabelFor(p)) + '</span>';
+      var pill = custStatusPill(p);
       return '<button class="cust-order" data-id="' + p.id + '">' +
         '<div class="co-main"><b>' + p.item.description + '</b>' +
         '<span class="co-meta">' + p.id + ' · ' + eta + '</span></div>' +
@@ -965,7 +1015,7 @@
     box.innerHTML = mine.slice().reverse().map(function (p) {
       var eta = p.status === "Delivered" ? "Delivered"
         : ("Est. " + new Date(p.promisedTs).toLocaleDateString(undefined, { month: "short", day: "numeric" }));
-      var pill = p.pendingSync ? '<span class="pill sla-risk">⟲ Syncing…</span>' : '<span class="' + pillClass(p.status) + '">' + (CUST_STATUS[p.status] || stageLabelFor(p)) + '</span>';
+      var pill = custStatusPill(p);
       return '<button class="cust-order" data-id="' + p.id + '">' +
         '<div class="co-main"><b>' + p.item.description + '</b>' +
         '<span class="co-meta">' + p.id + ' · ' + eta + '</span></div>' +
