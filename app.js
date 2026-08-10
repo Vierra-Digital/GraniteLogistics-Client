@@ -406,8 +406,34 @@
     var active = $(".nav-item.active") ? $(".nav-item.active").dataset.view : null;
     if (allowed.indexOf(active) < 0) go(allowed[0]);
   }
+  // Whether this session may actually use an ops workspace.
+  //
+  // With no server session the app runs entirely on local storage (static host, offline,
+  // or a demo), and every role is explorable — that is the point of the demo. With a real
+  // session the server decides: it authorizes /api/state by the account's role, so
+  // offering an ops role the account does not have would just produce a 403 later.
+  function opsAccessGranted() {
+    if (!hasServerAuth()) return true;
+    var u = (typeof currentUser === "function") ? currentUser() : null;
+    return !!(u && u.role && u.role !== "Customer");
+  }
   function openGate() {
     var g = $("#role-gate"); if (!g) return;
+    var locked = !opsAccessGranted();
+    $$("#role-gate .rg-card").forEach(function (c) {
+      var isOps = c.dataset.role && c.dataset.role !== "Customer";
+      var lock = isOps && locked;
+      c.classList.toggle("rg-locked", lock);
+      c.disabled = lock;
+      if (lock) c.setAttribute("aria-disabled", "true"); else c.removeAttribute("aria-disabled");
+      var note = c.querySelector(".rg-lock-note");
+      if (lock && !note) {
+        note = document.createElement("span");
+        note.className = "rg-lock-note";
+        note.textContent = "Needs an operations account";
+        c.appendChild(note);
+      } else if (!lock && note) { note.remove(); }
+    });
     g.classList.add("open");
     trapFocus(g);
   }
@@ -419,6 +445,12 @@
   }
   function setRole(role) {
     if (!ROLE_VIEWS[role]) return;
+    // Defence in depth: the picker disables these cards, but a stale saved role or a
+    // keyboard activation should not leave someone stranded in a workspace that 403s.
+    if (role !== "Customer" && !opsAccessGranted()) {
+      toast("This account doesn't have operations access. Ask an administrator to grant it, then sign in again.", "warn", 9000);
+      return;
+    }
     state.settings.role = role; state.settings.roleChosen = true; save();
     resetSyncBlock(); // a different role may well be allowed to sync
     closeGate(); applyRole(); go(allowedViews()[0]);
@@ -598,14 +630,27 @@
       .then(function (r) {
         if (r.status === 401) {
           logoutUser();
-          if (typeof toast === "function") toast("Your session expired. Please sign in again.", "ok");
+          if (typeof toast === "function") toast("Your session expired. Please sign in again.", "warn");
           showLogin();
           return null;
         }
         return r.json().catch(function () { return null; });
       })
       .then(function (j) {
-        if (j && j.ok && j.user) { authSave({ token: a.token, user: j.user }); updateRoleUI(); }
+        if (!(j && j.ok && j.user)) return;
+        authSave({ token: a.token, user: j.user });
+        // The server is authoritative on privileges. Boot starts from the cached role,
+        // which can be a stale ops role from before the account was demoted; without this
+        // the user would sit in an ops workspace that 403s until their next sign-in.
+        var serverRole = j.user.role || "Customer";
+        if (serverRole === "Customer" && savedRole() !== "Customer") {
+          state.settings.role = "Customer";
+          save();
+          applyRole();
+          go(allowedViews()[0]);
+          toast("This account no longer has operations access.", "warn", 8000);
+        }
+        updateRoleUI();
       })
       .catch(function () { /* offline / backend unreachable: keep the cached session */ });
   }
@@ -1889,7 +1934,7 @@
           setTimeout(loop, 400);
         }).catch(function () { setTimeout(loop, 600); });
       })();
-    }).catch(function () { toast("Couldn't access the camera.", "ok"); scanActive = false; });
+    }).catch(function () { toast("Couldn't access the camera.", "warn"); scanActive = false; });
   }
 
   // ---- Tracking / chain of custody ----
@@ -2241,12 +2286,18 @@
       };
       if (hasServerAuth()) {
         fetch("/api/my-orders?id=" + encodeURIComponent(id), { method: "DELETE", headers: { "Authorization": "Bearer " + authToken() } })
-          .then(function (r) { return r.json(); })
+          .then(function (r) { return r.json().catch(function () { return {}; }); })
           .then(function (j) {
             if (j && j.ok) { mergeCustomerOrders(j.orders, email); closeModal(); renderCustomerOrderList(email); renderCustHomeList(email); renderNotifs(); toast(id + " cancelled", "ok"); }
-            else { toast((j && j.error) || "Could not cancel that order.", "ok"); }
+            else { toast((j && j.error) || "Could not cancel that order.", "warn", 7000); }
           })
-          .catch(function () { applyLocal(); });
+          // A cancellation cannot be completed offline. Deleting the row locally used to
+          // look like success, but the server still had the order: it came back on the
+          // next sync and the parcel was still collected. Better to leave it visible and
+          // say plainly that nothing has changed yet.
+          .catch(function () {
+            toast("We couldn't reach the server, so " + id + " has NOT been cancelled. Try again when you're back online.", "warn", 9000);
+          });
       } else {
         applyLocal();
       }
@@ -2757,7 +2808,7 @@
         var rowEl = document.querySelector('#tracking-list .row-item[data-id="' + match.id + '"]');
         if (rowEl) rowEl.classList.add("selected");
       }
-      else toast("No shipment found for “" + query + "”. Showing all packages.", "ok");
+      else toast("No shipment found for “" + query + "”. Showing all packages.", "warn");
     }
     return true;
   }

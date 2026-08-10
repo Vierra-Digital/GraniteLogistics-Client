@@ -751,6 +751,15 @@ body[data-role="Customer"] .view-wrap{padding-bottom:calc(74px + env(safe-area-i
 .modal-backdrop.closing{display:flex;animation:backdrop-in var(--dur) var(--ease-in) reverse both}
 .modal-backdrop.closing .modal{animation:modal-out var(--dur) var(--ease-in) both}
 
+/* ---- Workspace picker: roles this account cannot use ----
+   Shown but clearly unavailable, rather than hidden. Someone evaluating the platform
+   should be able to see that a Runner and a Driver workspace exist; they just cannot
+   enter one until an administrator grants it. */
+.rg-card.rg-locked{opacity:.45;cursor:not-allowed}
+.rg-card.rg-locked:hover{transform:none;background:rgba(255,255,255,.04)}
+.rg-lock-note{display:inline-block;margin-top:8px;font-size:.7rem;font-weight:700;
+  text-transform:uppercase;letter-spacing:.08em;color:var(--amber)}
+
 /* ---- Order placed ----
    The one genuinely celebratory moment in the app. The check scales up through a 3%
    overshoot, which is the ceiling a Corporate personality allows, so it reads as
