@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { mergePushedPackages, nextId, tenantOf, resolveKey, makeOrder, EMPTY, publicTrackingView } from "../netlify/functions/_lib.mjs";
+import { mergePushedPackages, nextId, tenantOf, resolveKey, makeOrder, EMPTY, publicTrackingView, orderRateLimit, orderCreatedAt, ORDER_LIMITS } from "../netlify/functions/_lib.mjs";
 import { roleFor, OPS_ROLES, WRITE_ROLES } from "../netlify/functions/_auth.mjs";
 import { sign, verifyToken, bearer, sessionSuperseded } from "../netlify/functions/_auth.mjs";
 import { emailConfigured, sendEmail, resetEmail } from "../netlify/functions/_email.mjs";
@@ -196,6 +196,61 @@ test("roleFor grants Customer unless the operator says otherwise", () => {
     if (saved[0] === undefined) delete process.env.GL_ADMIN_EMAILS; else process.env.GL_ADMIN_EMAILS = saved[0];
     if (saved[1] === undefined) delete process.env.GL_ROLES; else process.env.GL_ROLES = saved[1];
   }
+});
+
+// ---------------------------------------------------------------------------
+// Order rate limiting. Too strict blocks a real customer; too loose lets one
+// account fill the shared ops queue.
+// ---------------------------------------------------------------------------
+const NOW = 1_700_000_000_000;
+const at = (ms) => ({ createdAt: NOW - ms });
+
+test("orderRateLimit allows normal ordering", () => {
+  assert.equal(orderRateLimit([], NOW).limited, false);
+  // Two in the last minute is under the burst cap of 3.
+  assert.equal(orderRateLimit([at(1000), at(20_000)], NOW).limited, false);
+  // Eleven spread across the hour is under the hourly cap of 12.
+  const spread = Array.from({ length: 11 }, (_, i) => at((i + 1) * 5 * 60_000));
+  assert.equal(orderRateLimit(spread, NOW).limited, false);
+});
+
+test("orderRateLimit blocks a burst and says when to retry", () => {
+  const burst = [at(1000), at(2000), at(3000)];
+  const r = orderRateLimit(burst, NOW);
+  assert.equal(r.limited, true);
+  // The oldest is 3s into a 60s window, so ~57s until a slot frees.
+  assert.equal(r.retryAfter, 57);
+  assert.match(r.error, /3 orders in the last minute/);
+});
+
+test("orderRateLimit blocks the hourly ceiling even when spread out", () => {
+  // 12 orders evenly spread: no 3 within any minute, so only the hour rule can catch it.
+  const spread = Array.from({ length: 12 }, (_, i) => at((i + 1) * 4 * 60_000));
+  const r = orderRateLimit(spread, NOW);
+  assert.equal(r.limited, true);
+  assert.match(r.error, /in the last hour/);
+  assert.ok(r.retryAfter > 0 && r.retryAfter <= 3600, "retryAfter should be inside the window");
+});
+
+test("orderRateLimit ignores orders that have aged out of the window", () => {
+  const old = Array.from({ length: 30 }, (_, i) => at(60 * 60_000 + (i + 1) * 1000));
+  assert.equal(orderRateLimit(old, NOW).limited, false, "orders older than an hour must not count");
+});
+
+test("orderCreatedAt falls back to the first history entry, then to zero", () => {
+  assert.equal(orderCreatedAt({ createdAt: 123 }), 123);
+  assert.equal(orderCreatedAt({ history: [{ stage: "Won", ts: 456 }] }), 456);
+  // An order with neither must not read as "created now" and consume quota.
+  assert.equal(orderCreatedAt({}), 0);
+  assert.equal(orderCreatedAt(null), 0);
+  assert.equal(orderRateLimit([{}, {}, {}, {}, {}], NOW).limited, false);
+});
+
+test("the burst window is tighter than the hourly one", () => {
+  // A limit list sorted the other way would report the wrong reason first.
+  const [burst, hourly] = ORDER_LIMITS;
+  assert.ok(burst.ms < hourly.ms);
+  assert.ok(burst.max < hourly.max);
 });
 
 test("Viewer is an ops role but not a writing one", () => {

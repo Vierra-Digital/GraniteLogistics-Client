@@ -8,7 +8,7 @@
 // read or change their own rows out of the shared state.
 import { getStore } from "@netlify/blobs";
 import { CORS, json, verifyToken, bearer } from "./_auth.mjs";
-import { readState, writeState, nextId } from "./_lib.mjs";
+import { readState, writeState, nextId, orderRateLimit } from "./_lib.mjs";
 
 // Single-company platform for now, so every customer order lands in one workspace.
 const TENANT = "default";
@@ -32,6 +32,7 @@ function makeCustomerOrder(d, owner, state) {
     },
     barcode: id.replace(/-/g, ""),
     carrier: null, lane: null, batchId: null, tracking: null, photos: {},
+    createdAt: now, // explicit, so rate limiting doesn't depend on history[0] surviving edits
     history: [{ stage: "Won", ts: now, note: "Order placed by customer." }],
     promisedTs: now + (3 + Math.floor(Math.random() * 3)) * 86400000,
     exception: null, status: "Won",
@@ -76,6 +77,16 @@ export default async (req) => {
     let d = {};
     try { d = await req.json(); } catch (e) {}
     if (!S(d.item)) return json({ ok: false, error: "An item description is required." }, 400);
+
+    // Cap how fast one account can add to the shared ops queue.
+    const rl = orderRateLimit(mine(), Date.now());
+    if (rl.limited) {
+      return new Response(JSON.stringify({ ok: false, error: rl.error, retryAfter: rl.retryAfter }), {
+        status: 429,
+        headers: { ...CORS, "Retry-After": String(rl.retryAfter) },
+      });
+    }
+
     const order = makeCustomerOrder(d, { email: p.email, name: p.name }, state);
     state.packages.push(order);
     await writeState(TENANT, state);

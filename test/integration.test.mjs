@@ -313,6 +313,58 @@ test("legacy per-customer orders are migrated into the shared workspace", async 
   assert.equal(blobs.get(k("granite-customer-orders", "legacy@example.com")), undefined);
 });
 
+// ---- order rate limiting ----
+
+test("a burst of orders is refused with 429 and a Retry-After header", async () => {
+  const token = await register("burst@example.com");
+  const place = () => ordersFn(asUser(token, { method: "POST", body: { item: "Spam" } }));
+
+  // The burst cap is 3 per minute; the first three must succeed.
+  for (let i = 0; i < 3; i++) {
+    const ok = await body(await place());
+    assert.equal(ok.ok, true, "order " + (i + 1) + " should have been accepted");
+  }
+
+  const res = await place();
+  assert.equal(res.status, 429);
+  const retry = Number(res.headers.get("Retry-After"));
+  assert.ok(retry > 0 && retry <= 60, "Retry-After should be within the burst window, got " + retry);
+  const j = await body(res);
+  assert.equal(j.ok, false);
+  assert.match(j.error, /orders in the last minute/);
+
+  // The refused order must not have reached the shared workspace.
+  const opsView = await body(await stateFn(asOps()));
+  assert.equal(opsView.packages.filter((p) => p.customerEmail === "burst@example.com").length, 3);
+});
+
+test("rate limiting is per account, not global", async () => {
+  const a = await register("rl-a@example.com");
+  const b = await register("rl-b@example.com");
+  for (let i = 0; i < 3; i++) await ordersFn(asUser(a, { method: "POST", body: { item: "A" } }));
+  assert.equal((await ordersFn(asUser(a, { method: "POST", body: { item: "A" } }))).status, 429);
+
+  // B has its own budget and must be unaffected by A hitting the cap.
+  const bRes = await ordersFn(asUser(b, { method: "POST", body: { item: "B" } }));
+  assert.equal(bRes.status, 200);
+});
+
+test("rate limiting does not block reads or cancellations", async () => {
+  const token = await register("rl-read@example.com");
+  const ids = [];
+  for (let i = 0; i < 3; i++) {
+    const j = await body(await ordersFn(asUser(token, { method: "POST", body: { item: "Item " + i } })));
+    ids.push(j.order.id);
+  }
+  assert.equal((await ordersFn(asUser(token, { method: "POST", body: { item: "over" } }))).status, 429);
+
+  // A capped account can still see and cancel what it has.
+  const mine = await body(await ordersFn(asUser(token)));
+  assert.equal(mine.orders.length, 3);
+  const del = await ordersFn(asUser(token, { method: "DELETE", qs: "?id=" + ids[0] }));
+  assert.equal(del.status, 200);
+});
+
 // ---- authorization on the ops workspace ----
 //
 // /api/state exposes every recipient's name, address and phone in the tenant. It used to

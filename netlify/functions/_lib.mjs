@@ -92,6 +92,48 @@ export function mergePushedPackages(currentPackages, pushedPackages, deleted) {
   return { packages: preserved.length ? pushed.concat(preserved) : pushed, preserved: preserved.length };
 }
 
+// ---- Order rate limiting ----
+//
+// Without this, one authenticated account can POST orders in a loop and fill the shared
+// ops queue with junk. The count is derived from the caller's own orders already in the
+// workspace rather than a separate counter, so it costs no extra storage and no second
+// read-modify-write. Two windows: a burst guard, and an hourly ceiling.
+//
+// Known gap: cancelling an order frees its slot, so create/cancel churn is not capped.
+// That churn leaves nothing behind in the queue, which is the thing being protected.
+export const ORDER_LIMITS = [
+  { ms: 60 * 1000, max: 3, per: "minute" },
+  { ms: 60 * 60 * 1000, max: 12, per: "hour" },
+];
+
+// When an order was placed. New orders carry createdAt; older ones only have the "Won"
+// history entry, so fall back to that before giving up and treating it as ancient.
+export function orderCreatedAt(o) {
+  if (!o) return 0;
+  if (typeof o.createdAt === "number") return o.createdAt;
+  const first = (o.history || [])[0];
+  return (first && typeof first.ts === "number") ? first.ts : 0;
+}
+
+// Returns { limited } or { limited:true, retryAfter (seconds), error }.
+export function orderRateLimit(orders, now, limits = ORDER_LIMITS) {
+  const times = (orders || []).map(orderCreatedAt).filter((t) => t > 0);
+  for (const lim of limits) {
+    const inWindow = times.filter((t) => t > now - lim.ms);
+    if (inWindow.length < lim.max) continue;
+    // Wait until the oldest order in this window falls out of it.
+    const oldest = Math.min(...inWindow);
+    const retryAfter = Math.max(1, Math.ceil((oldest + lim.ms - now) / 1000));
+    return {
+      limited: true,
+      retryAfter,
+      error: "You've placed " + inWindow.length + " orders in the last " + lim.per +
+        ". Please wait a moment before placing another, or contact us if you need to ship in bulk.",
+    };
+  }
+  return { limited: false };
+}
+
 export function nextId(state) {
   let max = 1040;
   (state.packages || []).forEach((p) => { const m = /GL-(\d+)/.exec(p.id || ""); if (m) max = Math.max(max, +m[1]); });

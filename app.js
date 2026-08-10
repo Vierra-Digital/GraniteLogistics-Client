@@ -785,8 +785,17 @@
   function myOrdersGet() {
     return fetch("/api/my-orders", { headers: { "Authorization": "Bearer " + authToken() } }).then(function (r) { return r.json(); });
   }
+  // Resolves with the parsed body plus _status. The caller needs the status to tell a
+  // definite rejection (rate limited, validation) apart from an unreachable server: the
+  // first must be shown to the customer, only the second should be queued for retry.
   function myOrdersPost(payload) {
-    return fetch("/api/my-orders", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + authToken() }, body: JSON.stringify(payload) }).then(function (r) { return r.json(); });
+    return fetch("/api/my-orders", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + authToken() }, body: JSON.stringify(payload) })
+      .then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (j) {
+          j._status = r.status;
+          return j;
+        });
+      });
   }
   // Replace this customer's orders in local state with the authoritative server list,
   // but keep any orders still waiting to sync (placed while offline) so a server pull
@@ -1008,6 +1017,11 @@
         myOrdersPost(payload).then(function (j) {
           if (btn) { btn.disabled = false; btn.textContent = "Place order →"; }
           if (j && j.ok && j.order) { mergeCustomerOrders(j.orders, email); finish(j.order); }
+          else if (j && j._status >= 400 && j._status < 500) {
+            // The server reached a decision and said no. Queueing this for retry would
+            // both lie to the customer and defeat the rate limit.
+            toast(j.error || "We couldn't place that order.", "warn", 8000);
+          }
           else { placeLocal(true); }
         }).catch(function () { if (btn) { btn.disabled = false; btn.textContent = "Place order →"; } placeLocal(true); });
       } else {
