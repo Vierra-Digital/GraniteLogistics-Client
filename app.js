@@ -351,13 +351,14 @@
     returns: ["Returns", "Reverse logistics: manage return requests through to receipt."],
     reports: ["Reports & Analytics", "Operational metrics computed from your live data."],
     activity: ["Activity Log", "Tamper-evident audit trail of every event, newest first."],
-    settings: ["Settings", "Company profile, defaults, and data management."]
+    settings: ["Settings", "Company profile, defaults, and data management."],
+    admin: ["Team & Roles", "Grant and revoke operations access."]
   };
 
   // ---- Role-based access (maps to the platform's user roles) ----
   var ROLE_VIEWS = {
     Customer: ["custhome", "order", "account"],
-    Admin: ["order", "overview", "ingest", "runner", "presort", "batch", "driver", "tracking", "returns", "reports", "activity", "settings"],
+    Admin: ["order", "overview", "ingest", "runner", "presort", "batch", "driver", "tracking", "returns", "reports", "activity", "settings", "admin"],
     Runner: ["home", "ingest", "runner", "presort", "batch", "tracking", "returns", "activity"],
     Driver: ["home", "driver", "tracking"],
     Viewer: ["overview", "tracking", "reports", "activity"]
@@ -376,7 +377,23 @@
   function isMobileViewport() { var w = window.innerWidth; return w > 0 && w <= 980; }
   function savedRole() { return (state.settings && state.settings.role) || "Customer"; }
   function currentRole() { return isMobileViewport() ? "Customer" : savedRole(); }
-  function allowedViews() { return ROLE_VIEWS[currentRole()] || ROLE_VIEWS.Customer; }
+  function allowedViews() {
+    var views = ROLE_VIEWS[currentRole()] || ROLE_VIEWS.Customer;
+    // "admin" talks to /api/admin, which only exists on a real deployment and only
+    // answers a signed-in Admin. In local/demo mode it is removed rather than shown
+    // broken, so the guided demo still explores every ops role freely.
+    if (views.indexOf("admin") >= 0 && !canManageRoles()) {
+      views = views.filter(function (v) { return v !== "admin"; });
+    }
+    return views;
+  }
+  // A real server session whose account is an Admin. Checked again on the server for
+  // every request; this only decides what to render.
+  function canManageRoles() {
+    if (!hasServerAuth()) return false;
+    var u = (typeof currentUser === "function") ? currentUser() : null;
+    return !!(u && u.role === "Admin");
+  }
   function updateRoleUI() {
     var m = ROLE_META[currentRole()] || ROLE_META.Admin;
     document.body.setAttribute("data-role", currentRole());
@@ -397,7 +414,13 @@
   }
   function applyRole() {
     var allowed = allowedViews();
-    $$(".nav-item").forEach(function (b) { b.style.display = allowed.indexOf(b.dataset.view) >= 0 ? "" : "none"; });
+    $$(".nav-item").forEach(function (b) {
+      var ok = allowed.indexOf(b.dataset.view) >= 0;
+      // Both, because the admin entry ships with `hidden` set so it cannot flash up
+      // before this runs, and style.display alone would not clear that.
+      b.hidden = !ok;
+      b.style.display = ok ? "" : "none";
+    });
     $$(".nav-group").forEach(function (g) {
       var any = Array.prototype.some.call(g.querySelectorAll(".nav-item"), function (b) { return b.style.display !== "none"; });
       g.style.display = any ? "" : "none";
@@ -837,6 +860,7 @@
     else if (view === "settings") renderSettings();
     else if (view === "presort") renderPresort();
     else if (view === "returns") renderReturns();
+    else if (view === "admin") renderAdmin();
   }
   function renderAll() { var active = $(".nav-item.active").dataset.view; render(active); if (typeof renderNotifs === "function") renderNotifs(); }
 
@@ -1008,6 +1032,137 @@
     }).join("");
     $$("#chome-recent [data-id]").forEach(function (b) { b.addEventListener("click", function () { openCustomerOrder(b.dataset.id); }); });
   }
+  // ---- Team & roles (Admin only) ----
+  //
+  // Every rule shown here is also enforced server-side; this only explains them. The
+  // server is the authority, so a stale page can't grant anything by being out of date.
+  var admUsers = [];
+  var admQuery = "";
+  var admBusy = false;
+
+  function admStatus(msg, kind) {
+    var el = $("#adm-status");
+    if (!el) return;
+    el.textContent = msg || "";
+    el.className = "muted small" + (kind ? " adm-" + kind : "");
+  }
+  function admFetch(init) {
+    return fetch("/api/admin", Object.assign({
+      headers: Object.assign({ "Authorization": "Bearer " + authToken() },
+        init && init.body ? { "Content-Type": "application/json" } : {})
+    }, init || {})).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) { j._status = r.status; return j; });
+    });
+  }
+  function renderAdmin() {
+    if (!canManageRoles()) { go(allowedViews()[0]); return; }
+    admStatus("Loading accounts…");
+    admFetch().then(function (j) {
+      if (!j.ok) {
+        // 404 here means the server does not consider this session an admin, which can
+        // happen if access was revoked in another tab or by a config change.
+        admStatus(j._status === 404
+          ? "This account no longer has administrator access."
+          : (j.error || "Couldn't load accounts."), "err");
+        admUsers = [];
+      } else {
+        admUsers = j.users || [];
+        admStatus("");
+      }
+      renderAdminList();
+    }).catch(function () {
+      admStatus("Couldn't reach the server. Check your connection and refresh.", "err");
+    });
+  }
+  function renderAdminList() {
+    var box = $("#adm-list"); if (!box) return;
+    var me = (currentUser() || {}).email;
+    var admins = admUsers.filter(function (u) { return u.role === "Admin"; }).length;
+    var count = $("#adm-count");
+    if (count) count.textContent = admUsers.length
+      ? admUsers.length + (admUsers.length === 1 ? " account" : " accounts") + " · " + admins + " admin" + (admins === 1 ? "" : "s")
+      : "";
+
+    var q = admQuery;
+    var rows = admUsers.filter(function (u) {
+      return !q || (u.email + " " + (u.name || "")).toLowerCase().indexOf(q) >= 0;
+    });
+    if (!rows.length) {
+      box.innerHTML = '<div class="empty-state"><div class="es-ico">⚿</div><b>' +
+        (admUsers.length ? "No accounts match that search" : "No accounts yet") + '</b>' +
+        '<span>' + (admUsers.length ? "Try a different name or address." : "Accounts appear here once people sign up.") + '</span></div>';
+      return;
+    }
+    box.innerHTML = rows.map(function (u) {
+      var isMe = u.email === me;
+      // An env-granted role is read-only here, and so is your own: both are enforced by
+      // the server, and disabling them explains why instead of failing on submit.
+      var locked = u.source === "env" || isMe;
+      var why = u.source === "env" ? "Set in this site's environment configuration"
+        : (isMe ? "You can't change your own role" : "");
+      var opts = ROLE_ORDER.map(function (r) {
+        return '<option value="' + r + '"' + (r === u.role ? " selected" : "") + '>' +
+          (r === "Customer" ? "Customer (no ops access)" : ROLE_META[r].label) + '</option>';
+      }).join("");
+      return '<div class="adm-row' + (locked ? " adm-locked" : "") + '">' +
+        '<div class="adm-who">' +
+        '<b>' + attr(u.name || u.email.split("@")[0]) + (isMe ? ' <span class="adm-you">you</span>' : '') + '</b>' +
+        '<span class="adm-email">' + attr(u.email) + '</span>' +
+        (u.grantedBy ? '<span class="adm-meta">granted by ' + attr(u.grantedBy) + '</span>' : '') +
+        '</div>' +
+        '<div class="adm-set">' +
+        '<select class="adm-role" data-email="' + attr(u.email) + '"' + (locked ? " disabled" : "") +
+        ' aria-label="Role for ' + attr(u.email) + '">' + opts + '</select>' +
+        (why ? '<span class="adm-why">' + why + '</span>' : '') +
+        '</div></div>';
+    }).join("");
+
+    $$("#adm-list .adm-role").forEach(function (sel) {
+      sel.addEventListener("change", function () { setUserRole(sel.dataset.email, sel.value, sel); });
+    });
+  }
+  // Order shown in the picker: no ops access first, then increasing reach.
+  var ROLE_ORDER = ["Customer", "Viewer", "Driver", "Runner", "Admin"];
+
+  function setUserRole(email, role, sel) {
+    if (admBusy) return;
+    var previous = (admUsers.find(function (u) { return u.email === email; }) || {}).role || "Customer";
+    if (role === previous) return;
+    var label = role === "Customer" ? "remove operations access for" : ("make " + ROLE_META[role].label.toLowerCase() + ":");
+    confirmDialog({
+      title: role === "Customer" ? "Revoke access?" : "Change role?",
+      message: role === "Customer"
+        ? "This removes " + email + "'s access to the operations workspace straight away."
+        : "This gives " + email + " the " + ROLE_META[role].label + " role straight away.",
+      confirmLabel: role === "Customer" ? "Revoke access" : "Change role",
+      danger: role === "Customer"
+    }).then(function (ok) {
+      if (!ok) { if (sel) sel.value = previous; return; }
+      admBusy = true;
+      if (sel) sel.disabled = true;
+      admStatus("Saving…");
+      admFetch({ method: "POST", body: JSON.stringify({ email: email, role: role }) })
+        .then(function (j) {
+          admBusy = false;
+          if (!j.ok) {
+            if (sel) { sel.value = previous; sel.disabled = false; }
+            admStatus(j.error || "Couldn't change that role.", "err");
+            toast(j.error || "Couldn't change that role.", "warn", 8000);
+            return;
+          }
+          admUsers = j.users || admUsers;
+          admStatus(j.note || "Saved.", "ok");
+          toast(email + " is now " + (role === "Customer" ? "a customer" : ROLE_META[role].label), "ok");
+          renderAdminList();
+        })
+        .catch(function () {
+          admBusy = false;
+          if (sel) { sel.value = previous; sel.disabled = false; }
+          admStatus("Couldn't reach the server. Nothing was changed.", "err");
+        });
+    });
+  }
+
   // Customer's Account tab: profile + sign out, replacing the header account dropdown.
   function renderAccountView() {
     var u = (typeof currentUser === "function") ? currentUser() : null;
@@ -2556,6 +2711,10 @@
 
   var searchInput = $("#track-search");
   if (searchInput) searchInput.addEventListener("input", function () { trackQuery = this.value.trim().toLowerCase(); renderTracking(); });
+  var admSearch = $("#adm-search");
+  if (admSearch) admSearch.addEventListener("input", function () { admQuery = this.value.trim().toLowerCase(); renderAdminList(); });
+  var admRefresh = $("#adm-refresh");
+  if (admRefresh) admRefresh.addEventListener("click", function () { renderAdmin(); });
 
   // Login + sign out
   var forgotBtn = $("#forgot-btn"); if (forgotBtn) forgotBtn.addEventListener("click", requestPasswordReset);
@@ -2808,6 +2967,9 @@
     var view = parts[0];
     var query = parts[1] ? decodeURIComponent(parts[1]) : null;
     if (!VIEW_META[view]) return false;
+    // A deep link must not reach a view this role has no business in: #admin was
+    // otherwise navigable by anyone who typed it.
+    if (allowedViews().indexOf(view) < 0) return false;
     go(view);
     if (view === "tracking" && query) {
       var norm = function (s) { return String(s).toUpperCase().replace(/[^A-Z0-9]/g, ""); };

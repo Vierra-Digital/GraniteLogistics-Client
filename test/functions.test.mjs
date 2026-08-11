@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { mergePushedPackages, nextId, tenantOf, resolveKey, makeOrder, EMPTY, publicTrackingView, orderRateLimit, orderCreatedAt, ORDER_LIMITS } from "../netlify/functions/_lib.mjs";
-import { roleFor, OPS_ROLES, WRITE_ROLES } from "../netlify/functions/_auth.mjs";
+import { envRoleFor, OPS_ROLES, WRITE_ROLES } from "../netlify/functions/_auth.mjs";
 import { sign, verifyToken, bearer, sessionSuperseded } from "../netlify/functions/_auth.mjs";
 import { emailConfigured, sendEmail, resetEmail, parseSender } from "../netlify/functions/_email.mjs";
 
@@ -190,22 +190,22 @@ test("malformed GL_TENANTS falls back to the demo keys rather than throwing", ()
 // ---------------------------------------------------------------------------
 // Role assignment. The operator config is the only source of privileges.
 // ---------------------------------------------------------------------------
-test("roleFor grants Customer unless the operator says otherwise", () => {
+test("envRoleFor grants Customer unless the operator config says otherwise", () => {
   const saved = [process.env.GL_ADMIN_EMAILS, process.env.GL_ROLES];
   delete process.env.GL_ADMIN_EMAILS; delete process.env.GL_ROLES;
   try {
-    assert.equal(roleFor("anyone@example.com"), "Customer");
-    assert.equal(roleFor(""), "Customer");
-    assert.equal(roleFor(undefined), "Customer");
+    assert.equal(envRoleFor("anyone@example.com"), "Customer");
+    assert.equal(envRoleFor(""), "Customer");
+    assert.equal(envRoleFor(undefined), "Customer");
 
     process.env.GL_ADMIN_EMAILS = " Boss@Example.com , other@example.com ";
-    assert.equal(roleFor("boss@example.com"), "Admin", "email match must be trimmed and case-insensitive");
-    assert.equal(roleFor("nobody@example.com"), "Customer");
+    assert.equal(envRoleFor("boss@example.com"), "Admin", "email match must be trimmed and case-insensitive");
+    assert.equal(envRoleFor("nobody@example.com"), "Customer");
 
     process.env.GL_ROLES = JSON.stringify({ "dave@example.com": "Runner", "eve@example.com": "Wizard" });
-    assert.equal(roleFor("dave@example.com"), "Runner");
+    assert.equal(envRoleFor("dave@example.com"), "Runner");
     // An unrecognised role name must not become a privilege.
-    assert.equal(roleFor("eve@example.com"), "Customer");
+    assert.equal(envRoleFor("eve@example.com"), "Customer");
   } finally {
     if (saved[0] === undefined) delete process.env.GL_ADMIN_EMAILS; else process.env.GL_ADMIN_EMAILS = saved[0];
     if (saved[1] === undefined) delete process.env.GL_ROLES; else process.env.GL_ROLES = saved[1];

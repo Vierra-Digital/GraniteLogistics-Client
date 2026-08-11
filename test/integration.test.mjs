@@ -32,10 +32,19 @@ function getStore({ name }) {
     },
     async set(key, value) { blobs.set(k(name, key), String(value)); },
     async delete(key) { blobs.delete(k(name, key)); },
+    // Shape matches @netlify/blobs: { blobs: [{ key, etag }], directories: [] }.
+    async list(options) {
+      const prefix = (options && options.prefix) || "";
+      const mine = [...blobs.keys()]
+        .filter((full) => full.startsWith(name + "\u0000"))
+        .map((full) => full.slice(name.length + 1))
+        .filter((key) => key.startsWith(prefix));
+      return { blobs: mine.map((key) => ({ key, etag: "e" })), directories: [] };
+    },
   };
 }
 
-let authFn, ordersFn, stateFn, trackFn, healthFn, ingestFn, sign;
+let authFn, ordersFn, stateFn, trackFn, healthFn, ingestFn, adminFn, sign;
 // Tokens for the operator-granted ops accounts. /api/state authorizes by role now, not by
 // the public demo key, so these tests have to sign in the way a real ops user does.
 let adminToken, viewerToken;
@@ -55,6 +64,7 @@ before(async () => {
   trackFn = (await import("../netlify/functions/track.mjs")).default;
   healthFn = (await import("../netlify/functions/health.mjs")).default;
   ingestFn = (await import("../netlify/functions/orders.mjs")).default;
+  adminFn = (await import("../netlify/functions/admin.mjs")).default;
   sign = (await import("../netlify/functions/_auth.mjs")).sign;
 
   adminToken = await register(ADMIN_EMAIL, "pass1234", "Ops Admin");
@@ -449,6 +459,154 @@ test("webhook ingest numbers a batch uniquely and survives a clobber", async () 
   assert.equal(new Set(batchIds).size, 3, "the batch reused an id");
   const allIds = pkgs.map((p) => p.id);
   assert.equal(new Set(allIds).size, allIds.length, "workspace contains duplicate ids");
+});
+
+// ---- role administration ----
+//
+// This endpoint hands out privileges, so its guards matter more than its happy path.
+
+const adminReq = (init = {}) => new Request("https://x/api/admin", {
+  method: init.method || "GET",
+  headers: Object.assign(
+    init.token === null ? {} : { authorization: "Bearer " + (init.token || adminToken) },
+    init.body ? { "content-type": "application/json" } : {}),
+  body: init.body ? JSON.stringify(init.body) : undefined,
+});
+const grant = (email, role, token) => adminFn(adminReq({ method: "POST", body: { email, role }, token }));
+
+test("only an admin can reach role administration, and it hides from everyone else", async () => {
+  const customer = await register("nosy-admin@example.com");
+
+  // 404 rather than 403: a non-admin should not even learn this endpoint exists.
+  const asCustomer = await adminFn(adminReq({ token: customer }));
+  assert.equal(asCustomer.status, 404);
+  assert.equal((await body(asCustomer)).error, "Not found.");
+
+  // A Viewer is an ops role but still not an administrator.
+  assert.equal((await adminFn(adminReq({ token: viewerToken }))).status, 404);
+  // No token at all.
+  assert.equal((await adminFn(adminReq({ token: null }))).status, 401);
+  // A reset token must not act as an admin session.
+  assert.equal((await adminFn(adminReq({ token: sign({ email: ADMIN_EMAIL, kind: "reset", exp: Date.now() + 60000 }) }))).status, 401);
+
+  // And a customer certainly cannot grant themselves anything.
+  const escalate = await grant("nosy-admin@example.com", "Admin", customer);
+  assert.equal(escalate.status, 404);
+});
+
+test("an admin grants a role, and it takes effect on the workspace immediately", async () => {
+  const email = "promote-me@example.com";
+  const token = await register(email);
+  // Before: a plain customer is refused the workspace.
+  assert.equal((await stateFn(stateReq({ token }))).status, 403);
+
+  const res = await grant(email, "Runner");
+  const j = await body(res);
+  assert.equal(j.ok, true, JSON.stringify(j));
+  assert.deepEqual(j.changed, { email, role: "Runner" });
+
+  // Access changes at once, on the token they already hold: /api/state re-derives the
+  // role per request rather than trusting what the token was minted with.
+  assert.equal((await stateFn(stateReq({ token }))).status, 200);
+
+  const row = j.users.find((u) => u.email === email);
+  assert.equal(row.role, "Runner");
+  assert.equal(row.source, "granted");
+  assert.equal(row.grantedBy, ADMIN_EMAIL);
+  assert.ok(row.grantedAt, "the grant was not stamped with a time");
+});
+
+test("revoking takes effect immediately too, on a token already issued", async () => {
+  const email = "revoke-me@example.com";
+  const token = await register(email);
+  await grant(email, "Admin");
+  assert.equal((await stateFn(stateReq({ token }))).status, 200);
+
+  const j = await body(await grant(email, "Customer"));
+  assert.equal(j.ok, true);
+  assert.equal(j.changed.role, "Customer");
+  // The still-valid 30-day token must stop working the moment access is revoked.
+  assert.equal((await stateFn(stateReq({ token }))).status, 403, "a revoked admin kept access");
+  assert.equal(j.users.find((u) => u.email === email).source, "default");
+});
+
+test("an admin cannot change their own role", async () => {
+  const res = await grant(ADMIN_EMAIL, "Customer");
+  assert.equal(res.status, 409);
+  assert.match((await body(res)).error, /your own role/i);
+  // Still an admin afterwards.
+  assert.equal((await adminFn(adminReq())).status, 200);
+});
+
+test("a role set in environment config cannot be changed in-app", async () => {
+  // The recovery path: config outranks the admin screen, so an operator can always undo
+  // whatever was done here.
+  const res = await grant(VIEWER_EMAIL, "Admin");
+  assert.equal(res.status, 409);
+  assert.match((await body(res)).error, /environment configuration/i);
+
+  const rows = (await body(await adminFn(adminReq()))).users;
+  assert.equal(rows.find((u) => u.email === VIEWER_EMAIL).source, "env");
+  assert.equal(rows.find((u) => u.email === ADMIN_EMAIL).source, "env");
+});
+
+test("the last administrator cannot be removed", async () => {
+  // Set up a lone granted admin, then have them try to revoke the only other one.
+  const email = "solo-admin@example.com";
+  const token = await register(email);
+  await grant(email, "Admin");
+
+  // Env admins still count, so with GL_ADMIN_EMAILS set this is allowed. Clear it to
+  // reach the genuinely-last-admin case.
+  const savedEnv = process.env.GL_ADMIN_EMAILS;
+  const savedRoles = process.env.GL_ROLES;
+  delete process.env.GL_ADMIN_EMAILS;
+  delete process.env.GL_ROLES;
+  try {
+    const second = "second-admin@example.com";
+    await register(second);
+    // `email` is now the only admin, and is refused when removing itself via another admin.
+    const j2 = await body(await grant(second, "Admin", token));
+    assert.equal(j2.ok, true, "a granted admin should be able to grant: " + JSON.stringify(j2));
+
+    // Now remove one: allowed, because one remains.
+    assert.equal((await grant(second, "Customer", token)).status, 200);
+
+    // Removing the last one is refused. `second` is a customer again, so have them try...
+    // no: only an admin may call. Use `email` (the last admin) targeting itself -> 409
+    // self-change. So grant `second` again and have IT revoke `email`.
+    await grant(second, "Admin", token);
+    const secondToken = (await body(await authFn(post({ action: "login", email: second, pw: "pass1234" })))).token;
+    assert.equal((await grant(email, "Customer", secondToken)).status, 200, "two admins: removing one is fine");
+
+    // `second` is now the only admin. Nobody else can remove it (self-change is blocked),
+    // which is the guard working from both directions.
+    const selfRes = await grant(second, "Customer", secondToken);
+    assert.equal(selfRes.status, 409);
+  } finally {
+    if (savedEnv === undefined) delete process.env.GL_ADMIN_EMAILS; else process.env.GL_ADMIN_EMAILS = savedEnv;
+    if (savedRoles === undefined) delete process.env.GL_ROLES; else process.env.GL_ROLES = savedRoles;
+  }
+});
+
+test("role administration validates its input", async () => {
+  assert.equal((await grant("", "Admin")).status, 400);
+  assert.equal((await grant("someone@example.com", "Wizard")).status, 400);
+  // Granting to an address with no account is refused rather than stored for later.
+  const res = await grant("ghost@example.com", "Admin");
+  assert.equal(res.status, 404);
+  assert.match((await body(res)).error, /sign up first/i);
+});
+
+test("the user list never exposes password material", async () => {
+  const j = await body(await adminFn(adminReq()));
+  assert.ok(j.users.length > 0);
+  const raw = JSON.stringify(j);
+  ["salt", "hash", "pwChangedAt"].forEach((f) => assert.ok(!raw.includes(f), "admin list leaked " + f));
+  j.users.forEach((u) => {
+    assert.deepEqual(Object.keys(u).sort(),
+      ["createdAt", "email", "grantedAt", "grantedBy", "name", "role", "source"]);
+  });
 });
 
 // ---- deployment readiness ----

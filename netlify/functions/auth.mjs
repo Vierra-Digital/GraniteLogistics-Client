@@ -4,7 +4,7 @@
 // Set GL_AUTH_SECRET in the Netlify env for production; a dev fallback is used otherwise.
 import { getStore } from "@netlify/blobs";
 import crypto from "node:crypto";
-import { CORS, json, sign, verifyToken, bearer, sessionSuperseded, roleFor } from "./_auth.mjs";
+import { CORS, json, sign, verifyToken, bearer, sessionSuperseded, effectiveRoleFor } from "./_auth.mjs";
 import { sendEmail, resetEmail, emailConfigured } from "./_email.mjs";
 
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -91,7 +91,7 @@ export default async (req) => {
     if (existing) return json({ ok: false, error: "That account already exists. Sign in instead." }, 409);
     const salt = crypto.randomBytes(16).toString("hex");
     // d.role is ignored on purpose: the caller does not get to pick its own privileges.
-    const role = roleFor(email);
+    const role = await effectiveRoleFor(email);
     const name = String(d.name || "").trim() || email.split("@")[0];
     const user = { email, name, role, salt, hash: hashPw(pw, salt), createdAt: new Date().toISOString() };
     await s.setJSON(email, user);
@@ -103,9 +103,9 @@ export default async (req) => {
     if (!u || !u.hash || !samePw(pw, u)) {
       return json({ ok: false, error: "Incorrect email or password." }, 401);
     }
-    // Re-derive privileges from the operator config on every login, so granting or
-    // revoking ops access is a config change and takes effect on next sign-in.
-    const role = roleFor(email);
+    // Re-derive privileges on every login from env config and the in-app grants, so a
+    // change made on the admin screen (or in config) takes effect at the next sign-in.
+    const role = await effectiveRoleFor(email);
     const fresh = role === u.role ? u : { ...u, role };
     if (fresh !== u) await s.setJSON(email, fresh);
     return json({ ok: true, token: tokenFor(fresh), user: publicUser(fresh) });

@@ -162,6 +162,8 @@
       <div class="nav-group">
         <div class="nav-label">Administration</div>
         <button class="nav-item" data-view="settings"><span class="ico">⚙</span> Settings</button>
+        <!-- Hidden unless the signed-in account is an Admin: revealed by applyRole(). -->
+        <button class="nav-item nav-admin-only" data-view="admin" hidden><span class="ico">⚿</span> Team &amp; Roles</button>
       </div>
     </nav>
 
@@ -504,6 +506,27 @@
               <input id="activity-search" class="search-input" type="search" placeholder="Search events…" /></div>
           </div>
           <div id="activity-feed" class="activity-feed"></div>
+        </div>
+      </section>
+
+      <!-- ============ TEAM & ROLES (Admin only) ============ -->
+      <section class="view" id="view-admin">
+        <div class="card">
+          <div class="card-head">
+            <h2>Team &amp; roles</h2>
+            <span class="muted small" id="adm-count"></span>
+          </div>
+          <p class="lead" id="adm-intro">
+            Grant an operations role to anyone who already has an account. Access changes
+            straight away; their navigation updates when they next sign in.
+          </p>
+          <div class="adm-bar">
+            <input id="adm-search" class="cust-search" type="search" placeholder="Search by name or email…"
+                   aria-label="Search accounts" autocomplete="off" />
+            <button class="btn" id="adm-refresh" type="button">↻ Refresh</button>
+          </div>
+          <div id="adm-status" class="muted small" role="status" aria-live="polite"></div>
+          <div id="adm-list" class="adm-list"></div>
         </div>
       </section>
 

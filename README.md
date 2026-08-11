@@ -77,10 +77,20 @@ behaviour when rotating it.
 
 ### Roles are assigned by the operator, never by the client
 
-A role is derived from `GL_ADMIN_EMAILS` / `GL_ROLES` on every login, and the role stored
-on the account is not trusted. That means granting or revoking ops access is a config
-change that takes effect at the next sign-in, and it also revokes any ops role an account
-picked up before this was enforced. Sign up first, then add the address and sign in again.
+A role comes from env config first, then from grants made on the **Team & Roles** screen,
+and the role stored on the account is never trusted (registration once accepted a
+client-supplied role). Effective role is re-derived on every login and on every
+`/api/state` request, so revoking someone takes effect immediately rather than whenever
+their 30-day token happens to expire.
+
+**Env config outranks the admin screen and cannot be edited from it.** That is the recovery
+path: if the stored grants are wrong, or nobody can sign in as an Admin any more, set
+`GL_ADMIN_EMAILS` and that account is an Admin at its next login. To bootstrap a new
+deployment, set `GL_ADMIN_EMAILS`, sign up with that address, sign in, then grant everyone
+else from **Team & Roles** — no further redeploys needed.
+
+The screen lives at **Team & Roles** in the sidebar and appears only for an Admin with a
+real server session; in local/offline demo mode it is removed rather than shown broken.
 
 ### The built-in api keys are public
 
@@ -98,6 +108,7 @@ rejected by `/api/state`, which reads. For a real machine integration set `GL_TE
 | `GET /api/auth` | Bearer token | Validates a session and returns the current user. |
 | `GET/POST/DELETE /api/my-orders` | Bearer token | A customer's own orders. Email comes from the verified token, so callers can only reach their own rows. `DELETE` cancels, and only before pickup. `POST` is rate limited per account (3/minute, 12/hour) and answers `429` with `Retry-After`; reads and cancellations are never limited. |
 | `GET/PUT /api/state` | Bearer token with an ops role, or a `GL_TENANTS` key | An ops client's whole workspace. Every recipient's name, address and phone lives here, so this is the one endpoint with real authorization: a Customer session gets 403, `Viewer` may read but not `PUT`, and the public demo keys are refused. |
+| `GET/POST /api/admin` | Bearer token, Admin only | Role administration. `GET` lists accounts with where each role comes from; `POST {email, role}` grants or revokes (`Customer` revokes). Answers `404` to a non-admin so the endpoint does not confirm it exists. Refuses changing your own role, removing the last Admin, editing an env-set role, or granting to an address with no account. |
 | `POST /api/orders` | `x-api-key` | Webhook ingest, single order or `{orders:[...]}`. Write-only, so a demo key here means at worst junk orders, not disclosure. |
 
 Passwords are salted and scrypt-hashed. Sessions are HMAC-signed, stateless, and carry

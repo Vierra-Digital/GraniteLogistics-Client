@@ -10,7 +10,7 @@
 // shipped in the client bundle, so treating them as a read credential would mean anyone
 // could dump the whole workspace. They remain valid for /api/orders, which only writes.
 import { CORS, json, resolveKey, readState, writeState, mergePushedPackages } from "./_lib.mjs";
-import { verifyToken, bearer, getUser, sessionSuperseded, OPS_ROLES, WRITE_ROLES } from "./_auth.mjs";
+import { verifyToken, bearer, getUser, sessionSuperseded, effectiveRoleFor, OPS_ROLES, WRITE_ROLES } from "./_auth.mjs";
 
 const HEADERS = { ...CORS, "Access-Control-Allow-Headers": "Content-Type, x-api-key, Authorization" };
 const fail = (error, status, extra) => json({ error, ...(extra || {}) }, status);
@@ -25,10 +25,14 @@ async function authorize(req) {
     const u = await getUser(p.email);
     if (!u) return { err: fail("Invalid or expired session", 401) };
     if (sessionSuperseded(p, u)) return { err: fail("Session ended because the password changed.", 401) };
-    if (!OPS_ROLES.includes(u.role)) {
+    // Re-derived per request rather than read off the stored account, so revoking someone
+    // on the admin screen takes effect at once instead of at their next sign-in. A
+    // revoked operator holding a valid 30-day token would otherwise keep full access.
+    const role = await effectiveRoleFor(p.email);
+    if (!OPS_ROLES.includes(role)) {
       return { err: fail("forbidden", 403, { hint: "this workspace is for operations roles; customers use /api/my-orders" }) };
     }
-    return { tenant: "default", role: u.role, email: u.email };
+    return { tenant: "default", role, email: u.email };
   }
 
   const { tenant, source } = resolveKey(req);

@@ -32,16 +32,53 @@ export function roleMap() {
   try { return process.env.GL_ROLES ? JSON.parse(process.env.GL_ROLES) : {}; } catch (e) { return {}; }
 }
 
-// The single source of truth for a caller's privileges. Deliberately ignores whatever
-// role is stored on the account: registration used to accept a client-supplied role, so
-// any stored ops role that the operator did not grant here is not trustworthy and is
-// downgraded to Customer on the next login.
-export function roleFor(email) {
-  const e = String(email || "").trim().toLowerCase();
+export const normalizeEmail = (e) => String(e || "").trim().toLowerCase();
+
+// Privileges granted by environment config. These outrank anything set in the app and
+// cannot be revoked from the admin screen, so an operator who edits config can always
+// recover access even if the stored grants are wrong or someone has locked themselves out.
+export function envRoleFor(email) {
+  const e = normalizeEmail(email);
   if (!e) return "Customer";
   if (adminEmails().includes(e)) return "Admin";
   const named = roleMap()[e];
   return OPS_ROLES.includes(named) ? named : "Customer";
+}
+
+// Privileges granted in-app by an Admin, stored as { email: { role, by, at } }.
+// One record, because a role list is small and always read whole.
+export function grantsStore() { return getStore({ name: "granite-roles", consistency: "strong" }); }
+export async function readGrants() {
+  const g = await grantsStore().get("grants", { type: "json" });
+  return (g && typeof g === "object") ? g : {};
+}
+export async function writeGrants(grants) { await grantsStore().setJSON("grants", grants); }
+
+export function grantedRole(grants, email) {
+  const entry = grants && grants[normalizeEmail(email)];
+  const role = entry && entry.role;
+  return OPS_ROLES.includes(role) ? role : null;
+}
+
+// The single source of truth for a caller's privileges: env config first, then in-app
+// grants, then Customer. Deliberately ignores whatever role is stored on the account,
+// because registration once accepted a client-supplied role, so a stored ops role nobody
+// granted is not trustworthy.
+export async function effectiveRoleFor(email, grants) {
+  const fromEnv = envRoleFor(email);
+  if (fromEnv !== "Customer") return fromEnv;
+  const g = grants || await readGrants();
+  return grantedRole(g, email) || "Customer";
+}
+
+// Every account, without the password material. Used by the admin screen.
+export async function listUsers() {
+  const { blobs } = await userStore().list();
+  const users = await Promise.all((blobs || []).map(async ({ key }) => {
+    const u = await userStore().get(key, { type: "json" });
+    return u ? { email: u.email || key, name: u.name || "", createdAt: u.createdAt || null } : null;
+  }));
+  return users.filter(Boolean);
 }
 
 export const CORS = {

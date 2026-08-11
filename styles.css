@@ -751,6 +751,29 @@ body[data-role="Customer"] .view-wrap{padding-bottom:calc(74px + env(safe-area-i
 .modal-backdrop.closing{display:flex;animation:backdrop-in var(--dur) var(--ease-in) reverse both}
 .modal-backdrop.closing .modal{animation:modal-out var(--dur) var(--ease-in) both}
 
+/* ---- Team & roles (Admin only) ---- */
+.adm-bar{display:flex;gap:10px;align-items:center;margin-bottom:12px}
+.adm-bar .cust-search{flex:1}
+.adm-list{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.adm-row{display:flex;align-items:center;justify-content:space-between;gap:16px;
+  border:1px solid var(--line);border-radius:var(--radius-sm);padding:12px 14px;background:var(--card)}
+.adm-who{display:flex;flex-direction:column;gap:2px;min-width:0}
+.adm-who b{font-size:.92rem}
+.adm-email{font-size:.8rem;color:var(--slate-500);overflow:hidden;text-overflow:ellipsis}
+.adm-meta{font-size:.72rem;color:var(--slate-400)}
+.adm-you{font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;
+  color:var(--blue-d);background:var(--blue-soft);border-radius:20px;padding:2px 7px;vertical-align:middle}
+.adm-set{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0}
+.adm-role{padding:7px 10px;border:1px solid var(--line);border-radius:9px;background:#fff;
+  font-family:inherit;font-size:.85rem;font-weight:600;color:var(--slate-700)}
+.adm-role:disabled{background:var(--slate-100);color:var(--slate-400);cursor:not-allowed}
+/* Why a row cannot be edited, stated on the row rather than only on failure, so the rule
+   is visible before someone tries. */
+.adm-why{font-size:.7rem;color:var(--slate-400);max-width:26ch;text-align:right;line-height:1.35}
+.adm-locked{background:var(--slate-100)}
+.adm-err{color:#b91c1c;font-weight:600}
+.adm-ok{color:#15803d;font-weight:600}
+
 /* ---- Workspace picker: roles this account cannot use ----
    Shown but clearly unavailable, rather than hidden. Someone evaluating the platform
    should be able to see that a Runner and a Driver workspace exist; they just cannot
