@@ -1142,15 +1142,21 @@
         name: v("name") || (u && u.name) || "–", item: v("item"), value: v("value"),
         address: v("address"), city: v("city"), state: v("state"), zip: v("zip"), phone: v("phone")
       };
-      var finish = function (p) { form.reset(); renderCustomerOrderList(email); showOrderSuccess(p); toast(p.pendingSync ? "Order saved. We'll sync it once you're back online." : "Order placed. Tracking " + p.id, "ok"); };
-      // pendingSync=true means we intended to save this server-side but couldn't reach
-      // the API. It's kept and retried (see syncPendingOrders) instead of being lost.
-      var placeLocal = function (pendingSync) {
+      var finish = function (p, queuedNote) {
+        form.reset(); renderCustomerOrderList(email); showOrderSuccess(p);
+        toast(p.pendingSync ? (queuedNote || "Order saved. We'll sync it once you're back online.")
+                            : "Order placed. Tracking " + p.id, "ok");
+      };
+      // pendingSync=true means we intended to save this server-side but couldn't confirm
+      // it. Kept and retried (see syncPendingOrders) instead of being lost. queuedNote
+      // exists because "once you're back online" is wrong when the server answered and
+      // simply could not confirm the write.
+      var placeLocal = function (pendingSync, queuedNote) {
         var p = makeOrderFrom(Object.assign({ source: "Customer Order" }, payload));
         p.customerEmail = email;
         if (pendingSync) p.pendingSync = true;
         state.packages.push(p); save();
-        finish(p);
+        finish(p, queuedNote);
       };
       if (hasServerAuth()) {
         var btn = $("#cust-order-form [type=submit]"); if (btn) { btn.disabled = true; btn.textContent = "Placing…"; }
@@ -1161,6 +1167,9 @@
             // The server reached a decision and said no. Queueing this for retry would
             // both lie to the customer and defeat the rate limit.
             toast(j.error || "We couldn't place that order.", "warn", 8000);
+          }
+          else if (j && j._status >= 500) {
+            placeLocal(true, "Saved. The server is busy, so we'll confirm this order shortly.");
           }
           else { placeLocal(true); }
         }).catch(function () { if (btn) { btn.disabled = false; btn.textContent = "Place order →"; } placeLocal(true); });
