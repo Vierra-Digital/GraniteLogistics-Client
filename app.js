@@ -324,6 +324,32 @@
   // Done at runtime rather than by editing the markup because a dozen of these blocks are
   // built by modal() and the various render functions, so static `for=` attributes would
   // miss exactly the fields that are hardest to fill in blind.
+  // Make a non-button element activate from the keyboard.
+  //
+  // Several lists render rows as <div> with a click handler: the tracking list, the staging
+  // list, the overview alerts, the notification feed. A mouse reaches them, a keyboard
+  // never does, which is most of the ops platform unreachable without a pointer. These
+  // stay divs rather than becoming <button> because a row can contain its own checkbox in
+  // select mode, and a button containing a control is invalid.
+  function makeActivatable(el, fn) {
+    if (!el || el.dataset.kbd === "1") return;
+    el.dataset.kbd = "1";
+    // A real button or link already does all of this, and adding role/tabindex would only
+    // misdescribe it. Some of these selectors match either shape depending on the view.
+    if (/^(BUTTON|A)$/.test(el.tagName)) { el.addEventListener("click", fn); return; }
+    el.tabIndex = 0;
+    // role=button only when the row holds no control of its own; claiming to be a button
+    // while wrapping a checkbox misdescribes it to a screen reader.
+    if (!el.querySelector("input, button, select, textarea, a")) el.setAttribute("role", "button");
+    el.addEventListener("click", fn);
+    el.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+      // Space scrolls the page by default, and Enter would submit an enclosing form.
+      e.preventDefault();
+      fn(e);
+    });
+  }
+
   var labelSeq = 0;
   function associateLabels(root) {
     var scope = root || document;
@@ -786,7 +812,7 @@
         return '<div class="notif-item' + (n.ts > seenTs ? " unread" : "") + '" data-open="' + n.pkgId + '"><span class="notif-ico ' + (n.exc ? "exc" : "ok") + '">' + (n.exc ? "⚠" : "📦") + '</span>' +
           '<div class="notif-main"><b>' + n.title + '</b><div class="notif-time">' + fmtTime(n.ts) + '</div></div></div>';
       }).join("") : '<div class="notif-empty">No updates yet. Place an order to start tracking it here.</div>');
-    $$("#notif-panel [data-open]").forEach(function (b) { b.addEventListener("click", function () { closeNotif(); openCustomerOrder(b.dataset.open); }); });
+    $$("#notif-panel [data-open]").forEach(function (b) { makeActivatable(b, function () { closeNotif(); openCustomerOrder(b.dataset.open); }); });
   }
   function renderNotifs() {
     if ((typeof currentRole === "function" ? currentRole() : "") === "Customer") { renderCustomerNotifs(); return; }
@@ -799,7 +825,7 @@
         return '<div class="notif-item" data-open="' + n.pkgId + '"><span class="notif-ico ' + n.kind + '">' + (n.kind === "exc" ? "⚠" : "⏱") + '</span>' +
           '<div class="notif-main"><b>' + n.title + '</b><div class="notif-time">' + n.sub + '</div></div></div>';
       }).join("") : '<div class="notif-empty">✓ All clear. No open exceptions or SLA breaches.</div>');
-    $$("#notif-panel [data-open]").forEach(function (b) { b.addEventListener("click", function () { closeNotif(); openPackage(b.dataset.open); }); });
+    $$("#notif-panel [data-open]").forEach(function (b) { makeActivatable(b, function () { closeNotif(); openPackage(b.dataset.open); }); });
   }
   function toggleNotif() { var p = $("#notif-panel"); if (p) p.classList.toggle("open"); }
   function closeNotif() { var p = $("#notif-panel"); if (p) p.classList.remove("open"); }
@@ -1551,7 +1577,7 @@
         '<div class="alert-reason">' + reason + '</div></div>' +
         '<span class="' + pillClass(p.status) + '">' + stageLabelFor(p) + '</span></div>';
     }).join("") : '<p class="muted">No open exceptions or SLA breaches. All clear.</p>';
-    $$("#overview-alerts .alert-row").forEach(function (r) { r.addEventListener("click", function () { openPackage(r.dataset.id); }); });
+    $$("#overview-alerts .alert-row").forEach(function (r) { makeActivatable(r, function () { openPackage(r.dataset.id); }); });
 
     var max = Math.max.apply(null, STAGES.map(function (s) { return c[s]; })) || 1;
     $("#funnel").innerHTML = STAGES.map(function (s) {
@@ -1731,7 +1757,7 @@
         '<div class="ri-sub">' + p.id + " · " + p.customer.city + ", " + p.customer.state + " " + p.customer.zip + '</div></div></div>';
     }).join("") : '<p class="muted">No items staged for batching. Pick up items in the Runner Dashboard first.</p>';
     $$("#stage-list .row-item").forEach(function (el) {
-      el.addEventListener("click", function () {
+      makeActivatable(el, function () {
         var id = el.dataset.id;
         if (batchSel[id]) { delete batchSel[id]; el.classList.remove("selected"); }
         else { batchSel[id] = true; el.classList.add("selected"); }
@@ -2309,7 +2335,7 @@
         '<span class="' + pillClass(p.status) + '">' + stageLabelFor(p) + '</span>' + slaPillHtml(p) + '</div>';
     }).join("") : '<p class="muted">No packages match “' + trackQuery + '”.</p>';
     $$("#tracking-list .row-item").forEach(function (el) {
-      el.addEventListener("click", function () {
+      makeActivatable(el, function () {
         var id = el.dataset.id;
         if (trackSelectMode) {
           if (trackSelect[id]) delete trackSelect[id]; else trackSelect[id] = true;
@@ -2393,7 +2419,9 @@
         '</div>';
     }
     $$("#home-content [data-go]").forEach(function (b) { b.addEventListener("click", function () { go(b.dataset.go); }); });
-    $$("#home-content [data-open]").forEach(function (b) { b.addEventListener("click", function () { openPackage(b.dataset.open); }); });
+    // These are row divs on the role-home view, so they need keyboard activation. The
+    // action button inside each row is native and focusable already, and stops propagation.
+    $$("#home-content [data-open]").forEach(function (b) { makeActivatable(b, function () { openPackage(b.dataset.open); }); });
     $$("#home-content [data-scan]").forEach(function (b) { b.addEventListener("click", function (ev) { ev.stopPropagation(); processScan(b.dataset.scan); renderHome(); }); });
   }
 

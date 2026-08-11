@@ -310,7 +310,7 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .pickup-list,.stage-list,.tracking-list{display:flex;flex-direction:column;gap:10px;max-height:64vh;overflow:auto}
 .row-item{border:1px solid var(--line);border-radius:12px;padding:13px 15px;display:flex;gap:14px;align-items:center}
 .row-item .ri-main{flex:1;min-width:0}
-.row-item .ri-title{font-weight:700;font-size:.92rem}
+.row-item .ri-title{font-weight:700;font-size:.92rem;overflow:hidden;text-overflow:ellipsis}
 .row-item .ri-sub{font-size:.8rem;color:var(--slate-500);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* The account that placed a self-serve order: present but visually subordinate to the
    recipient, since ops scans by recipient first. */
@@ -478,10 +478,23 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .search-input{min-width:0}
 .card-head .search-input{flex:1 1 200px}
 
-/* Visible keyboard focus (accessibility) */
+/* Visible keyboard focus (accessibility)
+   Every interactive thing belongs in this list. The previous version covered ten
+   selectors, which left the customer bottom nav, the order rows, the settings tabs and
+   both close buttons with no visible focus at all: reachable by keyboard, but with no way
+   to see where you were. */
 .btn:focus-visible,.nav-item:focus-visible,.icon-btn:focus-visible,.role-badge:focus-visible,
 .search-trigger:focus-visible,.home-action:focus-visible,.home-cta:focus-visible,.rg-card:focus-visible,
-.cmd-item:focus-visible,select:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.cmd-item:focus-visible,select:focus-visible,
+.bn-item:focus-visible,.cust-order:focus-visible,.tab-btn:focus-visible,.linkbtn:focus-visible,
+.close-x:focus-visible,.rg-close:focus-visible,.am-item:focus-visible,.notif-item:focus-visible,
+.alert-row:focus-visible,.row-item:focus-visible,.coc-back:focus-visible,.btn-demo:focus-visible,
+.btn-reset:focus-visible,.menu-btn:focus-visible,.import-drop:focus-visible,
+.adm-role:focus-visible,.acct-switch:focus-visible,input:focus-visible,
+.chk input:focus-visible,.tk-check:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+/* Rows sit flush against each other, so an outline outside the box gets clipped by the
+   neighbour. Inset it instead. */
+.row-item:focus-visible,.notif-item:focus-visible,.alert-row:focus-visible{outline-offset:-2px}
 
 /* ===== Boot preloader ===== */
 .preloader{position:fixed;inset:0;z-index:200;background:#0a1622;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;transition:opacity .4s ease}
@@ -869,6 +882,30 @@ body[data-role="Customer"] .view-wrap{padding-bottom:calc(74px + env(safe-area-i
   }
   .btn:active,.icon-btn:active,.row-item.selectable:hover,.row-item.selectable:active{transform:none}
 }
+
+/* =====================================================================
+   TOUCH & TEXT
+   Small things that only show up on a real device.
+   ===================================================================== */
+
+/* Removes the ~300ms wait a browser spends deciding whether a tap was a double-tap.
+   Applied to controls rather than the whole page, so pinch and double-tap zoom on content
+   still work: this is an installable app, and some of its users will need to zoom. */
+.btn,.icon-btn,.nav-item,.bn-item,.tab-btn,.row-item,.cust-order,.rg-card,.home-action,
+.am-item,.notif-item,.alert-row,.linkbtn,.close-x,.rg-close,.chk,.adm-role,.w-dot,
+.role-badge,.search-trigger,.menu-btn,.btn-demo,.btn-reset{touch-action:manipulation}
+
+/* We draw our own press and focus states, so the browser's grey flash on tap is noise. */
+.btn,.icon-btn,.nav-item,.bn-item,.tab-btn,.row-item,.cust-order,.rg-card,.home-action,
+.am-item,.notif-item,.alert-row,.linkbtn,.close-x,.rg-close{-webkit-tap-highlight-color:transparent}
+
+/* Stops a scroll inside a panel from carrying on into the page behind it once the panel
+   hits its end, which on a phone reads as the modal dragging the whole app around. */
+.modal,.cmd-results,.notif-panel,.sidebar,.account-menu,.rg-inner{overscroll-behavior:contain}
+.modal-backdrop,.welcome-backdrop,.role-gate{overscroll-behavior:contain}
+
+/* Avoids a single trailing word on its own line in a heading. */
+h1,h2,.step-head h3,.order-hero h2{text-wrap:balance}
 
 /* =====================================================================
    RESPONSIVE: exactly three tiers, each declared once, placed last so
