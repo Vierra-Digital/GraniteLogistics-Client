@@ -774,6 +774,18 @@ body[data-role="Customer"] .view-wrap{padding-bottom:calc(74px + env(safe-area-i
 .adm-err{color:#b91c1c;font-weight:600}
 .adm-ok{color:#15803d;font-weight:600}
 
+/* Access history: a grant/revoke trail, since the grants record only holds what is
+   true now. Directional dot rather than colour alone, so it reads without relying on
+   hue to tell granted from revoked. */
+.adm-audit{display:flex;flex-direction:column;gap:2px}
+.adm-audit-row{display:flex;gap:10px;align-items:flex-start;padding:9px 2px;border-bottom:1px solid var(--line)}
+.adm-audit-row:last-child{border-bottom:0}
+.adm-audit-row b{font-size:.86rem}
+.adm-audit-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:6px}
+.adm-audit-dot.up{background:var(--emerald)}
+.adm-audit-dot.down{background:var(--amber)}
+.adm-audit-meta{display:block;font-size:.74rem;color:var(--slate-400);margin-top:1px}
+
 /* ---- Workspace picker: roles this account cannot use ----
    Shown but clearly unavailable, rather than hidden. Someone evaluating the platform
    should be able to see that a Runner and a Driver workspace exist; they just cannot

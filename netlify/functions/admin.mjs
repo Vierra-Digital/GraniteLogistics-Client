@@ -17,7 +17,7 @@
 // because a token lives 30 days and a revoked admin must lose access immediately.
 import {
   CORS, json, verifyToken, bearer, getUser, sessionSuperseded, userStore,
-  effectiveRoleFor, envRoleFor, readGrants, writeGrants, grantedRole,
+  effectiveRoleFor, envRoleFor, readGrants, writeGrants, grantedRole, grantsStore,
   listUsers, normalizeEmail, ROLES, OPS_ROLES,
 } from "./_auth.mjs";
 
@@ -51,13 +51,38 @@ function describe(users, grants) {
       email, name: u.name, createdAt: u.createdAt, role,
       // "env" rows are read-only here; "granted" rows can be changed.
       source: fromEnv !== "Customer" ? "env" : (granted ? "granted" : "default"),
-      grantedBy: entry ? entry.by || null : null,
-      grantedAt: entry ? entry.at || null : null,
+      // Only attributed when the grant is the thing actually in force. A leftover entry
+      // carrying an unknown role must not look like it granted anything.
+      grantedBy: granted && entry ? entry.by || null : null,
+      grantedAt: granted && entry ? entry.at || null : null,
     };
   }).sort((a, b) => a.email.localeCompare(b.email));
 }
 
 const adminCount = (rows) => rows.filter((r) => r.role === "Admin").length;
+
+// Who changed whose access, and when.
+//
+// The grants record only holds the role in force now, so a revocation used to erase every
+// trace that access had ever been given. For a platform where a role decides who can read
+// every customer's address, that history is the point. Capped so one record cannot grow
+// without bound; a privilege change is rare enough that 500 covers a long time.
+const AUDIT_LIMIT = 500;
+
+export async function readRoleAudit() {
+  const a = await grantsStore().get("audit", { type: "json" });
+  return Array.isArray(a) ? a : [];
+}
+async function recordRoleChange(entry) {
+  try {
+    const log = await readRoleAudit();
+    log.unshift({ ...entry, at: new Date().toISOString() });
+    await grantsStore().setJSON("audit", log.slice(0, AUDIT_LIMIT));
+  } catch (e) {
+    // A lost audit line must not fail the change the caller already committed. The
+    // alternative is reporting failure for something that did happen.
+  }
+}
 
 export default async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: HEADERS });
@@ -69,7 +94,11 @@ export default async (req) => {
     if (req.method === "GET") {
       const users = await listUsers();
       const rows = describe(users, who.grants);
-      return json({ ok: true, you: who.email, roles: ROLES, opsRoles: OPS_ROLES, users: rows });
+      return json({
+        ok: true, you: who.email, roles: ROLES, opsRoles: OPS_ROLES, users: rows,
+        admins: adminCount(rows),
+        audit: (await readRoleAudit()).slice(0, 50),
+      });
     }
 
     if (req.method === "POST") {
@@ -93,6 +122,7 @@ export default async (req) => {
 
       const users = await listUsers();
       const before = describe(users, who.grants);
+      const previousRole = (before.find((r) => r.email === target) || {}).role || "Customer";
       const grants = { ...who.grants };
 
       if (role === "Customer") {
@@ -106,6 +136,20 @@ export default async (req) => {
         grants[target] = { role, by: who.email, at: new Date().toISOString() };
       }
       await writeGrants(grants);
+
+      // The check above read state that another admin may have changed before this write
+      // landed, and Blobs has no compare-and-swap, so two simultaneous revocations could
+      // each see one remaining admin and both go through. Zero admins is only recoverable
+      // by editing environment config, so it is worth re-reading to confirm.
+      const settled = await readGrants();
+      if (adminCount(describe(await listUsers(), settled)) === 0) {
+        // Put back what this request was working from. That may discard a concurrent
+        // change, which is the lesser harm compared with locking everyone out.
+        await writeGrants(who.grants);
+        return fail("Another administrator was removed at the same moment, which would have left none. Nothing was changed.", 409);
+      }
+
+      await recordRoleChange({ email: target, from: previousRole, to: role, by: who.email });
 
       // Keep the stored account in step so the client shows the right role without
       // waiting for a re-login. /api/state re-derives anyway, so this is presentation.
@@ -123,6 +167,7 @@ export default async (req) => {
           : "Access granted immediately. Their view updates when they next sign in.",
         admins: adminCount(rows),
         users: rows,
+        audit: (await readRoleAudit()).slice(0, 50),
       });
     }
 

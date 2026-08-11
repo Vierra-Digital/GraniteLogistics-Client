@@ -1037,6 +1037,7 @@
   // Every rule shown here is also enforced server-side; this only explains them. The
   // server is the authority, so a stale page can't grant anything by being out of date.
   var admUsers = [];
+  var admAudit = [];
   var admQuery = "";
   var admBusy = false;
 
@@ -1067,6 +1068,7 @@
         admUsers = [];
       } else {
         admUsers = j.users || [];
+        admAudit = j.audit || [];
         admStatus("");
       }
       renderAdminList();
@@ -1120,6 +1122,26 @@
     $$("#adm-list .adm-role").forEach(function (sel) {
       sel.addEventListener("change", function () { setUserRole(sel.dataset.email, sel.value, sel); });
     });
+    renderAdminAudit();
+  }
+  // The grants record only holds what is true now, so this is the only place a revoked
+  // role leaves a trace. Hidden entirely until there is something to show.
+  function renderAdminAudit() {
+    var card = $("#adm-audit-card"), box = $("#adm-audit");
+    if (!card || !box) return;
+    card.hidden = !admAudit.length;
+    if (!admAudit.length) return;
+    box.innerHTML = admAudit.map(function (a) {
+      var granted = a.to && a.to !== "Customer";
+      var what = granted
+        ? "granted " + ((ROLE_META[a.to] || {}).label || a.to)
+        : "revoked access";
+      return '<div class="adm-audit-row">' +
+        '<span class="adm-audit-dot' + (granted ? " up" : " down") + '"></span>' +
+        '<div><b>' + attr(a.email) + '</b> <span class="muted">' + what + '</span>' +
+        '<span class="adm-audit-meta">by ' + attr(a.by || "unknown") + ' · ' + (a.at ? fmtTime(a.at) : 'unknown time') + '</span></div>' +
+        '</div>';
+    }).join("");
   }
   // Order shown in the picker: no ops access first, then increasing reach.
   var ROLE_ORDER = ["Customer", "Viewer", "Driver", "Runner", "Admin"];
@@ -1151,6 +1173,7 @@
             return;
           }
           admUsers = j.users || admUsers;
+          admAudit = j.audit || admAudit;
           admStatus(j.note || "Saved.", "ok");
           toast(email + " is now " + (role === "Customer" ? "a customer" : ROLE_META[role].label), "ok");
           renderAdminList();

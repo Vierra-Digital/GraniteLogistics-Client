@@ -36,7 +36,7 @@ being offline. To exercise the real API, deploy to Netlify or run `netlify dev`.
 npm test
 ```
 
-79 tests, no network and no browser required, in two layers:
+89 tests, no network and no browser required, in two layers:
 
 - **Unit** (`test/functions.test.mjs`) covers the pure logic: workspace merging, id
   allocation, session tokens, tenant and api-key resolution, role assignment, the public
@@ -90,7 +90,10 @@ deployment, set `GL_ADMIN_EMAILS`, sign up with that address, sign in, then gran
 else from **Team & Roles** — no further redeploys needed.
 
 The screen lives at **Team & Roles** in the sidebar and appears only for an Admin with a
-real server session; in local/offline demo mode it is removed rather than shown broken.
+real server session; in local/offline demo mode it is removed rather than shown broken. It
+also shows an **access history**: who granted or revoked whose role, and when. That log
+matters because the grants record only holds what is true now, so a revocation would
+otherwise erase every trace that access had ever existed.
 
 ### The built-in api keys are public
 
@@ -108,7 +111,7 @@ rejected by `/api/state`, which reads. For a real machine integration set `GL_TE
 | `GET /api/auth` | Bearer token | Validates a session and returns the current user. |
 | `GET/POST/DELETE /api/my-orders` | Bearer token | A customer's own orders. Email comes from the verified token, so callers can only reach their own rows. `DELETE` cancels, and only before pickup. `POST` is rate limited per account (3/minute, 12/hour) and answers `429` with `Retry-After`; reads and cancellations are never limited. |
 | `GET/PUT /api/state` | Bearer token with an ops role, or a `GL_TENANTS` key | An ops client's whole workspace. Every recipient's name, address and phone lives here, so this is the one endpoint with real authorization: a Customer session gets 403, `Viewer` may read but not `PUT`, and the public demo keys are refused. |
-| `GET/POST /api/admin` | Bearer token, Admin only | Role administration. `GET` lists accounts with where each role comes from; `POST {email, role}` grants or revokes (`Customer` revokes). Answers `404` to a non-admin so the endpoint does not confirm it exists. Refuses changing your own role, removing the last Admin, editing an env-set role, or granting to an address with no account. |
+| `GET/POST /api/admin` | Bearer token, Admin only | Role administration. `GET` lists accounts with where each role comes from, plus the recent access history; `POST {email, role}` grants or revokes (`Customer` revokes). Answers `404` to a non-admin so the endpoint does not confirm it exists. Refuses changing your own role, removing the last Admin, editing an env-set role, or granting to an address with no account. Every change is appended to an audit trail, including revocations, which otherwise leave no trace. |
 | `POST /api/orders` | `x-api-key` | Webhook ingest, single order or `{orders:[...]}`. Write-only, so a demo key here means at worst junk orders, not disclosure. |
 
 Passwords are salted and scrypt-hashed. Sessions are HMAC-signed, stateless, and carry

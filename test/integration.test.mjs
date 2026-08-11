@@ -598,6 +598,75 @@ test("role administration validates its input", async () => {
   assert.match((await body(res)).error, /sign up first/i);
 });
 
+test("every role change is recorded, including the revocation", async () => {
+  const email = "audited@example.com";
+  await register(email);
+  await grant(email, "Driver");
+  const j = await body(await grant(email, "Customer"));
+
+  // Revoking deletes the grant, so without the audit log there would be nothing left to
+  // show that this account ever had access.
+  const mine = j.audit.filter((a) => a.email === email);
+  assert.equal(mine.length, 2, "expected a grant and a revoke: " + JSON.stringify(mine));
+  // Newest first.
+  assert.deepEqual([mine[0].from, mine[0].to], ["Driver", "Customer"]);
+  assert.deepEqual([mine[1].from, mine[1].to], ["Customer", "Driver"]);
+  mine.forEach((a) => {
+    assert.equal(a.by, ADMIN_EMAIL, "the acting admin was not recorded");
+    assert.ok(a.at, "no timestamp");
+  });
+
+  // And it is readable on a later GET, not just returned by the write.
+  const later = await body(await adminFn(adminReq()));
+  assert.ok(later.audit.some((a) => a.email === email && a.to === "Customer"));
+});
+
+test("two simultaneous revocations cannot leave zero administrators", async () => {
+  const savedEnv = process.env.GL_ADMIN_EMAILS;
+  const savedRoles = process.env.GL_ROLES;
+  const savedGrants = blobs.get(k("granite-roles", "grants"));
+  try {
+    // Two granted admins and no env admins, so the stored grants are the only thing
+    // keeping anyone in.
+    const a = "race-admin-a@example.com";
+    const b = "race-admin-b@example.com";
+    await register(a); await register(b);
+    await grant(a, "Admin"); await grant(b, "Admin");
+    delete process.env.GL_ADMIN_EMAILS;
+    delete process.env.GL_ROLES;
+
+    const aToken = (await body(await authFn(post({ action: "login", email: a, pw: "pass1234" })))).token;
+    const bToken = (await body(await authFn(post({ action: "login", email: b, pw: "pass1234" })))).token;
+
+    // As A's revocation of B is written, simulate B's request revoking A landing at the
+    // same instant. Each saw one admin remaining; together they would leave none.
+    let once = false;
+    setAfterWrite(({ store, key }) => {
+      if (store !== "granite-roles" || key !== "grants" || once) return;
+      once = true;
+      blobs.set(k("granite-roles", "grants"), JSON.stringify({}));
+    });
+    let res;
+    try {
+      res = await grant(b, "Customer", aToken);
+    } finally { setAfterWrite(null); }
+
+    assert.equal(res.status, 409, "the lockout was allowed through");
+    assert.match((await body(res)).error, /would have left none/i);
+
+    // At least one admin must still be able to get in.
+    const stillIn = (await adminFn(adminReq({ token: aToken }))).status === 200
+      || (await adminFn(adminReq({ token: bToken }))).status === 200;
+    assert.ok(stillIn, "nobody can administer roles any more");
+  } finally {
+    setAfterWrite(null);
+    if (savedEnv === undefined) delete process.env.GL_ADMIN_EMAILS; else process.env.GL_ADMIN_EMAILS = savedEnv;
+    if (savedRoles === undefined) delete process.env.GL_ROLES; else process.env.GL_ROLES = savedRoles;
+    if (savedGrants === undefined) blobs.delete(k("granite-roles", "grants"));
+    else blobs.set(k("granite-roles", "grants"), savedGrants);
+  }
+});
+
 test("the user list never exposes password material", async () => {
   const j = await body(await adminFn(adminReq()));
   assert.ok(j.users.length > 0);
