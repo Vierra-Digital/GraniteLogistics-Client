@@ -194,11 +194,15 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
    tokens; see the MOTION section near the end of this file. */
 @keyframes fade{from{opacity:0;transform:translateY(var(--rise))}to{opacity:1;transform:none}}
 
-/* Cards / layout */
+/* Cards / layout
+   Every fr track here is minmax(0,1fr), not 1fr. A bare `1fr` floors at min-content, so one
+   stubborn child (a video element, a nowrap label, an input's intrinsic size) widens its
+   track past the container and squashes its neighbour. That is what made the driver view
+   allocate 792px of a 647px row to one column. */
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;box-shadow:var(--shadow);margin-bottom:18px}
 .card-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}
 .card-head h2{font-size:1rem;font-weight:700;letter-spacing:-.01em;color:var(--ink)}
-.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.grid-2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}
 
 /* Reusable tabbed layout, used by Settings, Order Ingest, and anywhere a view
    has several independent sections that don't need to be seen side-by-side. */
@@ -324,7 +328,7 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .manifest-builder{display:flex;flex-direction:column;gap:14px}
 .manifest-builder label{display:flex;flex-direction:column;gap:6px;font-size:.82rem;font-weight:600;color:var(--slate-700)}
 .manifest-builder select,#scan-select{padding:10px;border:1px solid var(--line);border-radius:10px;font-size:.9rem;background:#fff}
-.manifest-selected{border:1px dashed var(--line);border-radius:11px;padding:12px;font-size:.85rem;color:var(--slate-600);min-height:54px}
+.manifest-selected{border:1px dashed var(--line);border-radius:11px;padding:12px;font-size:.85rem;color:var(--slate-700);min-height:54px}
 .chip{display:inline-block;background:var(--slate-100);border:1px solid var(--line);border-radius:8px;padding:4px 9px;margin:3px 4px 0 0;font-size:.78rem}
 
 /* Scanner */
@@ -347,7 +351,7 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .tl-node.current::before{background:var(--blue);border-color:var(--blue);box-shadow:0 0 0 4px rgba(37,99,235,.18)}
 .tl-stage{font-weight:700;font-size:.92rem}
 .tl-time{font-size:.76rem;color:var(--slate-500)}
-.tl-note{font-size:.83rem;color:var(--slate-600);margin-top:2px}
+.tl-note{font-size:.83rem;color:var(--slate-700);margin-top:2px}
 
 /* Barcode */
 .barcode{display:block;max-width:100%;height:auto}
@@ -359,7 +363,7 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .modal-backdrop.open{display:flex}
 .modal{background:var(--card);border-radius:18px;max-width:780px;width:100%;max-height:88vh;overflow:auto;padding:24px;box-shadow:0 30px 80px rgba(2,6,23,.4)}
 .modal h2{margin-bottom:4px}
-.modal-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:14px}
+.modal-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;margin-top:14px}
 .modal .photos{display:flex;gap:10px;flex-wrap:wrap}
 .modal .photos img{width:120px;height:120px;border-radius:11px;object-fit:cover;border:1px solid var(--line)}
 .close-x{float:right;border:0;background:var(--slate-100);width:34px;height:34px;border-radius:9px;cursor:pointer;font-size:1.1rem}
@@ -627,7 +631,7 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 /* Customer role: a single, purpose-built app shell, not the ops sidebar platform.
    No sidebar at any width, no header account dropdown (that's the Account tab
    now), and the bottom tab bar is the one and only navigation, always on. */
-body[data-role="Customer"] #app{grid-template-columns:1fr}
+body[data-role="Customer"] #app{grid-template-columns:minmax(0,1fr)}
 body[data-role="Customer"] .sidebar,
 body[data-role="Customer"] .sidebar-backdrop,
 body[data-role="Customer"] .menu-btn,
@@ -925,11 +929,11 @@ h1,h2,.step-head h3,.order-hero h2{text-wrap:balance}
    ===================================================================== */
 
 @media(max-width:980px){
-  #app{grid-template-columns:1fr}
+  #app{grid-template-columns:minmax(0,1fr)}
   .sidebar{position:fixed;left:calc(-1 * (var(--sidebar-w) + 6px));top:0;width:var(--sidebar-w);transition:left .25s ease;z-index:40}
   .sidebar.open{left:0;box-shadow:0 0 60px rgba(0,0,0,.5)}
-  .grid-2{grid-template-columns:1fr}
-  .modal-grid{grid-template-columns:1fr}
+  .grid-2{grid-template-columns:minmax(0,1fr)}
+  .modal-grid{grid-template-columns:minmax(0,1fr)}
   .global-search{display:none}
   .ff-row{flex-wrap:wrap}
 
@@ -945,10 +949,10 @@ h1,h2,.step-head h3,.order-hero h2{text-wrap:balance}
 }
 
 @media(max-width:760px){
-  .tabbed-layout{grid-template-columns:1fr}
+  .tabbed-layout{grid-template-columns:minmax(0,1fr)}
   .tab-rail{flex-direction:row;overflow-x:auto;position:static;padding:6px;gap:2px}
   .tab-btn{white-space:nowrap;width:auto;flex:0 0 auto}
-  .order-layout{grid-template-columns:1fr;gap:14px}
+  .order-layout{grid-template-columns:minmax(0,1fr);gap:14px}
 }
 
 @media(max-width:600px){
@@ -959,10 +963,30 @@ h1,h2,.step-head h3,.order-hero h2{text-wrap:balance}
   .tb-right{gap:8px}
   .search-trigger{display:none}            /* command palette is desktop; views have inline search */
   .icon-btn{width:36px;height:36px;font-size:1rem}
+  /* Keeps the 36px circle the design wants while giving a thumb the 44px target the
+     platform guidelines ask for. The pseudo-element is invisible and belongs to the same
+     button, so it only widens the hit area. */
+  .icon-btn::after{content:"";position:absolute;inset:-4px;border-radius:50%}
+  /* Block buttons landed a pixel under 44. */
+  .btn.block{min-height:44px}
+
+  /* iOS zooms the entire page when a focused input's font-size is under 16px, which on a
+     three-step form reads as the layout lurching every time you tap a field. 16px is the
+     threshold, not a preference. */
+  .ff input,.ff select,.search-input,.cust-search,#cmd-input,
+  input[type=text],input[type=email],input[type=password],input[type=number],
+  input[type=search],input[type=tel],textarea{font-size:16px}
+
+  /* Comfortable targets for a thumb. */
+  .ff input,.ff select,.search-input,.cust-search{min-height:44px}
+  .nav-item,.btn-demo,.btn-reset,.am-item{min-height:44px}
+  /* Same trick as .icon-btn: keep the compact chip, widen what the finger hits. */
+  .role-badge{position:relative}
+  .role-badge::after{content:"";position:absolute;inset:-4px;border-radius:22px}
   .role-badge{padding:0;width:36px;height:36px;border-radius:50%;justify-content:center;flex-shrink:0}
   .role-badge #role-badge-text,.role-badge .rb-switch{display:none}
   .role-badge .rb-dot{width:11px;height:11px}
-  .rg-grid{grid-template-columns:1fr}
+  .rg-grid{grid-template-columns:minmax(0,1fr)}
 
   /* Calmer, more focused screens */
   .view-wrap{padding:16px 14px max(18px,env(safe-area-inset-bottom,0px))}
