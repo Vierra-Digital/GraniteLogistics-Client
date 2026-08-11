@@ -193,6 +193,10 @@ also accepts an optional `x-signature` HMAC of the body using `GL_WEBHOOK_SECRET
 ## What works for real
 
 - Real accounts with hashed passwords, cross-device sessions, and password reset.
+- Server-side authorization: the ops workspace is gated on the signed-in account's role,
+  re-derived per request, so revoking access takes effect immediately.
+- **Team & Roles**: an Admin grants and revokes operations access in-app, with an audit
+  trail of who changed whose role.
 - Customer ordering: a three-step guided form, order list with search, a clean status
   tracker, shareable tracking links, and cancellation before pickup.
 - Orders placed offline are kept and retried, and survive a later server pull.
@@ -206,6 +210,8 @@ also accepts an optional `x-signature` HMAC of the body using `GL_WEBHOOK_SECRET
 - Reports computed live from chain-of-custody timestamps.
 - Role-based navigation, in-app notifications, dark mode, command palette (Ctrl/Cmd-K),
   JSON backup and restore, and a searchable audit log.
+- A readiness report at `/api/health` naming any configuration still missing.
+- One motion system across the app, with a `prefers-reduced-motion` opt-out.
 
 ## What is still simulated
 
@@ -219,7 +225,8 @@ server-side status pipeline before it can be real.
 
 - `index.html`, `landing.css`, `landing.js` public landing
 - `app.html`, `styles.css`, `app.js` the app shell and all views
-- `netlify/functions/` the API (auth, customer orders, workspace state, ingest, health)
+- `netlify/functions/` the API (auth, role administration, customer orders, workspace
+  state, ingest, public tracking, health)
 - `test/` regression tests for the function logic
 - `barcode.js` pure-JS Code 128 (Set B) to SVG
 - `manifest.webmanifest`, `sw.js` installable, offline-capable PWA
