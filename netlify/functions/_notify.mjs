@@ -60,6 +60,20 @@ export function detectStatusChanges(before, after) {
 
 function store() { return getStore({ name: "granite-notify", consistency: "strong" }); }
 
+// A parcel is finished once it has been announced as delivered: nothing further will ever
+// happen to it, so its entry is dead weight. Without pruning this record grows by one entry
+// per shipment forever, in a single Blobs value that is read and written on every ops push.
+export const ANNOUNCED_LIMIT = 5000;
+
+export function pruneAnnounced(announced) {
+  const entries = Object.entries(announced || {});
+  const live = entries.filter(([, stages]) => !(Array.isArray(stages) && stages.indexOf("Delivered") >= 0));
+  // Delivered parcels first out. If that is somehow not enough, drop the oldest remaining
+  // entries: losing one means at worst a repeated notification, never a missed shipment.
+  const kept = live.length <= ANNOUNCED_LIMIT ? live : live.slice(-ANNOUNCED_LIMIT);
+  return Object.fromEntries(kept);
+}
+
 // { "GL-1041": ["InTransit", "Delivered"] } per tenant. Server-owned.
 export async function readAnnounced(tenant) {
   const a = await store().get(tenant, { type: "json" });
@@ -97,7 +111,9 @@ export async function notifyStatusChanges(tenant, before, after) {
     batch.forEach((c) => {
       announced[c.id] = (announced[c.id] || []).concat([c.to]);
     });
-    await writeAnnounced(tenant, announced);
+    // Pruned on write rather than on a schedule, because there is no scheduler here and
+    // this is the only place the record is touched.
+    await writeAnnounced(tenant, pruneAnnounced(announced));
 
     if (!emailConfigured() && !pushConfigured()) {
       // No channel available yet. The stages are still recorded, so switching mail or push

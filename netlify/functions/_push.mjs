@@ -56,6 +56,11 @@ export function validSubscription(sub) {
     && sub.keys && typeof sub.keys.p256dh === "string" && typeof sub.keys.auth === "string");
 }
 
+// One person has a phone, a laptop, maybe a tablet. A cap keeps a scripted loop from
+// growing one account's record without bound, and keeps a single status change from
+// fanning out into an unbounded number of sends. Oldest devices drop off first.
+export const MAX_DEVICES = 10;
+
 export async function saveSubscription(email, sub) {
   if (!validSubscription(sub)) return { ok: false, error: "That subscription is incomplete." };
   const list = await readSubscriptions(email);
@@ -63,8 +68,9 @@ export async function saveSubscription(email, sub) {
   // the customer would get one notification per visit.
   const others = list.filter((s) => s && s.endpoint !== sub.endpoint);
   const kept = { endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth }, at: new Date().toISOString() };
-  await writeSubscriptions(email, others.concat([kept]));
-  return { ok: true, devices: others.length + 1 };
+  const next = others.concat([kept]).slice(-MAX_DEVICES);
+  await writeSubscriptions(email, next);
+  return { ok: true, devices: next.length };
 }
 
 export async function removeSubscription(email, endpoint) {

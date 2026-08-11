@@ -11,7 +11,8 @@ import { mergePushedPackages, nextId, tenantOf, resolveKey, makeOrder, EMPTY, pu
 import { envRoleFor, OPS_ROLES, WRITE_ROLES } from "../netlify/functions/_auth.mjs";
 import { sign, verifyToken, bearer, sessionSuperseded } from "../netlify/functions/_auth.mjs";
 import { emailConfigured, sendEmail, resetEmail, parseSender, statusEmail } from "../netlify/functions/_email.mjs";
-import { detectStatusChanges, unannounced, isNotifiable, NOTIFY_STAGES } from "../netlify/functions/_notify.mjs";
+import { detectStatusChanges, unannounced, isNotifiable, NOTIFY_STAGES, pruneAnnounced, ANNOUNCED_LIMIT } from "../netlify/functions/_notify.mjs";
+import { evaluate, afterFailure, LOGIN_LIMITS, RESET_LIMITS } from "../netlify/functions/_throttle.mjs";
 
 const opsPkg = (id, status = "Won") => ({ id, status });
 const custPkg = (id, status = "Won", email = "jane@x.com") => ({ id, status, customerEmail: email });
@@ -211,6 +212,84 @@ test("envRoleFor grants Customer unless the operator config says otherwise", () 
     if (saved[0] === undefined) delete process.env.GL_ADMIN_EMAILS; else process.env.GL_ADMIN_EMAILS = saved[0];
     if (saved[1] === undefined) delete process.env.GL_ROLES; else process.env.GL_ROLES = saved[1];
   }
+});
+
+// ---------------------------------------------------------------------------
+// Attempt throttling. Too loose and a password list runs unimpeded; too tight and
+// a real person who mistyped is locked out of their own account.
+// ---------------------------------------------------------------------------
+const T0 = 1_700_000_000_000;
+
+test("a fresh caller is allowed, and failures accumulate within the window", () => {
+  assert.equal(evaluate(null, T0).allowed, true);
+  let rec = null;
+  for (let i = 1; i < 6; i++) {
+    rec = afterFailure(rec, T0);
+    assert.equal(rec.fails, i);
+    assert.equal(evaluate(rec, T0).allowed, true, "locked after only " + i + " failures");
+  }
+  // The sixth trips it.
+  rec = afterFailure(rec, T0);
+  const gate = evaluate(rec, T0);
+  assert.equal(gate.allowed, false);
+  assert.ok(gate.retryAfter > 0 && gate.retryAfter <= 900, "retryAfter out of range: " + gate.retryAfter);
+});
+
+test("a lock expires on its own, and comes back with a full allowance", () => {
+  let rec = null;
+  for (let i = 0; i < 6; i++) rec = afterFailure(rec, T0);
+  assert.equal(evaluate(rec, T0).allowed, false);
+
+  // After the lock, allowed again.
+  const later = T0 + 15 * 60 * 1000 + 1;
+  assert.equal(evaluate(rec, later).allowed, true);
+  // And one more failure must not immediately re-lock, or a locked-out person would be
+  // stuck in a loop of single-attempt lockouts.
+  rec = afterFailure(rec, later);
+  assert.equal(evaluate(rec, later).allowed, true, "one attempt after a lock re-locked the account");
+});
+
+test("failures outside the window are forgotten", () => {
+  let rec = null;
+  for (let i = 0; i < 5; i++) rec = afterFailure(rec, T0);
+  // Someone who mistyped five times this morning starts clean this afternoon.
+  const tomorrow = T0 + 24 * 60 * 60 * 1000;
+  assert.equal(evaluate(rec, tomorrow).fails, 0);
+  const fresh = afterFailure(rec, tomorrow);
+  assert.equal(fresh.fails, 1, "an old window carried over");
+});
+
+test("delivered parcels are pruned from the announced record", () => {
+  // Otherwise this single Blobs value, read and written on every ops push, grows by one
+  // entry per shipment forever.
+  const announced = {
+    "GL-1": ["InTransit", "Delivered"],   // finished, nothing more can happen to it
+    "GL-2": ["InTransit"],                // still moving
+    "GL-3": ["PickedUp", "Delivered"],    // finished
+  };
+  const pruned = pruneAnnounced(announced);
+  assert.deepEqual(Object.keys(pruned), ["GL-2"]);
+  // Malformed input must not throw or wipe live entries.
+  assert.deepEqual(pruneAnnounced({}), {});
+  assert.deepEqual(pruneAnnounced(null), {});
+  assert.deepEqual(pruneAnnounced({ "GL-4": "not-an-array" }), { "GL-4": "not-an-array" });
+});
+
+test("the announced record stays bounded even with nothing delivered", () => {
+  const many = {};
+  for (let i = 0; i < ANNOUNCED_LIMIT + 250; i++) many["GL-" + i] = ["InTransit"];
+  const pruned = pruneAnnounced(many);
+  assert.equal(Object.keys(pruned).length, ANNOUNCED_LIMIT);
+  // Newest kept: losing an old entry means at worst a repeated notification.
+  assert.ok(pruned["GL-" + (ANNOUNCED_LIMIT + 249)]);
+});
+
+test("the reset limit is tighter than the login limit", () => {
+  // Mailing a stranger is the harm itself, so it gets fewer attempts than guessing.
+  assert.ok(RESET_LIMITS.max < LOGIN_LIMITS.max);
+  let rec = null;
+  for (let i = 0; i < RESET_LIMITS.max; i++) rec = afterFailure(rec, T0, RESET_LIMITS);
+  assert.equal(evaluate(rec, T0, RESET_LIMITS).allowed, false);
 });
 
 // ---------------------------------------------------------------------------

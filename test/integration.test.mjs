@@ -462,6 +462,82 @@ test("webhook ingest numbers a batch uniquely and survives a clobber", async () 
   assert.equal(new Set(allIds).size, allIds.length, "workspace contains duplicate ids");
 });
 
+// ---- credential throttling ----
+
+test("repeated wrong passwords lock an address, and the right one still works before that", async () => {
+  const email = "bruteforce@example.com";
+  await register(email, "correct-horse");
+  const wrong = () => authFn(post({ action: "login", email, pw: "wrong" }));
+
+  // Five wrong attempts, then the correct password must still be accepted: a person who
+  // mistyped a few times must not be locked out of their own account.
+  for (let i = 0; i < 5; i++) assert.equal((await wrong()).status, 401);
+  const ok = await body(await authFn(post({ action: "login", email, pw: "correct-horse" })));
+  assert.equal(ok.ok, true, "a legitimate sign-in was blocked too early");
+
+  // Success clears the count, so the allowance starts over.
+  for (let i = 0; i < 6; i++) await wrong();
+  const locked = await wrong();
+  assert.equal(locked.status, 429);
+  const j = await body(locked);
+  assert.ok(j.retryAfter > 0);
+  assert.equal(locked.headers.get("Retry-After"), String(j.retryAfter));
+
+  // And the lock holds even against the correct password: otherwise it would be an oracle
+  // telling an attacker exactly when they had guessed right.
+  assert.equal((await authFn(post({ action: "login", email, pw: "correct-horse" }))).status, 429);
+});
+
+test("throttling does not reveal whether an account exists", async () => {
+  // An unknown address has to lock exactly like a real one, or the difference tells an
+  // attacker which addresses are worth attacking.
+  const ghost = "no-such-person@example.com";
+  for (let i = 0; i < 6; i++) {
+    assert.equal((await authFn(post({ action: "login", email: ghost, pw: "guess" + i }))).status, 401);
+  }
+  const res = await authFn(post({ action: "login", email: ghost, pw: "guess-again" }));
+  assert.equal(res.status, 429, "unknown addresses were not throttled, which leaks their absence");
+});
+
+test("throttling is per address, so one attacker cannot lock everyone out", async () => {
+  const victim = "victim@example.com";
+  await register(victim, "victim-pass");
+  for (let i = 0; i < 7; i++) await authFn(post({ action: "login", email: "attacked@example.com", pw: "guess" + i }));
+  const ok = await body(await authFn(post({ action: "login", email: victim, pw: "victim-pass" })));
+  assert.equal(ok.ok, true, "an attack on one address locked a different one");
+});
+
+test("completing a password reset clears a lock", async () => {
+  const email = "lockedout@example.com";
+  await register(email, "old-pass");
+  for (let i = 0; i < 7; i++) await authFn(post({ action: "login", email, pw: "wrong" }));
+  assert.equal((await authFn(post({ action: "login", email, pw: "old-pass" }))).status, 429);
+
+  // Somebody locked out by an attacker must be able to recover through their inbox rather
+  // than waiting the lock out.
+  const resetToken = sign({ email, kind: "reset", exp: Date.now() + 60000 });
+  const done = await body(await authFn(post({ action: "reset-confirm", token: resetToken, pw: "new-pass" })));
+  assert.equal(done.ok, true);
+  const after = await body(await authFn(post({ action: "login", email, pw: "new-pass" })));
+  assert.equal(after.ok, true, "the lock survived a completed password reset");
+});
+
+test("reset requests are throttled harder, since each one mails somebody", async () => {
+  const mail = captureMail();
+  const email = "resetspam@example.com";
+  await register(email);
+  try {
+    // Three go through, the fourth is refused.
+    for (let i = 0; i < 3; i++) {
+      assert.equal((await authFn(post({ action: "reset-request", email }))).status, 200);
+    }
+    const res = await authFn(post({ action: "reset-request", email }));
+    assert.equal(res.status, 429);
+    assert.match((await body(res)).error, /already sent a reset link/i);
+    assert.equal(mail.sent.length, 3, "sent more mail than the limit allows");
+  } finally { mail.restore(); }
+});
+
 // ---- web push subscriptions ----
 
 const SUB = (endpoint) => ({ endpoint, keys: { p256dh: "p256dh-key", auth: "auth-key" } });
@@ -542,6 +618,26 @@ test("re-subscribing the same device replaces it instead of duplicating", async 
     const j = await body(await pushFn(pushReq({ method: "DELETE", token, body: { endpoint: "https://push.example/same" } })));
     assert.equal(j.devices, 1);
     assert.equal((await readSubscriptions(email))[0].endpoint, "https://push.example/other");
+  } finally { restore(); }
+});
+
+test("devices per account are capped", async () => {
+  const restore = withVapid();
+  try {
+    const email = "pushmany@example.com";
+    const token = await register(email);
+    const { readSubscriptions, MAX_DEVICES } = await import("../netlify/functions/_push.mjs");
+
+    // A scripted loop must not grow one account's record without bound, nor turn one
+    // status change into an unbounded fan-out of sends.
+    for (let i = 0; i < MAX_DEVICES + 5; i++) {
+      await pushFn(pushReq({ method: "POST", token, body: { subscription: SUB("https://push.example/dev-" + i) } }));
+    }
+    const stored = await readSubscriptions(email);
+    assert.equal(stored.length, MAX_DEVICES, "device list grew past the cap");
+    // Newest kept, oldest dropped.
+    assert.ok(stored.some((s) => s.endpoint.endsWith("dev-" + (MAX_DEVICES + 4))));
+    assert.ok(!stored.some((s) => s.endpoint.endsWith("dev-0")));
   } finally { restore(); }
 });
 

@@ -36,7 +36,7 @@ being offline. To exercise the real API, deploy to Netlify or run `netlify dev`.
 npm test
 ```
 
-109 tests, no network and no browser required, in two layers:
+121 tests, no network and no browser required, in two layers:
 
 - **Unit** (`test/functions.test.mjs`) covers the pure logic: workspace merging, id
   allocation, session tokens, tenant and api-key resolution, role assignment, the public
@@ -111,7 +111,7 @@ rejected by `/api/state`, which reads. For a real machine integration set `GL_TE
 |---|---|---|
 | `GET /api/health` | none | Liveness and storage backend. |
 | `GET /api/track?n=` | none | Public shipment lookup behind shareable tracking links. Returns a deliberately minimal view (status, dates, destination city, carrier) because tracking numbers are sequential and guessable. No recipient details, contents, or photos. |
-| `POST /api/auth` | none | `register`, `login`, `reset-request`, `reset-confirm`. |
+| `POST /api/auth` | none | `register`, `login`, `reset-request`, `reset-confirm`. `login` and `reset-request` are throttled per address and answer `429` with `Retry-After`. |
 | `GET /api/auth` | Bearer token | Validates a session and returns the current user. |
 | `GET/POST/DELETE /api/my-orders` | Bearer token | A customer's own orders. Email comes from the verified token, so callers can only reach their own rows. `DELETE` cancels, and only before pickup. `POST` is rate limited per account (3/minute, 12/hour) and answers `429` with `Retry-After`; reads and cancellations are never limited. |
 | `GET/PUT /api/state` | Bearer token with an ops role, or a `GL_TENANTS` key | An ops client's whole workspace. Every recipient's name, address and phone lives here, so this is the one endpoint with real authorization: a Customer session gets 403, `Viewer` may read but not `PUT`, and the public demo keys are refused. |
@@ -121,6 +121,15 @@ rejected by `/api/state`, which reads. For a real machine integration set `GL_TE
 
 Passwords are salted and scrypt-hashed. Sessions are HMAC-signed, stateless, and carry
 an issued-at so that a password change invalidates every session minted before it.
+
+**Credential endpoints are throttled per email address.** Six failed sign-ins inside 15
+minutes locks that address for 15 minutes; a correct password clears the count immediately,
+and completing a password reset clears a lock, so somebody locked out by an attacker can
+always recover through their inbox. Unknown addresses are counted exactly like real ones —
+counting only real accounts would turn the throttle into an account-enumeration oracle.
+Reset requests are held tighter (three per 15 minutes) because there the request itself is
+the harm: it mails a third party. Counting is per address rather than per IP, since an
+attacker rotates IPs trivially while the target of a credential-stuffing run is one account.
 
 ## Storage model, and why it matters
 

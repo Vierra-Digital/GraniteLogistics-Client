@@ -6,6 +6,7 @@ import { getStore } from "@netlify/blobs";
 import crypto from "node:crypto";
 import { CORS, json, sign, verifyToken, bearer, sessionSuperseded, effectiveRoleFor } from "./_auth.mjs";
 import { sendEmail, resetEmail, emailConfigured } from "./_email.mjs";
+import { checkThrottle, recordAttempt, clearThrottle, LOGIN_LIMITS, RESET_LIMITS } from "./_throttle.mjs";
 
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const RESET_MS = 30 * 60 * 1000;             // reset links are short-lived
@@ -57,6 +58,19 @@ export default async (req) => {
     if (!emailConfigured()) {
       return json({ ok: false, error: "Password reset isn't set up on this deployment yet. Contact support and we'll reset it for you." }, 503);
     }
+    // Reset requests send mail to somebody else's inbox, so an unthrottled endpoint is a
+    // way to spam a person you dislike. Counted per address, and every request counts,
+    // successful or not, because there is no failure to distinguish here.
+    const gate = await checkThrottle("reset", email, RESET_LIMITS);
+    if (!gate.allowed) {
+      return new Response(JSON.stringify({
+        ok: false,
+        error: "We've already sent a reset link recently. Please check your inbox, or try again in a few minutes.",
+        retryAfter: gate.retryAfter,
+      }), { status: 429, headers: { ...CORS, "Retry-After": String(gate.retryAfter) } });
+    }
+    await recordAttempt("reset", email, RESET_LIMITS);
+
     const u = await s.get(email, { type: "json" });
     if (u) {
       const token = sign({ email, kind: "reset", exp: Date.now() + RESET_MS });
@@ -79,6 +93,10 @@ export default async (req) => {
     const salt = crypto.randomBytes(16).toString("hex");
     const updated = { ...u, salt, hash: hashPw(pw, salt), pwChangedAt: Date.now() };
     await s.setJSON(p.email, updated);
+    // Proving control of the inbox clears both counters, so somebody locked out by an
+    // attacker can always recover through email rather than waiting it out.
+    await clearThrottle("login", p.email);
+    await clearThrottle("reset", p.email);
     return json({ ok: true, token: tokenFor(updated), user: publicUser(updated) });
   }
 
@@ -99,10 +117,26 @@ export default async (req) => {
   }
 
   if (action === "login") {
+    // Checked before the password is even looked at, so a locked address costs an attacker
+    // a rejection rather than a scrypt hash, and the answer does not depend on whether the
+    // account exists.
+    const gate = await checkThrottle("login", email, LOGIN_LIMITS);
+    if (!gate.allowed) {
+      return new Response(JSON.stringify({
+        ok: false,
+        error: "Too many sign-in attempts. Please wait a few minutes and try again.",
+        retryAfter: gate.retryAfter,
+      }), { status: 429, headers: { ...CORS, "Retry-After": String(gate.retryAfter) } });
+    }
+
     const u = await s.get(email, { type: "json" });
     if (!u || !u.hash || !samePw(pw, u)) {
+      // Counted for unknown addresses too: doing otherwise would turn the throttle into an
+      // account-enumeration oracle, since only real accounts would ever lock.
+      await recordAttempt("login", email, LOGIN_LIMITS);
       return json({ ok: false, error: "Incorrect email or password." }, 401);
     }
+    await clearThrottle("login", email);
     // Re-derive privileges on every login from env config and the in-app grants, so a
     // change made on the admin screen (or in config) takes effect at the next sign-in.
     const role = await effectiveRoleFor(email);
