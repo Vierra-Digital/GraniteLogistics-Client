@@ -54,6 +54,37 @@ export async function sendEmail({ to, subject, html, text }) {
   }
 }
 
+// A parcel moved. Says only what the recipient already knows plus the new status, and
+// links to the public tracking page rather than embedding shipment details in an email
+// that may sit in an inbox for years.
+export function statusEmail(pkg, stageLabel) {
+  const id = (pkg && pkg.id) || "your order";
+  const what = (pkg && pkg.item && pkg.item.description) || "Your shipment";
+  const who = (pkg && pkg.customer && pkg.customer.name || "").split(" ")[0] || "there";
+  const link = "https://usegl.com/track.html?n=" + encodeURIComponent(id);
+  const headline = what + " is " + stageLabel;
+  const eta = (pkg && pkg.promisedTs)
+    ? new Date(pkg.promisedTs).toLocaleDateString("en-US", { month: "long", day: "numeric" })
+    : null;
+  return {
+    subject: id + ": " + stageLabel,
+    text: "Hi " + who + ",\n\n" + headline + ".\n" +
+      (eta ? "Estimated delivery: " + eta + "\n" : "") +
+      "\nTrack it here:\n" + link + "\n\nGranite Logistics",
+    html:
+      '<div style="font-family:Segoe UI,system-ui,Arial,sans-serif;max-width:520px;margin:0 auto;padding:28px 24px;color:#101828">' +
+      '<div style="font-weight:800;letter-spacing:.08em;color:#0f1b2c;font-size:15px;margin-bottom:22px">GRANITE LOGISTICS</div>' +
+      '<h1 style="font-size:20px;margin:0 0 12px">' + headline + '</h1>' +
+      '<p style="color:#697587;font-size:15px;line-height:1.55;margin:0 0 8px">Hi ' + who +
+      ', your shipment <b style="color:#101828">' + id + '</b> is now <b style="color:#101828">' + stageLabel + '</b>.</p>' +
+      (eta ? '<p style="color:#697587;font-size:15px;line-height:1.55;margin:0 0 22px">Estimated delivery: <b style="color:#101828">' + eta + '</b></p>' : '<div style="height:14px"></div>') +
+      '<a href="' + link + '" style="display:inline-block;background:#2f9bd6;color:#fff;text-decoration:none;' +
+      'font-weight:700;padding:13px 22px;border-radius:10px;font-size:15px">Track this shipment</a>' +
+      '<p style="color:#9aa6b4;font-size:13px;line-height:1.55;margin:24px 0 0">' +
+      "You're receiving this because you placed this order with Granite Logistics.</p></div>",
+  };
+}
+
 // Plain, on-brand reset email. Kept inline (no template engine) to stay dependency-free.
 export function resetEmail(name, link) {
   const who = name ? name.split(" ")[0] : "there";

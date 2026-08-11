@@ -10,7 +10,8 @@ import assert from "node:assert/strict";
 import { mergePushedPackages, nextId, tenantOf, resolveKey, makeOrder, EMPTY, publicTrackingView, orderRateLimit, orderCreatedAt, ORDER_LIMITS } from "../netlify/functions/_lib.mjs";
 import { envRoleFor, OPS_ROLES, WRITE_ROLES } from "../netlify/functions/_auth.mjs";
 import { sign, verifyToken, bearer, sessionSuperseded } from "../netlify/functions/_auth.mjs";
-import { emailConfigured, sendEmail, resetEmail, parseSender } from "../netlify/functions/_email.mjs";
+import { emailConfigured, sendEmail, resetEmail, parseSender, statusEmail } from "../netlify/functions/_email.mjs";
+import { detectStatusChanges, unannounced, isNotifiable, NOTIFY_STAGES } from "../netlify/functions/_notify.mjs";
 
 const opsPkg = (id, status = "Won") => ({ id, status });
 const custPkg = (id, status = "Won", email = "jane@x.com") => ({ id, status, customerEmail: email });
@@ -210,6 +211,76 @@ test("envRoleFor grants Customer unless the operator config says otherwise", () 
     if (saved[0] === undefined) delete process.env.GL_ADMIN_EMAILS; else process.env.GL_ADMIN_EMAILS = saved[0];
     if (saved[1] === undefined) delete process.env.GL_ROLES; else process.env.GL_ROLES = saved[1];
   }
+});
+
+// ---------------------------------------------------------------------------
+// Customer status notifications. The transition is detected by diffing what ops
+// pushed against what was stored, so getting this wrong means either silence or
+// mailing somebody every 1.5 seconds.
+// ---------------------------------------------------------------------------
+const cust = (id, status, email = "jane@x.com") => ({ id, status, customerEmail: email });
+
+test("detectStatusChanges finds a customer parcel that moved", () => {
+  const c = detectStatusChanges([cust("GL-1", "PickedUp")], [cust("GL-1", "InTransit")]);
+  assert.equal(c.length, 1);
+  assert.deepEqual([c[0].id, c[0].from, c[0].to, c[0].email], ["GL-1", "PickedUp", "InTransit", "jane@x.com"]);
+});
+
+test("detectStatusChanges stays silent when nothing moved", () => {
+  // This is the common case: ops pushes the same state every 1.5 seconds.
+  assert.deepEqual(detectStatusChanges([cust("GL-1", "InTransit")], [cust("GL-1", "InTransit")]), []);
+  assert.deepEqual(detectStatusChanges([], []), []);
+  assert.deepEqual(detectStatusChanges(null, null), []);
+});
+
+test("detectStatusChanges ignores stages a customer should not be mailed about", () => {
+  // Internal choreography, and the confirmation they already saw on screen.
+  assert.deepEqual(detectStatusChanges([cust("GL-1", "Won")], [cust("GL-1", "Intake")]), []);
+  assert.deepEqual(detectStatusChanges([cust("GL-1", "PickedUp")], [cust("GL-1", "Staged")]), []);
+  assert.deepEqual(detectStatusChanges([cust("GL-1", "Intake")], [cust("GL-1", "Won")]), []);
+  assert.equal(detectStatusChanges([cust("GL-1", "Staged")], [cust("GL-1", "OutforDelivery")]).length, 1);
+});
+
+test("detectStatusChanges has nobody to tell about ops' own packages", () => {
+  assert.deepEqual(detectStatusChanges([{ id: "GL-9", status: "PickedUp" }], [{ id: "GL-9", status: "Delivered" }]), []);
+});
+
+test("a package appearing already in flight is not treated as a transition", () => {
+  // An import or a first sync must not mail a backlog of updates.
+  assert.deepEqual(detectStatusChanges([], [cust("GL-5", "Delivered")]), []);
+});
+
+test("unannounced drops stages already sent, per stage not per parcel", () => {
+  const changes = [
+    { id: "GL-1", to: "InTransit" }, { id: "GL-2", to: "Delivered" },
+  ];
+  const announced = { "GL-1": ["InTransit"], "GL-2": ["InTransit"] };
+  const left = unannounced(changes, announced);
+  // GL-1's InTransit was already sent; GL-2 reaching Delivered is new even though an
+  // earlier stage of the same parcel was announced.
+  assert.deepEqual(left.map((c) => c.id), ["GL-2"]);
+  assert.deepEqual(unannounced(changes, {}).map((c) => c.id), ["GL-1", "GL-2"]);
+  assert.deepEqual(unannounced([], announced), []);
+});
+
+test("the status email names the parcel and links to public tracking only", () => {
+  const m = statusEmail({ id: "GL-1041", item: { description: "LG OLED TV" }, customer: { name: "Jane Doe", address: "742 Birchwood Ln", phone: "555-0100" }, promisedTs: Date.UTC(2026, 7, 20) }, "out for delivery");
+  assert.match(m.subject, /GL-1041/);
+  assert.match(m.text, /out for delivery/);
+  assert.match(m.html, /track\.html\?n=GL-1041/);
+  assert.match(m.text, /Hi Jane,/);
+  // The address and phone must not travel in an email that will sit in an inbox.
+  ["742 Birchwood Ln", "555-0100"].forEach((secret) => {
+    assert.ok(!m.html.includes(secret), "status email leaked " + secret);
+    assert.ok(!m.text.includes(secret), "status email leaked " + secret);
+  });
+});
+
+test("the status email survives a sparse package", () => {
+  const m = statusEmail({ id: "GL-2" }, "delivered");
+  assert.match(m.subject, /GL-2/);
+  assert.match(m.text, /Hi there,/);
+  assert.ok(!/undefined|NaN|Invalid Date/.test(m.html + m.text), "placeholder leaked into the email");
 });
 
 // ---------------------------------------------------------------------------

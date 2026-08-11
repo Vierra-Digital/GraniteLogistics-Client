@@ -36,7 +36,7 @@ being offline. To exercise the real API, deploy to Netlify or run `netlify dev`.
 npm test
 ```
 
-90 tests, no network and no browser required, in two layers:
+103 tests, no network and no browser required, in two layers:
 
 - **Unit** (`test/functions.test.mjs`) covers the pure logic: workspace merging, id
   allocation, session tokens, tenant and api-key resolution, role assignment, the public
@@ -141,6 +141,21 @@ Three consequences worth knowing before changing this code:
 
 Customers never push the whole workspace; they only ever go through `/api/my-orders`.
 
+### Where customer status updates come from
+
+`PUT /api/state` is the server-side event. Ops clients do not mutate storage directly; they
+push the whole workspace through that handler, which therefore holds both the stored state
+and the incoming one and can see exactly what moved. `_notify.mjs` diffs them and emails the
+owner of any customer order that reached a stage worth announcing.
+
+Three things keep that safe inside a handler ops calls every ~1.5 seconds: the work is gated
+on a transition actually being found; only four of the seven stages are announced, because a
+parcel that emails on all of them is a parcel people mute; and what has already been
+announced is recorded in a store no client writes. That last record is not decoration —
+ops pushes stale whole state, so a parcel can be pushed backwards and re-advance, which
+looks like a brand new transition. Without it the customer is emailed twice for one real
+move. A mail failure never fails the push, which has already been stored.
+
 3. **There is no compare-and-swap.** `@netlify/blobs` v8 has no conditional writes, so two
    simultaneous orders can clobber each other. That race has two outcomes: an order is
    lost, or both orders are handed the same id because both computed `nextId` from the same
@@ -210,16 +225,19 @@ also accepts an optional `x-signature` HMAC of the body using `GL_WEBHOOK_SECRET
 - Reports computed live from chain-of-custody timestamps.
 - Role-based navigation, in-app notifications, dark mode, command palette (Ctrl/Cmd-K),
   JSON backup and restore, and a searchable audit log.
+- Customer status emails on pickup, in transit, out for delivery and delivered.
 - A readiness report at `/api/health` naming any configuration still missing.
 - One motion system across the app, with a `prefers-reduced-motion` opt-out.
 
 ## What is still simulated
 
-Carrier (UPS/FedEx) and e-commerce calls are mocked, so tracking numbers and carrier
-scans are generated locally rather than fetched. There are no payments, and no push
-notifications: status changes happen in the ops user's browser, so there is no
-server-side event to push from. Each of these needs a commercial account or a
-server-side status pipeline before it can be real.
+Carrier (UPS/FedEx) and e-commerce calls are mocked, so tracking numbers and carrier scans
+are generated locally rather than fetched, and there are no payments. Both need a commercial
+account before they can be real.
+
+Browser push notifications are still not implemented (that needs VAPID keys and a
+subscription store), but **email status updates are**, which is what customers actually
+asked for. See below.
 
 ## Files
 

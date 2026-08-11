@@ -11,6 +11,7 @@
 // could dump the whole workspace. They remain valid for /api/orders, which only writes.
 import { CORS, json, resolveKey, readState, writeState, mergePushedPackages } from "./_lib.mjs";
 import { verifyToken, bearer, getUser, sessionSuperseded, effectiveRoleFor, OPS_ROLES, WRITE_ROLES } from "./_auth.mjs";
+import { notifyStatusChanges } from "./_notify.mjs";
 
 const HEADERS = { ...CORS, "Access-Control-Allow-Headers": "Content-Type, x-api-key, Authorization" };
 const fail = (error, status, extra) => json({ error, ...(extra || {}) }, status);
@@ -61,7 +62,18 @@ export default async (req) => {
       const current = await readState(who.tenant);
       const merged = mergePushedPackages(current.packages, body.packages, body.deleted);
       await writeState(who.tenant, { ...body, packages: merged.packages, deleted: undefined });
-      return json({ ok: true, tenant: who.tenant, packages: merged.packages.length, preserved: merged.preserved });
+
+      // This is where a customer-facing status update comes from. Ops clients do not write
+      // storage directly, they push the whole workspace through here, so this handler holds
+      // both the old and new state and can see what moved. Gated on an actual transition,
+      // deduped server-side, and never allowed to fail the push that has already been
+      // stored above.
+      const notified = await notifyStatusChanges(who.tenant, current.packages, merged.packages);
+
+      return json({
+        ok: true, tenant: who.tenant, packages: merged.packages.length,
+        preserved: merged.preserved, notified,
+      });
     }
     return fail("method not allowed", 405);
   } catch (e) {

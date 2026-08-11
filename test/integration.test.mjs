@@ -461,6 +461,165 @@ test("webhook ingest numbers a batch uniquely and survives a clobber", async () 
   assert.equal(new Set(allIds).size, allIds.length, "workspace contains duplicate ids");
 });
 
+// ---- customer status notifications ----
+//
+// Driven through the real PUT handler, because the whole point is that the transition is
+// detected from what ops pushed versus what was stored.
+
+// Mail has to be genuinely configured and captured for these to mean anything: with no
+// provider set, `sent` is 0 for every push and a broken dedupe would look identical to a
+// working one.
+function captureMail() {
+  const saved = { key: process.env.GL_BREVO_KEY, from: process.env.GL_MAIL_FROM, fetch: globalThis.fetch };
+  const sent = [];
+  process.env.GL_BREVO_KEY = "xkeysib-test";
+  process.env.GL_MAIL_FROM = "Granite <no-reply@usegl.com>";
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes("api.brevo.com")) {
+      sent.push(JSON.parse(init.body));
+      return new Response("{}", { status: 201 });
+    }
+    return saved.fetch(url, init);
+  };
+  return {
+    sent,
+    restore() {
+      globalThis.fetch = saved.fetch;
+      if (saved.key === undefined) delete process.env.GL_BREVO_KEY; else process.env.GL_BREVO_KEY = saved.key;
+      if (saved.from === undefined) delete process.env.GL_MAIL_FROM; else process.env.GL_MAIL_FROM = saved.from;
+    },
+  };
+}
+
+test("advancing a customer order emails once, not on every push", async () => {
+  const email = "notify@example.com";
+  const token = await register(email);
+  const placed = await body(await ordersFn(asUser(token, { method: "POST", body: { item: "Notified TV" } })));
+  const id = placed.order.id;
+  const mail = captureMail();
+
+  const advance = async (status) => {
+    const view = await body(await stateFn(asOps()));
+    view.packages.find((p) => p.id === id).status = status;
+    return body(await stateFn(asOps({ method: "PUT", body: view })));
+  };
+  const repush = async () => {
+    const view = await body(await stateFn(asOps()));
+    return body(await stateFn(asOps({ method: "PUT", body: view })));
+  };
+
+  try {
+    let r = await advance("OutforDelivery");
+    assert.equal(r.notified.sent, 1, "expected one send: " + JSON.stringify(r.notified));
+    assert.equal(mail.sent.length, 1);
+    assert.equal(mail.sent[0].to[0].email, email);
+    assert.match(mail.sent[0].subject, /out for delivery/i);
+
+    // Ops keeps pushing the same state every 1.5s. No further mail may go out.
+    for (let i = 0; i < 3; i++) {
+      r = await repush();
+      assert.equal(r.notified.sent, 0, "a repeat push sent another email");
+    }
+    assert.equal(mail.sent.length, 1, "the 1.5s push loop mailed the customer repeatedly");
+
+    // A genuinely new stage does send.
+    r = await advance("Delivered");
+    assert.equal(r.notified.sent, 1, "the delivered stage was not announced");
+    assert.equal(mail.sent.length, 2);
+    assert.match(mail.sent[1].subject, /delivered/i);
+
+    // And re-pushing Delivered does not.
+    await repush();
+    assert.equal(mail.sent.length, 2);
+  } finally { mail.restore(); }
+});
+
+test("a parcel that flaps backwards and forwards is not announced twice", async () => {
+  // The case the dedupe record exists for. Ops clients push whole, possibly stale state,
+  // so a client that pulled before the change can push the parcel back to an earlier
+  // status; when it advances again the transition looks new. Without the server-side
+  // record of what was already announced, the customer gets the same email twice.
+  const token = await register("flap@example.com");
+  const placed = await body(await ordersFn(asUser(token, { method: "POST", body: { item: "Flapper" } })));
+  const id = placed.order.id;
+  const mail = captureMail();
+  const setStatus = async (status) => {
+    const view = await body(await stateFn(asOps()));
+    view.packages.find((p) => p.id === id).status = status;
+    return body(await stateFn(asOps({ method: "PUT", body: view })));
+  };
+  try {
+    await setStatus("InTransit");
+    assert.equal(mail.sent.length, 1, "first advance should notify");
+
+    // A stale client pushes it back, then it advances again.
+    await setStatus("Won");
+    await setStatus("InTransit");
+    assert.equal(mail.sent.length, 1, "the customer was emailed twice for one real transition");
+
+    // A later, genuinely different stage still gets through.
+    await setStatus("Delivered");
+    assert.equal(mail.sent.length, 2);
+  } finally { mail.restore(); }
+});
+
+test("internal stages and ops-only packages send no mail at all", async () => {
+  const token = await register("quiet-mail@example.com");
+  const placed = await body(await ordersFn(asUser(token, { method: "POST", body: { item: "Quiet TV" } })));
+  const mail = captureMail();
+  try {
+    const view = await body(await stateFn(asOps()));
+    view.packages.find((p) => p.id === placed.order.id).status = "Staged";
+    view.packages.push({ id: "GL-9002", status: "Delivered", item: { description: "Ops only" }, customer: { name: "N" }, history: [], photos: {} });
+    const r = await body(await stateFn(asOps({ method: "PUT", body: view })));
+    assert.equal(r.notified.sent, 0);
+    assert.equal(mail.sent.length, 0, "mailed about an internal stage or an ops-only package");
+  } finally { mail.restore(); }
+});
+
+test("internal stages and ops-only packages raise nothing", async () => {
+  const token = await register("quiet@example.com");
+  const placed = await body(await ordersFn(asUser(token, { method: "POST", body: { item: "Quiet TV" } })));
+
+  const view = await body(await stateFn(asOps()));
+  // An internal step on the customer's parcel, plus an ops-only package going all the way
+  // to Delivered. Neither has anyone to tell.
+  view.packages.find((p) => p.id === placed.order.id).status = "Intake";
+  view.packages.push({ id: "GL-9001", status: "Delivered", item: { description: "Ops only" }, customer: { name: "N" }, history: [], photos: {} });
+  const r = await body(await stateFn(asOps({ method: "PUT", body: view })));
+  assert.equal(r.notified.sent, 0);
+  assert.equal(r.notified.deferred, 0);
+  assert.ok(!r.notified.reason, "unexpected reason: " + r.notified.reason);
+});
+
+test("a failing mail provider does not fail the workspace push", async () => {
+  const saved = { key: process.env.GL_BREVO_KEY, from: process.env.GL_MAIL_FROM, fetch: globalThis.fetch };
+  const token = await register("mailfail@example.com");
+  const placed = await body(await ordersFn(asUser(token, { method: "POST", body: { item: "Unsendable" } })));
+
+  process.env.GL_BREVO_KEY = "xkeysib-test";
+  process.env.GL_MAIL_FROM = "Granite <no-reply@usegl.com>";
+  globalThis.fetch = async () => { throw new TypeError("provider down"); };
+  try {
+    const view = await body(await stateFn(asOps()));
+    view.packages.find((p) => p.id === placed.order.id).status = "InTransit";
+    const res = await stateFn(asOps({ method: "PUT", body: view }));
+    // The push itself must succeed: the workspace was already stored before mailing.
+    assert.equal(res.status, 200);
+    const r = await body(res);
+    assert.equal(r.ok, true);
+    assert.equal(r.notified.sent, 0);
+  } finally {
+    globalThis.fetch = saved.fetch;
+    if (saved.key === undefined) delete process.env.GL_BREVO_KEY; else process.env.GL_BREVO_KEY = saved.key;
+    if (saved.from === undefined) delete process.env.GL_MAIL_FROM; else process.env.GL_MAIL_FROM = saved.from;
+  }
+
+  // And the status change still landed.
+  const mine = await body(await ordersFn(asUser(token)));
+  assert.equal(mine.orders.find((o) => o.id === placed.order.id).status, "InTransit");
+});
+
 // ---- role administration ----
 //
 // This endpoint hands out privileges, so its guards matter more than its happy path.
