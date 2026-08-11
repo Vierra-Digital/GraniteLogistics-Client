@@ -619,15 +619,28 @@ test("health reports what is missing, and leaks no secret values", async () => {
   const restore = () => Object.entries({ GL_ADMIN_EMAILS: saved.admins, GL_ROLES: saved.roles, GL_AUTH_SECRET: saved.secret, GL_BREVO_KEY: saved.key, GL_MAIL_FROM: saved.from, GL_TENANTS: saved.tenants })
     .forEach(([k, v]) => { if (v === undefined) delete process.env[k]; else process.env[k] = v; });
 
+  const savedGrants = blobs.get(k("granite-roles", "grants"));
   try {
-    // Nothing configured: both blocking checks must fail.
+    // Nothing configured at all: both blocking checks must fail. In-app grants count
+    // toward ops access, so they have to be cleared too, not just the env vars.
     delete process.env.GL_ADMIN_EMAILS; delete process.env.GL_ROLES;
     delete process.env.GL_AUTH_SECRET; delete process.env.GL_BREVO_KEY;
     delete process.env.GL_MAIL_FROM; delete process.env.GL_TENANTS;
+    blobs.delete(k("granite-roles", "grants"));
+
     let j = await body(await healthFn(new Request("https://x/api/health")));
     assert.equal(j.readiness.ready, false);
     assert.deepEqual(j.readiness.blocking.sort(), ["authSecret", "opsAccess"]);
-    assert.match(j.readiness.checks.opsAccess.detail, /locked out/);
+    assert.match(j.readiness.checks.opsAccess.detail, /no ops roles granted/);
+
+    // A grant made on the Team & Roles screen satisfies ops access on its own, so a
+    // deployment bootstrapped from config and then managed in-app stops reporting
+    // itself as unconfigured.
+    blobs.set(k("granite-roles", "grants"), JSON.stringify({ "someone@example.com": { role: "Admin", by: "x", at: "t" } }));
+    j = await body(await healthFn(new Request("https://x/api/health")));
+    assert.deepEqual(j.readiness.blocking, ["authSecret"], "an in-app grant should count as ops access");
+    assert.match(j.readiness.checks.opsAccess.detail, /1 account\(s\)/);
+    blobs.delete(k("granite-roles", "grants"));
 
     // Fully configured: ready, and the counts are right.
     process.env.GL_AUTH_SECRET = "s3cr3t-value-must-not-appear";
@@ -649,6 +662,8 @@ test("health reports what is missing, and leaks no secret values", async () => {
       .forEach((secret) => assert.ok(!raw.includes(secret), "health leaked: " + secret));
   } finally {
     restore();
+    if (savedGrants === undefined) blobs.delete(k("granite-roles", "grants"));
+    else blobs.set(k("granite-roles", "grants"), savedGrants);
   }
 });
 

@@ -9,21 +9,32 @@
 // It reports booleans and counts only, never a value: this route is public, so it must
 // say whether a secret is configured without disclosing it or who holds it.
 import { json, tenants } from "./_lib.mjs";
-import { adminEmails, roleMap, OPS_ROLES } from "./_auth.mjs";
+import { adminEmails, roleMap, readGrants, grantedRole, OPS_ROLES } from "./_auth.mjs";
 import { emailConfigured } from "./_email.mjs";
 
-function readiness() {
+// An address already counted via env config must not be counted twice.
+const envRoleForCount = (email, admins, named) =>
+  (admins.includes(email) || OPS_ROLES.includes(named[email])) ? 1 : 0;
+
+async function readiness() {
   const admins = adminEmails();
   const named = roleMap();
   const namedOps = Object.values(named).filter((r) => OPS_ROLES.includes(r)).length;
-  const opsUsers = admins.length + namedOps;
+  // Grants made on the Team & Roles screen count too, so a deployment bootstrapped from
+  // config and then managed in-app does not keep reporting itself as unconfigured.
+  let inApp = 0;
+  try {
+    const grants = await readGrants();
+    inApp = Object.keys(grants).filter((e) => grantedRole(grants, e) && envRoleForCount(e, admins, named) === 0).length;
+  } catch (e) { inApp = 0; }
+  const opsUsers = admins.length + namedOps + inApp;
   const authSecret = !!process.env.GL_AUTH_SECRET;
 
   const checks = {
     // Without this every session token is forgeable by anyone who can read the repo.
     authSecret: { ok: authSecret, detail: authSecret ? "set" : "GL_AUTH_SECRET is not set; sessions are signed with a public fallback" },
     // Without this nobody can reach the ops workspace at all.
-    opsAccess: { ok: opsUsers > 0, detail: opsUsers > 0 ? opsUsers + " account(s) granted an ops role" : "no ops roles granted; set GL_ADMIN_EMAILS or the ops platform is locked out" },
+    opsAccess: { ok: opsUsers > 0, detail: opsUsers > 0 ? opsUsers + " account(s) hold an ops role" : "no ops roles granted; set GL_ADMIN_EMAILS to bootstrap, then use Team & Roles" },
     // Optional: reset links simply report "not set up" without it.
     passwordReset: { ok: emailConfigured(), detail: emailConfigured() ? "configured" : "GL_BREVO_KEY / GL_MAIL_FROM not set; password reset returns a clear error instead of sending" },
     // Optional: only needed for machine callers that read a workspace.
@@ -42,7 +53,7 @@ export default async () =>
     runtime: "netlify-functions",
     storage: "netlify-blobs",
     time: new Date().toISOString(),
-    readiness: readiness(),
+    readiness: await readiness(),
   });
 
 export const config = { path: "/api/health" };
