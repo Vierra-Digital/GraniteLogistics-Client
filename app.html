@@ -228,6 +228,13 @@
             <div class="acct-id"><b id="acct-name">–</b><span id="acct-email">–</span></div>
           </div>
         </div>
+        <!-- Hidden unless this deployment has push configured and the browser supports it. -->
+        <div class="card" id="acct-push-card" hidden>
+          <div class="card-head"><h2>Delivery alerts</h2></div>
+          <p class="muted small" id="acct-push-note">Get a notification on this device when your parcel is picked up, out for delivery, and delivered.</p>
+          <button class="btn block primary" id="acct-push-on" type="button">🔔 Turn on notifications</button>
+          <button class="btn block" id="acct-push-off" type="button" hidden>Turn off on this device</button>
+        </div>
         <div class="card">
           <div class="card-head"><h2>Help</h2></div>
           <button class="btn block" id="acct-tour" type="button">▶ Show me how it works</button>

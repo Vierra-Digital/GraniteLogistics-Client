@@ -1191,12 +1191,112 @@
     });
   }
 
+  // ---- Delivery alerts (Web Push) ----
+  //
+  // Offered only when all three are true: the browser supports push, the deployment has
+  // VAPID keys, and there is a real server session to attach the subscription to. Asking
+  // for notification permission the app cannot honour is the fastest way to get denied
+  // permanently, so the card stays hidden rather than failing on tap.
+  var pushInfo = null; // {configured, publicKey} once /api/push has answered
+
+  function pushSupported() {
+    return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  }
+  // The VAPID public key travels as base64url and has to reach PushManager as bytes.
+  function urlBase64ToUint8Array(base64) {
+    var padding = "=".repeat((4 - (base64.length % 4)) % 4);
+    var raw = atob((base64 + padding).replace(/-/g, "+").replace(/_/g, "/"));
+    var out = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+  function pushApi(init) {
+    return fetch("/api/push", Object.assign({
+      headers: Object.assign({ "Authorization": "Bearer " + authToken() },
+        init && init.body ? { "Content-Type": "application/json" } : {})
+    }, init || {})).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) { j._status = r.status; return j; });
+    });
+  }
+  function renderPushCard() {
+    var card = $("#acct-push-card"), on = $("#acct-push-on"), off = $("#acct-push-off"), note = $("#acct-push-note");
+    if (!card) return;
+    if (!pushSupported() || !hasServerAuth() || !(pushInfo && pushInfo.configured)) { card.hidden = true; return; }
+    card.hidden = false;
+
+    if (Notification.permission === "denied") {
+      // Only the browser can undo this, so say so instead of offering a button that
+      // silently does nothing.
+      on.hidden = true; off.hidden = true;
+      note.textContent = "Notifications are blocked for this site. You can re-enable them in your browser's site settings.";
+      return;
+    }
+    navigator.serviceWorker.ready.then(function (reg) {
+      return reg.pushManager.getSubscription();
+    }).then(function (sub) {
+      var active = !!sub && Notification.permission === "granted";
+      on.hidden = active; off.hidden = !active;
+      note.textContent = active
+        ? "On for this device. You'll hear when your parcel is picked up, out for delivery, and delivered."
+        : "Get a notification on this device when your parcel is picked up, out for delivery, and delivered.";
+    }).catch(function () { on.hidden = false; off.hidden = true; });
+  }
+  function enablePush() {
+    var on = $("#acct-push-on");
+    if (on) { on.disabled = true; on.textContent = "Turning on…"; }
+    var reset = function () { if (on) { on.disabled = false; on.textContent = "🔔 Turn on notifications"; } };
+
+    Notification.requestPermission().then(function (perm) {
+      if (perm !== "granted") { reset(); renderPushCard(); toast("Notifications weren't allowed.", "warn"); return null; }
+      return navigator.serviceWorker.ready.then(function (reg) {
+        return reg.pushManager.subscribe({
+          userVisibleOnly: true,  // required by browsers; every push shows a notification
+          applicationServerKey: urlBase64ToUint8Array(pushInfo.publicKey)
+        });
+      });
+    }).then(function (sub) {
+      if (!sub) return;
+      return pushApi({ method: "POST", body: JSON.stringify({ subscription: sub.toJSON ? sub.toJSON() : sub }) })
+        .then(function (j) {
+          reset();
+          if (!j.ok) { toast(j.error || "Couldn't turn on notifications.", "warn", 7000); return; }
+          toast("Delivery alerts are on for this device.", "ok");
+          renderPushCard();
+        });
+    }).catch(function (e) {
+      reset();
+      toast("Couldn't turn on notifications on this device.", "warn", 7000);
+    });
+  }
+  function disablePush() {
+    navigator.serviceWorker.ready.then(function (reg) { return reg.pushManager.getSubscription(); })
+      .then(function (sub) {
+        if (!sub) return null;
+        var endpoint = sub.endpoint;
+        // Unsubscribe locally first: if the server call fails, the device is already quiet,
+        // and the stale record is pruned the next time a send to it is refused.
+        return sub.unsubscribe().then(function () {
+          return pushApi({ method: "DELETE", body: JSON.stringify({ endpoint: endpoint }) });
+        });
+      })
+      .then(function () { toast("Delivery alerts are off for this device.", "ok"); renderPushCard(); })
+      .catch(function () { toast("Couldn't turn notifications off.", "warn"); });
+  }
+  // Asked once per load, not per render: the answer is a property of the deployment.
+  function loadPushInfo() {
+    if (pushInfo || !pushSupported()) { renderPushCard(); return; }
+    fetch("/api/push").then(function (r) { return r.json(); })
+      .then(function (j) { pushInfo = { configured: !!j.configured, publicKey: j.publicKey }; renderPushCard(); })
+      .catch(function () { pushInfo = { configured: false, publicKey: null }; renderPushCard(); });
+  }
+
   // Customer's Account tab: profile + sign out, replacing the header account dropdown.
   function renderAccountView() {
     var u = (typeof currentUser === "function") ? currentUser() : null;
     var av = $("#acct-avatar"); if (av) av.textContent = ((u && (u.name || u.email)) || "U").charAt(0).toUpperCase();
     var nm = $("#acct-name"); if (nm) nm.textContent = u ? (u.name || u.email) : "Guest";
     var em = $("#acct-email"); if (em) em.textContent = u ? u.email : "";
+    loadPushInfo();
   }
   function renderOrder() {
     if (typeof resetOrderForm === "function") resetOrderForm();
@@ -2739,6 +2839,10 @@
 
   var searchInput = $("#track-search");
   if (searchInput) searchInput.addEventListener("input", function () { trackQuery = this.value.trim().toLowerCase(); renderTracking(); });
+  var pushOn = $("#acct-push-on");
+  if (pushOn) pushOn.addEventListener("click", enablePush);
+  var pushOff = $("#acct-push-off");
+  if (pushOff) pushOff.addEventListener("click", disablePush);
   var admSearch = $("#adm-search");
   if (admSearch) admSearch.addEventListener("input", function () { admQuery = this.value.trim().toLowerCase(); renderAdminList(); });
   var admRefresh = $("#adm-refresh");

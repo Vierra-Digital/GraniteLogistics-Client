@@ -2,7 +2,7 @@
  * NETWORK-FIRST for the app shell: a fresh deploy shows up immediately whenever the
  * device is online, while a cache fallback keeps the app usable offline. This avoids
  * the "installed PWA is stuck on an old version" problem that cache-first causes. */
-var CACHE = "granite-logistics-v62";
+var CACHE = "granite-logistics-v63";
 var ASSETS = [
   "./", "./index.html", "./app.html", "./track.html", "./landing.css", "./landing.js",
   "./styles.css", "./app.js", "./barcode.js", "./manifest.webmanifest",
@@ -24,6 +24,41 @@ self.addEventListener("activate", function (e) {
 
 self.addEventListener("message", function (e) {
   if (e.data === "skip-waiting") self.skipWaiting();
+});
+
+/* ---- Push notifications ----
+ * The payload is built server-side in _push.mjs and carries only the tracking id and the
+ * new status: it travels through a third-party push service, so it must not contain the
+ * recipient's address. `tag` is the parcel id, so a second update for the same shipment
+ * replaces the first rather than stacking up. */
+self.addEventListener("push", function (e) {
+  var data = {};
+  try { data = e.data ? e.data.json() : {}; } catch (err) { data = {}; }
+  var title = data.title || "Granite Logistics";
+  e.waitUntil(self.registration.showNotification(title, {
+    body: data.body || "",
+    tag: data.tag || "granite",
+    renotify: true,
+    icon: "./assets/logo-mark.png",
+    badge: "./assets/favicon-32.png",
+    data: { url: data.url || "./app.html" }
+  }));
+});
+
+/* Tapping a notification should reuse an open tab rather than piling up new ones. */
+self.addEventListener("notificationclick", function (e) {
+  e.notification.close();
+  var target = (e.notification.data && e.notification.data.url) || "./app.html";
+  e.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(function (list) {
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].url.indexOf(target) !== -1 && "focus" in list[i]) return list[i].focus();
+      }
+      // Nothing suitable open: focus any existing window and send it there, else open one.
+      if (list.length && "navigate" in list[0]) return list[0].navigate(target).then(function (c) { return c && c.focus(); });
+      return self.clients.openWindow(target);
+    })
+  );
 });
 
 self.addEventListener("fetch", function (e) {

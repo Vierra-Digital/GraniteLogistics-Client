@@ -15,6 +15,7 @@
 //      each package, so the flag would be overwritten on the very next push.
 import { getStore } from "@netlify/blobs";
 import { sendEmail, statusEmail, emailConfigured } from "./_email.mjs";
+import { sendPush, pushPayload, pushConfigured } from "./_push.mjs";
 
 // Stages worth an email. Deliberately not every step: "Intake" and "Staged" are internal
 // choreography, and a parcel that emails on all seven is a parcel people mute.
@@ -82,11 +83,11 @@ export function unannounced(changes, announced) {
 export async function notifyStatusChanges(tenant, before, after) {
   try {
     const changes = detectStatusChanges(before, after);
-    if (!changes.length) return { sent: 0, skipped: 0, deferred: 0 };
+    if (!changes.length) return { sent: 0, pushed: 0, skipped: 0, deferred: 0 };
 
     const announced = await readAnnounced(tenant);
     const todo = unannounced(changes, announced);
-    if (!todo.length) return { sent: 0, skipped: changes.length, deferred: 0 };
+    if (!todo.length) return { sent: 0, pushed: 0, skipped: changes.length, deferred: 0 };
 
     const batch = todo.slice(0, MAX_PER_PUSH);
     const deferred = todo.length - batch.length;
@@ -98,20 +99,29 @@ export async function notifyStatusChanges(tenant, before, after) {
     });
     await writeAnnounced(tenant, announced);
 
-    if (!emailConfigured()) {
-      // Nothing to send through yet. The stages are still recorded, so switching mail on
-      // later does not produce a flood of backdated updates.
-      return { sent: 0, skipped: 0, deferred, reason: "email-not-configured" };
+    if (!emailConfigured() && !pushConfigured()) {
+      // No channel available yet. The stages are still recorded, so switching mail or push
+      // on later does not produce a flood of backdated updates.
+      return { sent: 0, pushed: 0, skipped: 0, deferred, reason: "no-channel-configured" };
     }
 
-    let sent = 0;
+    // Both channels share the announced record above, so a customer with push enabled and
+    // an email address gets one of each per real transition, never two of either.
+    let sent = 0, pushed = 0;
     for (const c of batch) {
-      const msg = statusEmail(c.pkg, NOTIFY_STAGES[c.to]);
-      const r = await sendEmail({ to: c.email, subject: msg.subject, html: msg.html, text: msg.text });
-      if (r && r.ok) sent++;
+      const label = NOTIFY_STAGES[c.to];
+      if (emailConfigured()) {
+        const msg = statusEmail(c.pkg, label);
+        const r = await sendEmail({ to: c.email, subject: msg.subject, html: msg.html, text: msg.text });
+        if (r && r.ok) sent++;
+      }
+      if (pushConfigured()) {
+        const r = await sendPush(c.email, pushPayload(c.pkg, label));
+        pushed += (r && r.sent) || 0;
+      }
     }
-    return { sent, skipped: changes.length - todo.length, deferred };
+    return { sent, pushed, skipped: changes.length - todo.length, deferred };
   } catch (e) {
-    return { sent: 0, skipped: 0, deferred: 0, reason: "failed", detail: String((e && e.message) || e) };
+    return { sent: 0, pushed: 0, skipped: 0, deferred: 0, reason: "failed", detail: String((e && e.message) || e) };
   }
 }

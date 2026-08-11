@@ -44,7 +44,7 @@ function getStore({ name }) {
   };
 }
 
-let authFn, ordersFn, stateFn, trackFn, healthFn, ingestFn, adminFn, sign;
+let authFn, ordersFn, stateFn, trackFn, healthFn, ingestFn, adminFn, pushFn, sign;
 // Tokens for the operator-granted ops accounts. /api/state authorizes by role now, not by
 // the public demo key, so these tests have to sign in the way a real ops user does.
 let adminToken, viewerToken;
@@ -65,6 +65,7 @@ before(async () => {
   healthFn = (await import("../netlify/functions/health.mjs")).default;
   ingestFn = (await import("../netlify/functions/orders.mjs")).default;
   adminFn = (await import("../netlify/functions/admin.mjs")).default;
+  pushFn = (await import("../netlify/functions/push.mjs")).default;
   sign = (await import("../netlify/functions/_auth.mjs")).sign;
 
   adminToken = await register(ADMIN_EMAIL, "pass1234", "Ops Admin");
@@ -459,6 +460,127 @@ test("webhook ingest numbers a batch uniquely and survives a clobber", async () 
   assert.equal(new Set(batchIds).size, 3, "the batch reused an id");
   const allIds = pkgs.map((p) => p.id);
   assert.equal(new Set(allIds).size, allIds.length, "workspace contains duplicate ids");
+});
+
+// ---- web push subscriptions ----
+
+const SUB = (endpoint) => ({ endpoint, keys: { p256dh: "p256dh-key", auth: "auth-key" } });
+const pushReq = (init = {}) => new Request("https://x/api/push" + (init.qs || ""), {
+  method: init.method || "GET",
+  headers: Object.assign(
+    init.token === null ? {} : { authorization: "Bearer " + init.token },
+    init.body ? { "content-type": "application/json" } : {}),
+  body: init.body ? JSON.stringify(init.body) : undefined,
+});
+
+function withVapid() {
+  const saved = { pub: process.env.GL_VAPID_PUBLIC, priv: process.env.GL_VAPID_PRIVATE };
+  process.env.GL_VAPID_PUBLIC = "BFakePublicKeyForTests";
+  process.env.GL_VAPID_PRIVATE = "fake-private-key-for-tests";
+  return () => {
+    if (saved.pub === undefined) delete process.env.GL_VAPID_PUBLIC; else process.env.GL_VAPID_PUBLIC = saved.pub;
+    if (saved.priv === undefined) delete process.env.GL_VAPID_PRIVATE; else process.env.GL_VAPID_PRIVATE = saved.priv;
+  };
+}
+
+test("push availability is public, but subscribing needs a session", async () => {
+  // The client has to know whether to offer the option before it can sign anyone in.
+  let j = await body(await pushFn(pushReq({ token: null })));
+  assert.equal(j.ok, true);
+  assert.equal(j.configured, false, "push should report unconfigured with no VAPID keys");
+  assert.equal(j.publicKey, null);
+
+  const restore = withVapid();
+  try {
+    j = await body(await pushFn(pushReq({ token: null })));
+    assert.equal(j.configured, true);
+    assert.equal(j.publicKey, "BFakePublicKeyForTests");
+
+    // Writing requires a token.
+    assert.equal((await pushFn(pushReq({ method: "POST", token: null, body: { subscription: SUB("https://push.example/a") } }))).status, 401);
+  } finally { restore(); }
+});
+
+test("a subscription is stored against the signed-in account, not one named in the body", async () => {
+  const restore = withVapid();
+  try {
+    const mine = "pushme@example.com";
+    const victim = "pushvictim@example.com";
+    const token = await register(mine);
+    await register(victim);
+
+    // The body names someone else; the token is what counts.
+    const j = await body(await pushFn(pushReq({
+      method: "POST", token,
+      body: { email: victim, subscription: SUB("https://push.example/mine") },
+    })));
+    assert.equal(j.ok, true);
+    assert.equal(j.devices, 1);
+
+    const { readSubscriptions } = await import("../netlify/functions/_push.mjs");
+    assert.equal((await readSubscriptions(mine)).length, 1, "not stored against the caller");
+    assert.equal((await readSubscriptions(victim)).length, 0, "stored against the account named in the body");
+  } finally { restore(); }
+});
+
+test("re-subscribing the same device replaces it instead of duplicating", async () => {
+  const restore = withVapid();
+  try {
+    const email = "pushdup@example.com";
+    const token = await register(email);
+    const { readSubscriptions } = await import("../netlify/functions/_push.mjs");
+
+    await pushFn(pushReq({ method: "POST", token, body: { subscription: SUB("https://push.example/same") } }));
+    await pushFn(pushReq({ method: "POST", token, body: { subscription: SUB("https://push.example/same") } }));
+    assert.equal((await readSubscriptions(email)).length, 1, "one device became two, so it would be notified twice");
+
+    // A genuinely different device is additive.
+    await pushFn(pushReq({ method: "POST", token, body: { subscription: SUB("https://push.example/other") } }));
+    assert.equal((await readSubscriptions(email)).length, 2);
+
+    // Turning it off on one device leaves the other alone.
+    const j = await body(await pushFn(pushReq({ method: "DELETE", token, body: { endpoint: "https://push.example/same" } })));
+    assert.equal(j.devices, 1);
+    assert.equal((await readSubscriptions(email))[0].endpoint, "https://push.example/other");
+  } finally { restore(); }
+});
+
+test("an incomplete subscription is refused rather than stored to fail later", async () => {
+  const restore = withVapid();
+  try {
+    const token = await register("pushbad@example.com");
+    const bad = [
+      {}, { endpoint: "https://push.example/x" },
+      { endpoint: "https://push.example/x", keys: { p256dh: "only-one" } },
+      { endpoint: "not-a-url", keys: { p256dh: "a", auth: "b" } },
+    ];
+    for (const sub of bad) {
+      const res = await pushFn(pushReq({ method: "POST", token, body: { subscription: sub } }));
+      assert.equal(res.status, 400, "accepted an unusable subscription: " + JSON.stringify(sub));
+    }
+  } finally { restore(); }
+});
+
+test("subscribing reports clearly when push is not configured", async () => {
+  const token = await register("pushnokeys@example.com");
+  const res = await pushFn(pushReq({ method: "POST", token, body: { subscription: SUB("https://push.example/z") } }));
+  assert.equal(res.status, 503);
+  assert.match((await body(res)).error, /aren't set up/i);
+});
+
+test("the push payload carries no recipient details", async () => {
+  const { pushPayload } = await import("../netlify/functions/_push.mjs");
+  const p = pushPayload({
+    id: "GL-1041", item: { description: "LG OLED TV" },
+    customer: { name: "Jane Doe", address: "742 Birchwood Ln", phone: "555-0100" },
+  }, "out for delivery");
+  assert.match(p.title, /out for delivery/);
+  assert.equal(p.tag, "GL-1041");
+  assert.match(p.url, /track\.html\?n=GL-1041/);
+  const raw = JSON.stringify(p);
+  // A push payload passes through a third-party service.
+  ["742 Birchwood Ln", "555-0100", "Jane Doe"].forEach((secret) =>
+    assert.ok(!raw.includes(secret), "push payload leaked " + secret));
 });
 
 // ---- customer status notifications ----

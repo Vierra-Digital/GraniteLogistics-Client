@@ -36,7 +36,7 @@ being offline. To exercise the real API, deploy to Netlify or run `netlify dev`.
 npm test
 ```
 
-103 tests, no network and no browser required, in two layers:
+109 tests, no network and no browser required, in two layers:
 
 - **Unit** (`test/functions.test.mjs`) covers the pure logic: workspace merging, id
   allocation, session tokens, tenant and api-key resolution, role assignment, the public
@@ -72,6 +72,8 @@ there is no database to provision.
 | `GL_MAIL_FROM` | For password reset | Verified sender, e.g. `Granite Logistics <no-reply@usegl.com>`. |
 | `GL_ADMIN_EMAILS` | To use the ops platform | Comma-separated emails granted the `Admin` role, e.g. `you@co.com,ops@co.com`. Without this, every account is a Customer and nobody can reach the ops workspace. |
 | `GL_ROLES` | Optional | JSON map of email to a non-Admin ops role, e.g. `{"dana@co.com":"Runner"}`. Valid roles are `Admin`, `Runner`, `Driver`, `Viewer`. |
+| `GL_VAPID_PUBLIC` | For push notifications | Public half of the VAPID keypair, handed to browsers at subscribe time. Not a secret. Generate with `npm run vapid`. |
+| `GL_VAPID_PRIVATE` | For push notifications | Private half. **A secret** — it signs every push this server sends. Rotating both invalidates every existing subscription; devices re-opt-in and the dead ones are pruned on first refusal. |
 | `GL_TENANTS` | Optional | JSON map of api key to tenant, e.g. `{"my-key":"my-tenant"}`. Setting it **replaces** the built-in demo keys rather than adding to them, which switches the public keys off. |
 
 Changing `GL_AUTH_SECRET` invalidates every existing session, which is the correct
@@ -114,6 +116,7 @@ rejected by `/api/state`, which reads. For a real machine integration set `GL_TE
 | `GET/POST/DELETE /api/my-orders` | Bearer token | A customer's own orders. Email comes from the verified token, so callers can only reach their own rows. `DELETE` cancels, and only before pickup. `POST` is rate limited per account (3/minute, 12/hour) and answers `429` with `Retry-After`; reads and cancellations are never limited. |
 | `GET/PUT /api/state` | Bearer token with an ops role, or a `GL_TENANTS` key | An ops client's whole workspace. Every recipient's name, address and phone lives here, so this is the one endpoint with real authorization: a Customer session gets 403, `Viewer` may read but not `PUT`, and the public demo keys are refused. |
 | `GET/POST /api/admin` | Bearer token, Admin only | Role administration. `GET` lists accounts with where each role comes from, plus the recent access history; `POST {email, role}` grants or revokes (`Customer` revokes). Answers `404` to a non-admin so the endpoint does not confirm it exists. Refuses changing your own role, removing the last Admin, editing an env-set role, or granting to an address with no account. Every change is appended to an audit trail, including revocations, which otherwise leave no trace. |
+| `GET/POST/DELETE /api/push` | `GET` none; writes need a Bearer token | Web Push subscriptions. `GET` reports whether push is configured here and returns the public VAPID key, unauthenticated because the client needs it before deciding whether to offer the option. Writes take the account from the verified token, never the body, so a device cannot be registered against someone else's account. |
 | `POST /api/orders` | `x-api-key` | Webhook ingest, single order or `{orders:[...]}`. Write-only, so a demo key here means at worst junk orders, not disclosure. |
 
 Passwords are salted and scrypt-hashed. Sessions are HMAC-signed, stateless, and carry
@@ -147,6 +150,9 @@ Customers never push the whole workspace; they only ever go through `/api/my-ord
 push the whole workspace through that handler, which therefore holds both the stored state
 and the incoming one and can see exactly what moved. `_notify.mjs` diffs them and emails the
 owner of any customer order that reached a stage worth announcing.
+
+Both channels, email and push, share one record of what has been announced, so a customer
+with push enabled gets one of each per real transition and never two of either.
 
 Three things keep that safe inside a handler ops calls every ~1.5 seconds: the work is gated
 on a transition actually being found; only four of the seven stages are announced, because a
@@ -225,7 +231,8 @@ also accepts an optional `x-signature` HMAC of the body using `GL_WEBHOOK_SECRET
 - Reports computed live from chain-of-custody timestamps.
 - Role-based navigation, in-app notifications, dark mode, command palette (Ctrl/Cmd-K),
   JSON backup and restore, and a searchable audit log.
-- Customer status emails on pickup, in transit, out for delivery and delivered.
+- Customer status updates on pickup, in transit, out for delivery and delivered, by email
+  and by browser push (opt-in per device, from the customer's Account tab).
 - A readiness report at `/api/health` naming any configuration still missing.
 - One motion system across the app, with a `prefers-reduced-motion` opt-out.
 
@@ -235,15 +242,14 @@ Carrier (UPS/FedEx) and e-commerce calls are mocked, so tracking numbers and car
 are generated locally rather than fetched, and there are no payments. Both need a commercial
 account before they can be real.
 
-Browser push notifications are still not implemented (that needs VAPID keys and a
-subscription store), but **email status updates are**, which is what customers actually
-asked for. See below.
+Everything else is real, including customer status updates by **email and browser push**.
 
 ## Files
 
 - `index.html`, `landing.css`, `landing.js` public landing
 - `app.html`, `styles.css`, `app.js` the app shell and all views
-- `netlify/functions/` the API (auth, role administration, customer orders, workspace
+- `scripts/vapid.mjs` generates a VAPID keypair for push (`npm run vapid`)
+- `netlify/functions/` the API (auth, role administration, push, customer orders, workspace
   state, ingest, public tracking, health)
 - `test/` regression tests for the function logic
 - `barcode.js` pure-JS Code 128 (Set B) to SVG
