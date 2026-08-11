@@ -1,6 +1,7 @@
 // Shared helpers for the Granite Netlify Functions.
 // Storage = Netlify Blobs (built-in, free, no external DB or env vars).
 import { getStore } from "@netlify/blobs";
+import crypto from "node:crypto";
 
 export const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -82,12 +83,19 @@ export function publicTrackingView(p) {
 // orders missing from the payload are preserved. `deleted` carries ids the client
 // removed on purpose, which are allowed through so real deletions still stick.
 // Pure function, kept here so it can be unit tested without the Blobs runtime.
+// A row this server created, which an ops client may therefore not have pulled yet.
+// `uid` is set by appendOrderWithRepair, so it covers both customer orders and webhook
+// ingest; customerEmail also matches customer orders created before uid existed. Packages
+// an ops client made itself are not in this set, so its own deletions still apply
+// normally and a local demo reset still clears the workspace.
+const serverCreated = (p) => !!(p && (p.uid || p.customerEmail));
+
 export function mergePushedPackages(currentPackages, pushedPackages, deleted) {
   const pushed = Array.isArray(pushedPackages) ? pushedPackages : [];
   const pushedIds = new Set(pushed.map((p) => p && p.id));
   const tombstoned = new Set((Array.isArray(deleted) ? deleted : []).map((t) => (t && t.id) || t));
   const preserved = (currentPackages || []).filter(
-    (p) => p && p.customerEmail && !pushedIds.has(p.id) && !tombstoned.has(p.id)
+    (p) => serverCreated(p) && !pushedIds.has(p.id) && !tombstoned.has(p.id)
   );
   return { packages: preserved.length ? pushed.concat(preserved) : pushed, preserved: preserved.length };
 }
@@ -132,6 +140,75 @@ export function orderRateLimit(orders, now, limits = ORDER_LIMITS) {
     };
   }
   return { limited: false };
+}
+
+// ---- Appending an order safely without compare-and-swap ----
+//
+// Two customers can read the workspace, both add an order, and both write it back. There
+// is no conditional write in @netlify/blobs v8, so that race has two outcomes:
+//
+//   1. one order is silently lost (the second write did not contain it), and
+//   2. both orders get the SAME id, because both computed nextId from the same snapshot.
+//
+// The second is worse: two different parcels would carry one tracking number.
+//
+// Neither can be prevented without CAS, but both can be detected afterwards and repaired.
+// Every order carries a `uid` that no other order shares, so after writing we re-read and
+// ask two questions: is exactly one copy of my uid present, and is my id unique? If not,
+// we rebuild onto the newest state (taking a fresh id if ours was taken) and try again.
+//
+// This does not make the write atomic. It makes the *outcome* self-correcting, which turns
+// a silent loss into a retry. A caller that exhausts its attempts is told so rather than
+// being given a false success.
+// node:crypto rather than the global, which was still flagged experimental on the Node
+// versions these functions may run on.
+export function orderUid() { return crypto.randomUUID(); }
+
+// Ids appear in two places on a package, so renumbering has to move both.
+export function renumberOrder(order, id) {
+  order.id = id;
+  order.barcode = id.replace(/-/g, "");
+  return order;
+}
+
+// `build(state)` must return a fresh order numbered from the state it is given.
+// Returns { order, state, attempts, repaired, unverified }.
+export async function appendOrderWithRepair(tenant, build, attempts = 4) {
+  let order = null;
+  let repaired = 0;
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const state = await readState(tenant);
+    if (!Array.isArray(state.packages)) state.packages = [];
+
+    if (!order) {
+      order = build(state);
+      if (!order.uid) order.uid = orderUid();
+    }
+
+    // Everything except any earlier copy of this same order.
+    const others = state.packages.filter((p) => p && p.uid !== order.uid);
+    // If another order has taken our id in the meantime, take the next free one.
+    if (others.some((p) => p && p.id === order.id)) {
+      renumberOrder(order, nextId({ packages: others }));
+      repaired++;
+    }
+
+    state.packages = others.concat([order]);
+    await writeState(tenant, state);
+
+    // Did it survive, exactly once, with an id nobody else holds?
+    const after = await readState(tenant);
+    const pkgs = after.packages || [];
+    const mine = pkgs.filter((p) => p && p.uid === order.uid);
+    const idHolders = pkgs.filter((p) => p && p.id === order.id);
+    if (mine.length === 1 && idHolders.length === 1) {
+      return { order, state: after, attempts: attempt, repaired };
+    }
+    repaired++;
+  }
+
+  return { order, state: await readState(tenant), attempts, repaired, unverified: true };
 }
 
 export function nextId(state) {

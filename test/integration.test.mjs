@@ -13,6 +13,12 @@ import assert from "node:assert/strict";
 // ---- in-memory stand-in for Netlify Blobs ----
 const blobs = new Map(); // "store\u0000key" -> serialized value
 const k = (store, key) => store + "\u0000" + key;
+// Runs immediately after a write, so a test can emulate another request writing the same
+// record at the same instant. That interleaving is the only way to exercise the lost-order
+// and duplicate-id races from out here, since nothing in this file is truly concurrent.
+let afterWrite = null;
+const setAfterWrite = (fn) => { afterWrite = fn; };
+
 function getStore({ name }) {
   return {
     async get(key, opts) {
@@ -20,13 +26,16 @@ function getStore({ name }) {
       if (raw === undefined) return null;
       return opts && opts.type === "json" ? JSON.parse(raw) : raw;
     },
-    async setJSON(key, value) { blobs.set(k(name, key), JSON.stringify(value)); },
+    async setJSON(key, value) {
+      blobs.set(k(name, key), JSON.stringify(value));
+      if (afterWrite) afterWrite({ store: name, key });
+    },
     async set(key, value) { blobs.set(k(name, key), String(value)); },
     async delete(key) { blobs.delete(k(name, key)); },
   };
 }
 
-let authFn, ordersFn, stateFn, trackFn, healthFn, sign;
+let authFn, ordersFn, stateFn, trackFn, healthFn, ingestFn, sign;
 // Tokens for the operator-granted ops accounts. /api/state authorizes by role now, not by
 // the public demo key, so these tests have to sign in the way a real ops user does.
 let adminToken, viewerToken;
@@ -45,6 +54,7 @@ before(async () => {
   stateFn = (await import("../netlify/functions/state.mjs")).default;
   trackFn = (await import("../netlify/functions/track.mjs")).default;
   healthFn = (await import("../netlify/functions/health.mjs")).default;
+  ingestFn = (await import("../netlify/functions/orders.mjs")).default;
   sign = (await import("../netlify/functions/_auth.mjs")).sign;
 
   adminToken = await register(ADMIN_EMAIL, "pass1234", "Ops Admin");
@@ -312,6 +322,133 @@ test("legacy per-customer orders are migrated into the shared workspace", async 
   const opsView = await body(await stateFn(asOps()));
   assert.ok(opsView.packages.find((p) => p.id === "GL-8001"));
   assert.equal(blobs.get(k("granite-customer-orders", "legacy@example.com")), undefined);
+});
+
+// ---- the concurrent-write race ----
+//
+// Netlify Blobs v8 has no conditional write, so two simultaneous orders can clobber each
+// other. These drive the exact interleaving through the real handler: write, have another
+// request overwrite the record, and check the order repairs itself.
+
+const WORKSPACE = "granite-workspaces";
+const readWorkspace = () => JSON.parse(blobs.get(k(WORKSPACE, "default")));
+const writeWorkspace = (s) => blobs.set(k(WORKSPACE, "default"), JSON.stringify(s));
+
+test("an order clobbered by a simultaneous write is restored, not lost", async () => {
+  const token = await register("race-lost@example.com");
+  const before = readWorkspace();
+
+  // The first write gets stomped by another request that never saw this order, which is
+  // precisely how an order used to disappear.
+  let stomped = false;
+  setAfterWrite(() => {
+    if (stomped) return;
+    stomped = true;
+    writeWorkspace({ ...before, packages: (before.packages || []).slice() });
+  });
+  try {
+    const res = await ordersFn(asUser(token, { method: "POST", body: { item: "Survivor" } }));
+    const j = await body(res);
+    assert.equal(j.ok, true, "order was refused: " + JSON.stringify(j));
+    assert.ok(stomped, "the test did not actually simulate a clobber");
+
+    // It must be in the shared workspace exactly once, and visible to its owner.
+    const pkgs = readWorkspace().packages;
+    const mine = pkgs.filter((p) => p.customerEmail === "race-lost@example.com");
+    assert.equal(mine.length, 1, "order lost or duplicated");
+    assert.equal(mine[0].item.description, "Survivor");
+    assert.equal(mine[0].id, j.order.id, "the id reported to the customer is not the stored one");
+  } finally { setAfterWrite(null); }
+});
+
+test("two orders that race onto the same id do not share a tracking number", async () => {
+  const token = await register("race-id@example.com");
+  const before = readWorkspace();
+  // The id this order will be handed, given the current state.
+  const contestedId = "GL-" + (1041 + (before.packages || []).length);
+
+  // Another request lands first and takes that very id.
+  let stomped = false;
+  setAfterWrite(() => {
+    if (stomped) return;
+    stomped = true;
+    writeWorkspace({ ...before, packages: (before.packages || []).concat([{
+      id: contestedId, uid: "someone-else", status: "Won", customerEmail: "other@example.com",
+      item: { description: "Got there first", value: 0, weight: 1 },
+      customer: { name: "Other" }, history: [{ stage: "Won", ts: Date.now() }], photos: {},
+    }]) });
+  });
+  try {
+    const j = await body(await ordersFn(asUser(token, { method: "POST", body: { item: "Renumbered" } })));
+    assert.equal(j.ok, true);
+    assert.ok(stomped);
+
+    const pkgs = readWorkspace().packages;
+    // Both survive, and no id is held twice anywhere in the workspace.
+    const ours = pkgs.find((p) => p.item && p.item.description === "Renumbered");
+    const theirs = pkgs.find((p) => p.uid === "someone-else");
+    assert.ok(ours && theirs, "one of the two racing orders was lost");
+    assert.notEqual(ours.id, theirs.id, "two parcels ended up sharing a tracking number");
+    assert.equal(ours.id, j.order.id);
+    assert.equal(ours.barcode, ours.id.replace(/-/g, ""), "barcode was not renumbered with the id");
+
+    const ids = pkgs.map((p) => p.id);
+    assert.equal(new Set(ids).size, ids.length, "workspace contains duplicate ids");
+  } finally { setAfterWrite(null); }
+});
+
+test("an order that cannot be confirmed is refused rather than reported as placed", async () => {
+  const token = await register("race-hopeless@example.com");
+  const before = readWorkspace();
+  // Every write is stomped, so the repair can never verify. The customer must be told.
+  setAfterWrite(() => writeWorkspace({ ...before, packages: (before.packages || []).slice() }));
+  try {
+    const res = await ordersFn(asUser(token, { method: "POST", body: { item: "Doomed" } }));
+    assert.equal(res.status, 503);
+    const j = await body(res);
+    assert.equal(j.ok, false);
+    assert.match(j.error, /couldn't confirm/i);
+  } finally { setAfterWrite(null); }
+
+  // And nothing phantom was left behind for that account.
+  const mine = await body(await ordersFn(asUser(token)));
+  assert.equal(mine.orders.length, 0, "a refused order was still stored");
+});
+
+test("webhook ingest numbers a batch uniquely and survives a clobber", async () => {
+  const ingest = (body) => new Request("https://x/api/orders", {
+    method: "POST",
+    headers: { "x-api-key": OPS_KEY, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  // A concurrent writer whose snapshot was one order behind: it keeps everything already
+  // confirmed but drops the write currently in flight. That is the race this repairs.
+  // (A writer with a much older snapshot can still destroy an order that was already
+  // confirmed and returned; that case is what mergePushedPackages covers on /api/state.)
+  let stomps = 0;
+  setAfterWrite(({ store }) => {
+    if (store !== WORKSPACE || stomps++ !== 1) return;
+    const cur = readWorkspace();
+    writeWorkspace({ ...cur, packages: (cur.packages || []).slice(0, -1) });
+  });
+  let j;
+  try {
+    const res = await ingestFn(ingest({ orders: [{ item: "A", name: "N1" }, { item: "B", name: "N2" }, { item: "C", name: "N3" }] }));
+    j = await body(res);
+    assert.equal(j.ok, true, "ingest failed: " + JSON.stringify(j));
+    assert.equal(j.created, 3);
+  } finally { setAfterWrite(null); }
+
+  // All three are stored, each with its own id.
+  const pkgs = readWorkspace().packages;
+  ["A", "B", "C"].forEach((d) => {
+    const hits = pkgs.filter((p) => p.item && p.item.description === d);
+    assert.equal(hits.length, 1, "order " + d + " lost or duplicated");
+  });
+  const batchIds = j.packages.map((p) => p.id);
+  assert.equal(new Set(batchIds).size, 3, "the batch reused an id");
+  const allIds = pkgs.map((p) => p.id);
+  assert.equal(new Set(allIds).size, allIds.length, "workspace contains duplicate ids");
 });
 
 // ---- deployment readiness ----

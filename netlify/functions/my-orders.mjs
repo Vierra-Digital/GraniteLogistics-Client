@@ -8,7 +8,7 @@
 // read or change their own rows out of the shared state.
 import { getStore } from "@netlify/blobs";
 import { CORS, json, verifyToken, bearer } from "./_auth.mjs";
-import { readState, writeState, nextId, orderRateLimit } from "./_lib.mjs";
+import { readState, writeState, nextId, orderRateLimit, appendOrderWithRepair } from "./_lib.mjs";
 
 // Single-company platform for now, so every customer order lands in one workspace.
 const TENANT = "default";
@@ -87,10 +87,20 @@ export default async (req) => {
       });
     }
 
-    const order = makeCustomerOrder(d, { email: p.email, name: p.name }, state);
-    state.packages.push(order);
-    await writeState(TENANT, state);
-    return json({ ok: true, order, orders: mine() });
+    // Append-and-verify rather than a plain read-modify-write: two customers ordering at
+    // the same moment could otherwise lose one order, or be handed the same tracking
+    // number. See appendOrderWithRepair.
+    const result = await appendOrderWithRepair(TENANT, (fresh) =>
+      makeCustomerOrder(d, { email: p.email, name: p.name }, fresh));
+
+    if (result.unverified) {
+      // Repeated interference. Better to ask the customer to retry than to confirm an
+      // order we cannot prove is stored.
+      return json({ ok: false, error: "We couldn't confirm that order was saved. Please try again." }, 503);
+    }
+
+    const orders = (result.state.packages || []).filter((o) => o.customerEmail === p.email);
+    return json({ ok: true, order: result.order, orders });
   }
 
   // Cancel one of the caller's own orders. Only allowed while the parcel is still

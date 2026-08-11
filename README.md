@@ -36,7 +36,7 @@ being offline. To exercise the real API, deploy to Netlify or run `netlify dev`.
 npm test
 ```
 
-73 tests, no network and no browser required, in two layers:
+79 tests, no network and no browser required, in two layers:
 
 - **Unit** (`test/functions.test.mjs`) covers the pure logic: workspace merging, id
   allocation, session tokens, tenant and api-key resolution, role assignment, the public
@@ -109,23 +109,35 @@ Everything for one tenant lives in a single Netlify Blobs record. Customer order
 rows in that same record, tagged with `customerEmail`. That is what makes a customer
 order visible to ops, and an ops status change visible to the customer.
 
-Two consequences worth knowing before changing this code:
+Three consequences worth knowing before changing this code:
 
 1. **Ops clients push their entire local workspace.** That state can be minutes old, so
    `PUT /api/state` does not blindly replace. It preserves any customer order missing
    from the payload (created since that client last pulled) unless the client explicitly
-   tombstoned it in `deleted`. Without this, a routine ops push would delete recent
-   customer orders. See `mergePushedPackages` in `netlify/functions/_lib.mjs`.
+   tombstoned it in `deleted`. Without this, a routine ops push would delete recent customer
+   orders and webhook-ingested shipments. The rule covers anything created server-side
+   (identified by `uid`), not just customer orders; packages an ops client created itself are
+   not preserved, so its own deletions and a local demo reset still behave normally. See
+   `mergePushedPackages` in `netlify/functions/_lib.mjs`.
 2. **Ids are allocated across the whole workspace.** Customer orders are numbered
    server-side, so clients call `syncSeqFromPackages()` whenever server-numbered
    packages arrive, otherwise a local package could reuse an existing id.
 
 Customers never push the whole workspace; they only ever go through `/api/my-orders`.
 
-**Known limitation:** `@netlify/blobs` v8 has no conditional writes, so there is no
-compare-and-swap. Two customers ordering inside the same read-modify-write window can
-still lose one order. The fix is per-package writes instead of whole-state pushes, which
-is a larger redesign.
+3. **There is no compare-and-swap.** `@netlify/blobs` v8 has no conditional writes, so two
+   simultaneous orders can clobber each other. That race has two outcomes: an order is
+   lost, or both orders are handed the same id because both computed `nextId` from the same
+   snapshot (two parcels, one tracking number). Neither can be *prevented* without CAS, but
+   both are detectable, so `appendOrderWithRepair` writes, re-reads, and checks that exactly
+   one copy of its `uid` is present holding an id nobody else holds. If not, it rebuilds onto
+   the newest state, taking a fresh id if its own was taken. A caller that exhausts its
+   attempts gets a `503` rather than a false confirmation. Both `/api/my-orders` and the
+   webhook ingest go through it.
+
+   This makes the outcome self-correcting, not the write atomic. A writer holding a much
+   older snapshot can still overwrite an order that was already confirmed; that is what the
+   preserve rule in point 1 covers on `/api/state`.
 
 ## Cloud sync providers
 

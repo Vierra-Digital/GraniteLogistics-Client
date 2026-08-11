@@ -43,6 +43,20 @@ test("tombstones are accepted as bare id strings too", () => {
   assert.equal(r.packages.length, 0);
 });
 
+test("a webhook-ingested order survives a stale ops push", () => {
+  // Ingested orders have no customerEmail, so they used to fall outside the preserve rule
+  // and a routine ops push would silently delete a shipment nobody had pulled yet.
+  const ingested = { id: "GL-7", uid: "u-7", source: "API" };
+  const r = mergePushedPackages([opsPkg("GL-1"), ingested], [opsPkg("GL-1")], []);
+  assert.equal(ids(r), "GL-1,GL-7");
+  assert.equal(r.preserved, 1);
+});
+
+test("a tombstoned ingested order still deletes", () => {
+  const r = mergePushedPackages([{ id: "GL-7", uid: "u-7" }], [], [{ id: "GL-7" }]);
+  assert.equal(r.packages.length, 0);
+});
+
 test("ops' own packages need no tombstone to delete", () => {
   const r = mergePushedPackages([opsPkg("GL-9")], [], []);
   assert.equal(r.packages.length, 0);
