@@ -36,7 +36,7 @@ being offline. To exercise the real API, deploy to Netlify or run `netlify dev`.
 npm test
 ```
 
-89 tests, no network and no browser required, in two layers:
+90 tests, no network and no browser required, in two layers:
 
 - **Unit** (`test/functions.test.mjs`) covers the pure logic: workspace merging, id
   allocation, session tokens, tenant and api-key resolution, role assignment, the public
@@ -49,8 +49,10 @@ npm test
   rules, stale-push protection, tombstoned deletions, forged and expired tokens,
   password-change session invalidation, the legacy order migration, and the authorization
   rules on the ops workspace (customer sessions refused, demo keys refused, `Viewer`
-  read-only, no self-granted roles), per-account order rate limiting, and that the public
-  `/api/health` readiness report never discloses a secret value.
+  read-only, no self-granted roles), per-account order rate limiting, role administration
+  (a non-admin gets 404, you cannot change your own role or remove the last Admin, env-set
+  roles are read-only, every change is audited), the concurrent-write repairs, and that
+  neither the public `/api/health` report nor the admin account list discloses a secret.
 
 The integration layer needs `--experimental-test-module-mocks`, which the npm script
 already passes.

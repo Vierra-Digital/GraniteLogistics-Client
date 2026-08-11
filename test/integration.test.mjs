@@ -667,6 +667,21 @@ test("two simultaneous revocations cannot leave zero administrators", async () =
   }
 });
 
+test("the account list reports its own total, and flags a truncated page", async () => {
+  const j = await body(await adminFn(adminReq()));
+  assert.equal(typeof j.total, "number");
+  assert.equal(j.users.length, j.total, "unexpected truncation at this size");
+  assert.equal(j.truncated, false);
+
+  // Truncation has to be visible, not silent: a partial list that looked complete would
+  // make an admin think an account does not exist.
+  const { listUsers } = await import("../netlify/functions/_auth.mjs");
+  const small = await listUsers(2);
+  assert.equal(small.users.length, 2);
+  assert.ok(small.total > 2);
+  assert.equal(small.truncated, true);
+});
+
 test("the user list never exposes password material", async () => {
   const j = await body(await adminFn(adminReq()));
   assert.ok(j.users.length > 0);

@@ -92,11 +92,12 @@ export default async (req) => {
 
   try {
     if (req.method === "GET") {
-      const users = await listUsers();
-      const rows = describe(users, who.grants);
+      const listed = await listUsers();
+      const rows = describe(listed.users, who.grants);
       return json({
         ok: true, you: who.email, roles: ROLES, opsRoles: OPS_ROLES, users: rows,
         admins: adminCount(rows),
+        total: listed.total, truncated: listed.truncated,
         audit: (await readRoleAudit()).slice(0, 50),
       });
     }
@@ -120,8 +121,8 @@ export default async (req) => {
         return fail("That role is set in this site's environment configuration and can't be changed here.", 409);
       }
 
-      const users = await listUsers();
-      const before = describe(users, who.grants);
+      const listed = await listUsers();
+      const before = describe(listed.users, who.grants);
       const previousRole = (before.find((r) => r.email === target) || {}).role || "Customer";
       const grants = { ...who.grants };
 
@@ -142,7 +143,7 @@ export default async (req) => {
       // each see one remaining admin and both go through. Zero admins is only recoverable
       // by editing environment config, so it is worth re-reading to confirm.
       const settled = await readGrants();
-      if (adminCount(describe(await listUsers(), settled)) === 0) {
+      if (adminCount(describe((await listUsers()).users, settled)) === 0) {
         // Put back what this request was working from. That may discard a concurrent
         // change, which is the lesser harm compared with locking everyone out.
         await writeGrants(who.grants);
@@ -156,7 +157,7 @@ export default async (req) => {
       const nextRole = await effectiveRoleFor(target, grants);
       if (account.role !== nextRole) await userStore().setJSON(target, { ...account, role: nextRole });
 
-      const rows = describe(await listUsers(), grants);
+      const rows = describe((await listUsers()).users, grants);
       return json({
         ok: true,
         changed: { email: target, role: nextRole },

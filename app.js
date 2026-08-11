@@ -1038,6 +1038,7 @@
   // server is the authority, so a stale page can't grant anything by being out of date.
   var admUsers = [];
   var admAudit = [];
+  var admTruncated = null; // {total} when the server returned only part of the list
   var admQuery = "";
   var admBusy = false;
 
@@ -1069,6 +1070,7 @@
       } else {
         admUsers = j.users || [];
         admAudit = j.audit || [];
+        admTruncated = j.truncated ? { total: j.total } : null;
         admStatus("");
       }
       renderAdminList();
@@ -1082,7 +1084,10 @@
     var admins = admUsers.filter(function (u) { return u.role === "Admin"; }).length;
     var count = $("#adm-count");
     if (count) count.textContent = admUsers.length
-      ? admUsers.length + (admUsers.length === 1 ? " account" : " accounts") + " · " + admins + " admin" + (admins === 1 ? "" : "s")
+      ? (admTruncated
+          // Never let a partial list read as the whole list.
+          ? "showing " + admUsers.length + " of " + admTruncated.total + " accounts · " + admins + " admin" + (admins === 1 ? "" : "s") + " here"
+          : admUsers.length + (admUsers.length === 1 ? " account" : " accounts") + " · " + admins + " admin" + (admins === 1 ? "" : "s"))
       : "";
 
     var q = admQuery;

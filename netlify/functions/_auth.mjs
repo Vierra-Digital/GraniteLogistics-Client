@@ -71,14 +71,23 @@ export async function effectiveRoleFor(email, grants) {
   return grantedRole(g, email) || "Customer";
 }
 
-// Every account, without the password material. Used by the admin screen.
-export async function listUsers() {
+// Accounts, without the password material. Used by the admin screen.
+//
+// One read per account, because a name is only in the record. That is fine for an
+// operations team and would not be fine for a large customer base, so it is capped and
+// reports truncation rather than quietly issuing thousands of reads. If this ever needs to
+// scale, the fix is an index record maintained on registration, not a bigger cap.
+export const USER_LIST_LIMIT = 500;
+
+export async function listUsers(limit = USER_LIST_LIMIT) {
   const { blobs } = await userStore().list();
-  const users = await Promise.all((blobs || []).map(async ({ key }) => {
+  const keys = (blobs || []).map((b) => b.key);
+  const page = keys.slice(0, limit);
+  const users = await Promise.all(page.map(async (key) => {
     const u = await userStore().get(key, { type: "json" });
     return u ? { email: u.email || key, name: u.name || "", createdAt: u.createdAt || null } : null;
   }));
-  return users.filter(Boolean);
+  return { users: users.filter(Boolean), total: keys.length, truncated: keys.length > page.length };
 }
 
 export const CORS = {
