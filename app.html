@@ -240,6 +240,14 @@
           <button class="btn block" id="acct-tour" type="button"><span aria-hidden="true">▶</span> Show me how it works</button>
           <button class="btn block" id="acct-support" type="button"><span aria-hidden="true">✉</span> Contact support</button>
         </div>
+        <!-- Only shown with a real server session: there is nothing to export or close in
+             local demo mode. Revealed by renderAccountView(). -->
+        <div class="card" id="acct-data-card" hidden>
+          <div class="card-head"><h2>Your data</h2></div>
+          <p class="muted small">Download everything we hold about you, or close your account for good.</p>
+          <button class="btn block" id="acct-export" type="button"><span aria-hidden="true">⇩</span> Download my data</button>
+          <button class="btn block danger" id="acct-close" type="button">Close my account</button>
+        </div>
         <button class="btn danger block" id="acct-signout" type="button"><span aria-hidden="true">⎋</span> Sign out</button>
         <button class="linkbtn acct-switch" id="acct-switch" type="button">Switch workspace (ops / admin view)</button>
       </section>

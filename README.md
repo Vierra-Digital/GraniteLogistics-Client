@@ -36,7 +36,7 @@ being offline. To exercise the real API, deploy to Netlify or run `netlify dev`.
 npm test
 ```
 
-134 tests, no network and no browser required, in two layers:
+137 tests, no network and no browser required, in two layers:
 
 - **Unit** (`test/functions.test.mjs`) covers the pure logic: workspace merging, id
   allocation, session tokens, tenant and api-key resolution, role assignment, the public
@@ -119,6 +119,7 @@ rejected by `/api/state`, which reads. For a real machine integration set `GL_TE
 | `GET/PUT /api/state` | Bearer token with an ops role, or a `GL_TENANTS` key | An ops client's whole workspace. Every recipient's name, address and phone lives here, so this is the one endpoint with real authorization: a Customer session gets 403, `Viewer` may read but not `PUT`, and the public demo keys are refused. |
 | `GET/POST /api/admin` | Bearer token, Admin only | Role administration. `GET` lists accounts with where each role comes from, plus the recent access history; `POST {email, role}` grants or revokes (`Customer` revokes). Answers `404` to a non-admin so the endpoint does not confirm it exists. Refuses changing your own role, removing the last Admin, editing an env-set role, or granting to an address with no account. Every change is appended to an audit trail, including revocations, which otherwise leave no trace. |
 | `GET/POST/DELETE /api/push` | `GET` none; writes need a Bearer token | Web Push subscriptions. `GET` reports whether push is configured here and returns the public VAPID key, unauthenticated because the client needs it before deciding whether to offer the option. Writes take the account from the verified token, never the body, so a device cannot be registered against someone else's account. |
+| `GET/DELETE /api/account` | Bearer token | The caller's own account. `GET` exports everything held about them, without the password hash. `DELETE` closes the account: credentials, push subscriptions and rate-limit counters go unconditionally, uncollected orders are removed, delivered ones are kept as records with the person scrubbed out. Refused with `409` while a parcel is in flight, because the address is needed to complete the delivery. |
 | `GET/POST /api/carriers` | `GET` none; `POST` needs a writing ops role | `GET` reports which carriers are configured and whether tracking is simulated. `POST` refreshes in-flight packages from the carrier, and answers `503` while no carrier is configured rather than inventing scans. A carrier scan flows into the same notification path an ops push does. |
 | `POST /api/orders` | `x-api-key` | Webhook ingest, single order or `{orders:[...]}`. Write-only, so a demo key here means at worst junk orders, not disclosure. |
 
@@ -245,6 +246,8 @@ also accepts an optional `x-signature` HMAC of the body using `GL_WEBHOOK_SECRET
   JSON backup and restore, and a searchable audit log.
 - Customer status updates on pickup, in transit, out for delivery and delivered, by email
   and by browser push (opt-in per device, from the customer's Account tab).
+- Self-service data rights: a customer can download everything held about them and close
+  their account from **Account > Your data**, without emailing anyone.
 - A readiness report at `/api/health` naming any configuration still missing.
 - One motion system across the app, with a `prefers-reduced-motion` opt-out.
 
@@ -285,6 +288,7 @@ and the notification wiring are already done and tested.
 ## Files
 
 - `index.html`, `landing.css`, `landing.js` public landing
+- `privacy.html`, `terms.html` legal pages, linked from the footer and in the sitemap
 - `app.html`, `styles.css`, `app.js` the app shell and all views
 - `scripts/vapid.mjs` generates a VAPID keypair for push (`npm run vapid`)
 - `netlify/functions/` the API (auth, role administration, push, carriers, customer orders, workspace

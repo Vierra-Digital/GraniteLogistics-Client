@@ -44,7 +44,7 @@ function getStore({ name }) {
   };
 }
 
-let authFn, ordersFn, stateFn, trackFn, healthFn, ingestFn, adminFn, pushFn, carrierFn, sign;
+let authFn, ordersFn, stateFn, trackFn, healthFn, ingestFn, adminFn, pushFn, carrierFn, acctFn, sign;
 // Tokens for the operator-granted ops accounts. /api/state authorizes by role now, not by
 // the public demo key, so these tests have to sign in the way a real ops user does.
 let adminToken, viewerToken;
@@ -67,6 +67,7 @@ before(async () => {
   adminFn = (await import("../netlify/functions/admin.mjs")).default;
   pushFn = (await import("../netlify/functions/push.mjs")).default;
   carrierFn = (await import("../netlify/functions/carriers.mjs")).default;
+  acctFn = (await import("../netlify/functions/account.mjs")).default;
   sign = (await import("../netlify/functions/_auth.mjs")).sign;
 
   adminToken = await register(ADMIN_EMAIL, "pass1234", "Ops Admin");
@@ -461,6 +462,91 @@ test("webhook ingest numbers a batch uniquely and survives a clobber", async () 
   assert.equal(new Set(batchIds).size, 3, "the batch reused an id");
   const allIds = pkgs.map((p) => p.id);
   assert.equal(new Set(allIds).size, allIds.length, "workspace contains duplicate ids");
+});
+
+// ---- account export and closure ----
+
+const acctReq = (init = {}) => new Request("https://x/api/account", {
+  method: init.method || "GET",
+  headers: init.token === null ? {} : { authorization: "Bearer " + init.token },
+});
+
+test("a customer can export everything held about them, minus the password", async () => {
+  const email = "export-me@example.com";
+  const token = await register(email, "pass1234", "Export Me");
+  await ordersFn(asUser(token, { method: "POST", body: { item: "Exported TV", address: "9 Elm St", city: "Dayton", state: "OH" } }));
+
+  const j = await body(await acctFn(acctReq({ token })));
+  assert.equal(j.ok, true);
+  assert.equal(j.account.email, email);
+  assert.equal(j.account.name, "Export Me");
+  assert.equal(j.orders.length, 1);
+  // Their own address is their data and belongs in the export.
+  assert.equal(j.orders[0].customer.address, "9 Elm St");
+
+  // The password must never leave, in any form. Checked as JSON keys rather than as
+  // substrings, because the explanatory note legitimately contains the word "salted".
+  const raw = JSON.stringify(j);
+  ['"salt"', '"hash"', '"pwChangedAt"'].forEach((k) => assert.ok(!raw.includes(k), "export leaked the " + k + " field"));
+  assert.ok(!raw.includes("pass1234"), "export leaked the password itself");
+  assert.deepEqual(Object.keys(j.account).sort(), ["createdAt", "email", "name", "role"]);
+  assert.equal((await acctFn(acctReq({ token: null }))).status, 401);
+});
+
+test("closing an account is refused while a parcel is on the way", async () => {
+  const email = "midflight@example.com";
+  const token = await register(email);
+  const placed = await body(await ordersFn(asUser(token, { method: "POST", body: { item: "Moving parcel" } })));
+
+  // Ops picks it up: now it is in our custody and the address is needed to finish the job.
+  const view = await body(await stateFn(asOps()));
+  view.packages.find((p) => p.id === placed.order.id).status = "InTransit";
+  await stateFn(asOps({ method: "PUT", body: view }));
+
+  const res = await acctFn(acctReq({ method: "DELETE", token }));
+  assert.equal(res.status, 409);
+  const j = await body(res);
+  assert.match(j.error, /on the way/i);
+  assert.equal(j.inFlight[0].id, placed.order.id);
+  // Refused means nothing changed: the account still works.
+  assert.equal((await acctFn(acctReq({ token }))).status, 200);
+});
+
+test("closing an account removes uncollected orders and anonymises delivered ones", async () => {
+  const email = "closeme@example.com";
+  const token = await register(email, "pass1234", "Close Me");
+  const a = await body(await ordersFn(asUser(token, { method: "POST", body: { item: "Not collected yet" } })));
+  const b = await body(await ordersFn(asUser(token, { method: "POST", body: { item: "Already delivered", address: "5 Oak Ave", city: "Dayton", state: "OH", phone: "937-555-0199" } })));
+
+  const view = await body(await stateFn(asOps()));
+  view.packages.find((p) => p.id === b.order.id).status = "Delivered";
+  await stateFn(asOps({ method: "PUT", body: view }));
+
+  const j = await body(await acctFn(acctReq({ method: "DELETE", token })));
+  assert.equal(j.ok, true, JSON.stringify(j));
+  assert.equal(j.ordersRemoved, 1);
+  assert.equal(j.ordersAnonymised, 1);
+
+  const after = await body(await stateFn(asOps()));
+  // The uncollected order is gone entirely.
+  assert.ok(!after.packages.find((p) => p.id === a.order.id), "an uncollected order survived closure");
+  // The delivered one survives as a record, with the person removed.
+  const kept = after.packages.find((p) => p.id === b.order.id);
+  assert.ok(kept, "a delivered shipment record was destroyed");
+  assert.equal(kept.customerEmail, null);
+  assert.equal(kept.customer.address, "");
+  assert.equal(kept.customer.phone, "");
+  assert.deepEqual(kept.photos, {});
+  // The lane is kept, since city and state describe the shipment not the person.
+  assert.equal(kept.customer.city, "Dayton");
+  assert.equal(kept.customer.state, "OH");
+  const raw = JSON.stringify(kept);
+  ["5 Oak Ave", "937-555-0199", email].forEach((s) => assert.ok(!raw.includes(s), "closure left behind " + s));
+
+  // And the credentials are gone: the old session and the old password both stop working.
+  assert.equal((await acctFn(acctReq({ token }))).status, 401);
+  const relogin = await authFn(post({ action: "login", email, pw: "pass1234" }));
+  assert.equal(relogin.status, 401, "a closed account could still sign in");
 });
 
 // ---- carrier tracking ----

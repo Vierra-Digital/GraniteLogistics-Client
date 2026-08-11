@@ -1354,7 +1354,62 @@
     var av = $("#acct-avatar"); if (av) av.textContent = ((u && (u.name || u.email)) || "U").charAt(0).toUpperCase();
     var nm = $("#acct-name"); if (nm) nm.textContent = u ? (u.name || u.email) : "Guest";
     var em = $("#acct-email"); if (em) em.textContent = u ? u.email : "";
+    // Export and closure need the server. In local demo mode there is nothing to act on.
+    var dc = $("#acct-data-card"); if (dc) dc.hidden = !hasServerAuth();
     loadPushInfo();
+  }
+
+  // ---- Data rights ----
+  function exportMyData() {
+    var btn = $("#acct-export");
+    if (btn) { btn.disabled = true; btn.textContent = "Preparing…"; }
+    var done = function () { if (btn) { btn.disabled = false; btn.innerHTML = '<span aria-hidden="true">⇩</span> Download my data'; } };
+    fetch("/api/account", { headers: { "Authorization": "Bearer " + authToken() } })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { j._status = r.status; return j; }); })
+      .then(function (j) {
+        done();
+        if (!j.ok) { toast(j.error || "Couldn't prepare your data.", "warn", 7000); return; }
+        // Downloaded rather than displayed: it contains every address they have shipped to.
+        var blob = new Blob([JSON.stringify(j, null, 2)], { type: "application/json" });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = "granite-logistics-my-data.json";
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+        toast("Your data has been downloaded.", "ok");
+      })
+      .catch(function () { done(); toast("Couldn't reach the server.", "warn"); });
+  }
+
+  function closeMyAccount() {
+    confirmDialog({
+      title: "Close your account?",
+      message: "This deletes your sign-in details and any order we haven't collected yet. " +
+        "Shipments already delivered are kept as records with your name and address removed. This can't be undone.",
+      confirmLabel: "Close my account", danger: true
+    }).then(function (ok) {
+      if (!ok) return;
+      var btn = $("#acct-close");
+      if (btn) { btn.disabled = true; btn.textContent = "Closing…"; }
+      fetch("/api/account", { method: "DELETE", headers: { "Authorization": "Bearer " + authToken() } })
+        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { j._status = r.status; return j; }); })
+        .then(function (j) {
+          if (!j.ok) {
+            if (btn) { btn.disabled = false; btn.textContent = "Close my account"; }
+            // The in-flight case is the one people will hit, so give the reason, not a code.
+            toast(j.error || "Couldn't close your account.", "warn", 10000);
+            return;
+          }
+          toast("Your account is closed. Thanks for using Granite Logistics.", "ok", 6000);
+          // Sign out locally so nothing of theirs is left on this device.
+          setTimeout(function () { logoutUser(); showLogin(); }, 1200);
+        })
+        .catch(function () {
+          if (btn) { btn.disabled = false; btn.textContent = "Close my account"; }
+          toast("Couldn't reach the server. Nothing was changed.", "warn");
+        });
+    });
   }
   function renderOrder() {
     if (typeof resetOrderForm === "function") resetOrderForm();
@@ -2900,6 +2955,10 @@
 
   var searchInput = $("#track-search");
   if (searchInput) searchInput.addEventListener("input", function () { trackQuery = this.value.trim().toLowerCase(); renderTracking(); });
+  var acctExport = $("#acct-export");
+  if (acctExport) acctExport.addEventListener("click", exportMyData);
+  var acctClose = $("#acct-close");
+  if (acctClose) acctClose.addEventListener("click", closeMyAccount);
   var pushOn = $("#acct-push-on");
   if (pushOn) pushOn.addEventListener("click", enablePush);
   var pushOff = $("#acct-push-off");
