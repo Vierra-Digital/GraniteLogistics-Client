@@ -11,6 +11,7 @@
 import { json, tenants } from "./_lib.mjs";
 import { adminEmails, roleMap, readGrants, grantedRole, OPS_ROLES } from "./_auth.mjs";
 import { emailConfigured } from "./_email.mjs";
+import { pushConfigured } from "./_push.mjs";
 
 // An address already counted via env config must not be counted twice.
 const envRoleForCount = (email, admins, named) =>
@@ -37,6 +38,10 @@ async function readiness() {
     opsAccess: { ok: opsUsers > 0, detail: opsUsers > 0 ? opsUsers + " account(s) hold an ops role" : "no ops roles granted; set GL_ADMIN_EMAILS to bootstrap, then use Team & Roles" },
     // Optional: reset links simply report "not set up" without it.
     passwordReset: { ok: emailConfigured(), detail: emailConfigured() ? "configured" : "GL_BREVO_KEY / GL_MAIL_FROM not set; password reset returns a clear error instead of sending" },
+    // Optional: customers simply do not see the opt-in without it.
+    pushNotifications: { ok: pushConfigured(), detail: pushConfigured() ? "configured" : "GL_VAPID_PUBLIC / GL_VAPID_PRIVATE not set; run `npm run vapid` to generate a keypair" },
+    // Customer status updates need at least one channel to actually reach anyone.
+    statusUpdates: { ok: emailConfigured() || pushConfigured(), detail: (emailConfigured() || pushConfigured()) ? "at least one channel configured" : "no email or push configured; transitions are recorded but nothing is delivered" },
     // Optional: only needed for machine callers that read a workspace.
     machineApiKeys: { ok: true, detail: tenants() ? "GL_TENANTS configured; the public demo keys are disabled" : "using the public demo keys, which are valid for /api/orders ingest only" },
   };

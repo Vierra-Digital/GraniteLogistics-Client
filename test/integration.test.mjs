@@ -981,7 +981,8 @@ test("the user list never exposes password material", async () => {
 
 test("health reports what is missing, and leaks no secret values", async () => {
   const saved = { admins: process.env.GL_ADMIN_EMAILS, roles: process.env.GL_ROLES, secret: process.env.GL_AUTH_SECRET, key: process.env.GL_BREVO_KEY, from: process.env.GL_MAIL_FROM, tenants: process.env.GL_TENANTS };
-  const restore = () => Object.entries({ GL_ADMIN_EMAILS: saved.admins, GL_ROLES: saved.roles, GL_AUTH_SECRET: saved.secret, GL_BREVO_KEY: saved.key, GL_MAIL_FROM: saved.from, GL_TENANTS: saved.tenants })
+  saved.vapidPub = process.env.GL_VAPID_PUBLIC; saved.vapidPriv = process.env.GL_VAPID_PRIVATE;
+  const restore = () => Object.entries({ GL_ADMIN_EMAILS: saved.admins, GL_ROLES: saved.roles, GL_AUTH_SECRET: saved.secret, GL_BREVO_KEY: saved.key, GL_MAIL_FROM: saved.from, GL_TENANTS: saved.tenants, GL_VAPID_PUBLIC: saved.vapidPub, GL_VAPID_PRIVATE: saved.vapidPriv })
     .forEach(([k, v]) => { if (v === undefined) delete process.env[k]; else process.env[k] = v; });
 
   const savedGrants = blobs.get(k("granite-roles", "grants"));
@@ -991,12 +992,20 @@ test("health reports what is missing, and leaks no secret values", async () => {
     delete process.env.GL_ADMIN_EMAILS; delete process.env.GL_ROLES;
     delete process.env.GL_AUTH_SECRET; delete process.env.GL_BREVO_KEY;
     delete process.env.GL_MAIL_FROM; delete process.env.GL_TENANTS;
+    delete process.env.GL_VAPID_PUBLIC; delete process.env.GL_VAPID_PRIVATE;
     blobs.delete(k("granite-roles", "grants"));
 
     let j = await body(await healthFn(new Request("https://x/api/health")));
     assert.equal(j.readiness.ready, false);
     assert.deepEqual(j.readiness.blocking.sort(), ["authSecret", "opsAccess"]);
     assert.match(j.readiness.checks.opsAccess.detail, /no ops roles granted/);
+    // With neither email nor push, transitions are recorded but reach nobody. Reported,
+    // but not blocking: the platform still works, customers just hear nothing.
+    assert.equal(j.readiness.checks.statusUpdates.ok, false);
+    assert.match(j.readiness.checks.statusUpdates.detail, /recorded but nothing is delivered/);
+    assert.equal(j.readiness.checks.pushNotifications.ok, false);
+    assert.ok(!j.readiness.blocking.includes("statusUpdates"));
+    assert.ok(!j.readiness.blocking.includes("pushNotifications"));
 
     // A grant made on the Team & Roles screen satisfies ops access on its own, so a
     // deployment bootstrapped from config and then managed in-app stops reporting
@@ -1019,6 +1028,9 @@ test("health reports what is missing, and leaks no secret values", async () => {
     assert.deepEqual(j.readiness.blocking, []);
     // 2 admins + 1 valid named ops role; the bogus role must not be counted.
     assert.match(j.readiness.checks.opsAccess.detail, /^3 account\(s\)/);
+
+    // Configuring a channel satisfies statusUpdates.
+    assert.equal(j.readiness.checks.statusUpdates.ok, true, "email is configured at this point");
 
     // The response must not contain any secret value, or any privileged email.
     const raw = JSON.stringify(j);
