@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server/server.js",
     "test": "node --experimental-test-module-mocks --test test/*.test.mjs",
-    "vapid": "node scripts/vapid.mjs"
+    "vapid": "node scripts/vapid.mjs",
+    "verify:live": "node scripts/verify-live.mjs"
   },
   "dependencies": {
     "@netlify/blobs": "^8.1.0",
