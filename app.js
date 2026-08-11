@@ -313,6 +313,37 @@
   var money = function (n) { return "$" + n.toLocaleString(); };
 
   // ---- Toasts ----
+  // ---- Label association ----
+  //
+  // The form markup is `<div class="ff"><label>Item</label><input ...></div>` throughout.
+  // That looks labelled and reads as labelled to a sighted user, but a <label> with no
+  // `for` and no wrapped control names nothing: a screen reader falls back to the
+  // placeholder, or announces the field with no name at all. 39 of 46 controls were in
+  // that state.
+  //
+  // Done at runtime rather than by editing the markup because a dozen of these blocks are
+  // built by modal() and the various render functions, so static `for=` attributes would
+  // miss exactly the fields that are hardest to fill in blind.
+  var labelSeq = 0;
+  function associateLabels(root) {
+    var scope = root || document;
+    var labels = scope.querySelectorAll ? scope.querySelectorAll("label:not([for])") : [];
+    Array.prototype.forEach.call(labels, function (label) {
+      // A label that already wraps its control is correct as it stands.
+      if (label.querySelector("input, select, textarea")) return;
+      var el = label.nextElementSibling;
+      while (el && !/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) {
+        // Only look past wrappers that hold the control, never into the next field.
+        el = el.querySelector ? el.querySelector("input, select, textarea") : null;
+        break;
+      }
+      if (!el || !/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) return;
+      if (el.type === "hidden") return;
+      if (!el.id) el.id = "f" + (++labelSeq) + "-" + (el.name || "field");
+      label.htmlFor = el.id;
+    });
+  }
+
   var TOAST_ICONS = { api: "⇄", warn: "⚠", ok: "✓" };
   // ms overrides how long it stays up; a warning worth interrupting for needs longer than
   // a routine confirmation.
@@ -835,6 +866,7 @@
     $("#view-title").textContent = VIEW_META[view][0];
     $("#view-sub").textContent = VIEW_META[view][1];
     render(view);
+    associateLabels(target);
     // Entrance animation belongs to navigation, not to rendering. The ops workspace
     // re-renders on every sync (~1.5s), and animating that would make the queue flicker
     // constantly, so the class is added here and dropped once it has played.
@@ -1336,7 +1368,7 @@
         '<span class="es-step-arrow">→</span>' +
         '<div class="es-step"><span class="es-step-ico">✅</span><span>Delivered &amp; tracked</span></div>' +
         '</div>' +
-        '<button class="btn primary" id="try-sample" type="button">✨ Try a sample order</button></div>';
+        '<button class="btn primary" id="try-sample" type="button"><span aria-hidden="true">✨</span> Try a sample order</button></div>';
       var ts = $("#try-sample"); if (ts) ts.addEventListener("click", fillSampleOrder);
       return;
     }
@@ -1662,8 +1694,8 @@
       '<div style="margin:12px 0">' + Code128.toSVG(p.barcode, { height: 80, moduleWidth: 2 }) + '</div>' +
       '<div class="lbl-key">' + p.barcode + '</div></div>' +
       '<div style="margin-top:16px;text-align:center;display:flex;gap:8px;justify-content:center">' +
-      '<button class="btn primary" id="print-label">🖨 Print</button>' +
-      '<button class="btn" id="pdf-label">📄 PDF (server)</button></div>'
+      '<button class="btn primary" id="print-label"><span aria-hidden="true">🖨</span> Print</button>' +
+      '<button class="btn" id="pdf-label"><span aria-hidden="true">📄</span> PDF (server)</button></div>'
     );
     var pb = $("#print-label");
     if (pb) pb.addEventListener("click", function () { printLabel(p); });
@@ -1742,10 +1774,10 @@
         ' <span class="cm-badge" style="background:' + (CARRIER_COLOR[m.carrier] || "#334155") + '">' + m.carrier + '</span>' +
         (m.transmitted ? ' <span class="pill st-Delivered">transmitted</span>' : '') + '</div>' +
         '<div class="ri-sub">' + manifestPkgs(m).length + ' packages · ' + m.lane + ' · ' + fmtTime(m.ts) + '</div></div>' +
-        '<div class="head-actions"><button class="btn sm" data-mprint="' + m.id + '">🖨 Print</button>' +
-        '<button class="btn sm" data-mcsv="' + m.id + '">↓ CSV</button>' +
-        '<button class="btn sm" data-mlabels="' + m.id + '">🏷 Labels PDF</button>' +
-        '<button class="btn sm" data-mxmit="' + m.id + '">⇈ Transmit</button></div></div>';
+        '<div class="head-actions"><button class="btn sm" data-mprint="' + m.id + '"><span aria-hidden="true">🖨</span> Print</button>' +
+        '<button class="btn sm" data-mcsv="' + m.id + '"><span aria-hidden="true">↓</span> CSV</button>' +
+        '<button class="btn sm" data-mlabels="' + m.id + '"><span aria-hidden="true">🏷</span> Labels PDF</button>' +
+        '<button class="btn sm" data-mxmit="' + m.id + '"><span aria-hidden="true">⇈</span> Transmit</button></div></div>';
     }).join("");
     $$("#manifest-list [data-mprint]").forEach(function (b) { b.addEventListener("click", function () { printManifest(b.dataset.mprint); }); });
     $$("#manifest-list [data-mcsv]").forEach(function (b) { b.addEventListener("click", function () { exportManifest(b.dataset.mcsv); }); });
@@ -2239,7 +2271,7 @@
     var ids = Object.keys(trackSelect);
     bar.style.display = "flex";
     bar.innerHTML = '<span class="bulk-count">' + ids.length + ' selected</span>' +
-      '<button class="btn sm" data-bulk="export"' + (ids.length ? '' : ' disabled') + '>↓ Export selected</button>' +
+      '<button class="btn sm" data-bulk="export"' + (ids.length ? '' : ' disabled') + '><span aria-hidden="true">↓</span> Export selected</button>' +
       '<button class="btn sm" data-bulk="clear">Clear</button>';
     var ex = bar.querySelector('[data-bulk="export"]'); if (ex) ex.addEventListener("click", exportSelected);
     var cl = bar.querySelector('[data-bulk="clear"]'); if (cl) cl.addEventListener("click", function () { trackSelect = {}; renderTracking(); });
@@ -2483,14 +2515,14 @@
       '<div class="mono small" style="text-align:center">' + p.barcode + '</div></div>' +
       '</div><div><h2 style="font-size:.95rem;margin-bottom:10px">Chain of Custody</h2>' + tl + photos + '</div></div>' +
       '<div style="margin-top:18px;display:flex;gap:8px;justify-content:flex-end">' +
-      '<button class="btn sm" id="copy-track">🔗 Copy tracking link</button>' +
-      (p.status === "Delivered" && !p.return ? '<button class="btn sm" id="init-return">↩ Initiate Return</button>' : '') +
-      (p.return && p.return.status !== "Received" ? '<button class="btn sm ok" id="adv-return">↩ Advance Return</button>' : '') +
+      '<button class="btn sm" id="copy-track"><span aria-hidden="true">🔗</span> Copy tracking link</button>' +
+      (p.status === "Delivered" && !p.return ? '<button class="btn sm" id="init-return"><span aria-hidden="true">↩</span> Initiate Return</button>' : '') +
+      (p.return && p.return.status !== "Received" ? '<button class="btn sm ok" id="adv-return"><span aria-hidden="true">↩</span> Advance Return</button>' : '') +
       (p.exception
-        ? '<button class="btn sm ok" id="resolve-exc">✓ Resolve Exception</button>'
-        : '<button class="btn sm" id="flag-exc">⚠ Flag Exception</button>') +
-      '<button class="btn sm" id="edit-pkg">✎ Edit</button>' +
-      '<button class="btn sm danger" id="del-pkg">🗑 Delete</button></div>'
+        ? '<button class="btn sm ok" id="resolve-exc"><span aria-hidden="true">✓</span> Resolve Exception</button>'
+        : '<button class="btn sm" id="flag-exc"><span aria-hidden="true">⚠</span> Flag Exception</button>') +
+      '<button class="btn sm" id="edit-pkg"><span aria-hidden="true">✎</span> Edit</button>' +
+      '<button class="btn sm danger" id="del-pkg"><span aria-hidden="true">🗑</span> Delete</button></div>'
     );
     var ed = $("#edit-pkg"); if (ed) ed.addEventListener("click", function () { editPackage(p.id); });
     var dl = $("#del-pkg"); if (dl) dl.addEventListener("click", function () { deletePackage(p.id); });
@@ -2542,7 +2574,7 @@
       (p.tracking ? '<div><dt>Carrier tracking</dt><dd>' + p.tracking + '</dd></div>' : '') +
       '</dl>' +
       '<div class="cust-detail-actions">' +
-      '<button class="btn block" id="cust-copy-link" type="button">🔗 Copy tracking link</button>' +
+      '<button class="btn block" id="cust-copy-link" type="button"><span aria-hidden="true">🔗</span> Copy tracking link</button>' +
       // Cancelling is only offered before anything physical has happened to the parcel.
       (stageIdx(p.status) === 0 && !p.pendingSync
         ? '<button class="btn danger block" id="cust-cancel" type="button">Cancel this order</button>'
@@ -2674,6 +2706,7 @@
 
   function modal(html) {
     $("#modal").innerHTML = html;
+    associateLabels($("#modal"));
     // Cancel any in-flight close, otherwise .closing would still be set and its exit
     // animation would win the cascade over .open, hiding the modal we just opened.
     clearTimeout(modalCloseTimer);
@@ -3123,6 +3156,7 @@
   // Arriving from a password-reset email takes priority over any cached session.
   var bootReset = null;
   try { bootReset = new URLSearchParams(location.search).get("reset"); } catch (e) { }
+  associateLabels(document);
   if (bootReset) {
     showResetForm(bootReset);
   } else if (currentUser()) {
