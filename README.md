@@ -36,7 +36,7 @@ being offline. To exercise the real API, deploy to Netlify or run `netlify dev`.
 npm test
 ```
 
-121 tests, no network and no browser required, in two layers:
+134 tests, no network and no browser required, in two layers:
 
 - **Unit** (`test/functions.test.mjs`) covers the pure logic: workspace merging, id
   allocation, session tokens, tenant and api-key resolution, role assignment, the public
@@ -74,6 +74,8 @@ there is no database to provision.
 | `GL_ROLES` | Optional | JSON map of email to a non-Admin ops role, e.g. `{"dana@co.com":"Runner"}`. Valid roles are `Admin`, `Runner`, `Driver`, `Viewer`. |
 | `GL_VAPID_PUBLIC` | For push notifications | Public half of the VAPID keypair, handed to browsers at subscribe time. Not a secret. Generate with `npm run vapid`. |
 | `GL_VAPID_PRIVATE` | For push notifications | Private half. **A secret** — it signs every push this server sends. Rotating both invalidates every existing subscription; devices re-opt-in and the dead ones are pruned on first refusal. |
+| `GL_UPS_CLIENT_ID` / `GL_UPS_CLIENT_SECRET` | For real UPS tracking | Both required together; one without the other counts as unconfigured. See **Carriers** below — the request layer is not implemented yet. |
+| `GL_FEDEX_CLIENT_ID` / `GL_FEDEX_CLIENT_SECRET` | For real FedEx tracking | As above. |
 | `GL_TENANTS` | Optional | JSON map of api key to tenant, e.g. `{"my-key":"my-tenant"}`. Setting it **replaces** the built-in demo keys rather than adding to them, which switches the public keys off. |
 
 Changing `GL_AUTH_SECRET` invalidates every existing session, which is the correct
@@ -117,6 +119,7 @@ rejected by `/api/state`, which reads. For a real machine integration set `GL_TE
 | `GET/PUT /api/state` | Bearer token with an ops role, or a `GL_TENANTS` key | An ops client's whole workspace. Every recipient's name, address and phone lives here, so this is the one endpoint with real authorization: a Customer session gets 403, `Viewer` may read but not `PUT`, and the public demo keys are refused. |
 | `GET/POST /api/admin` | Bearer token, Admin only | Role administration. `GET` lists accounts with where each role comes from, plus the recent access history; `POST {email, role}` grants or revokes (`Customer` revokes). Answers `404` to a non-admin so the endpoint does not confirm it exists. Refuses changing your own role, removing the last Admin, editing an env-set role, or granting to an address with no account. Every change is appended to an audit trail, including revocations, which otherwise leave no trace. |
 | `GET/POST/DELETE /api/push` | `GET` none; writes need a Bearer token | Web Push subscriptions. `GET` reports whether push is configured here and returns the public VAPID key, unauthenticated because the client needs it before deciding whether to offer the option. Writes take the account from the verified token, never the body, so a device cannot be registered against someone else's account. |
+| `GET/POST /api/carriers` | `GET` none; `POST` needs a writing ops role | `GET` reports which carriers are configured and whether tracking is simulated. `POST` refreshes in-flight packages from the carrier, and answers `503` while no carrier is configured rather than inventing scans. A carrier scan flows into the same notification path an ops push does. |
 | `POST /api/orders` | `x-api-key` | Webhook ingest, single order or `{orders:[...]}`. Write-only, so a demo key here means at worst junk orders, not disclosure. |
 
 Passwords are salted and scrypt-hashed. Sessions are HMAC-signed, stateless, and carry
@@ -247,18 +250,44 @@ also accepts an optional `x-signature` HMAC of the body using `GL_WEBHOOK_SECRET
 
 ## What is still simulated
 
-Carrier (UPS/FedEx) and e-commerce calls are mocked, so tracking numbers and carrier scans
-are generated locally rather than fetched, and there are no payments. Both need a commercial
-account before they can be real.
+There are no payments. Carrier tracking numbers and scans are still generated locally: see
+**Carriers** below for exactly what is and is not in place.
 
 Everything else is real, including customer status updates by **email and browser push**.
+
+## Carriers
+
+`netlify/functions/_carriers.mjs` is the seam where UPS or FedEx plugs in. What is there:
+
+- **Config detection.** A carrier counts as configured only when both of its credentials are
+  set, so a half-filled pair cannot look ready. `/api/carriers` and `/api/health` both report
+  it, and the app says "generated locally" rather than implying a tracking number means
+  something to a carrier.
+- **Status mapping.** Each carrier's top-level codes map onto this app's seven stages. An
+  unrecognised code maps to `null` and changes nothing, so the table is safe to extend
+  without risking a wrong status.
+- **A forward-only guard.** Carriers repeat and reorder scans; a late facility scan arriving
+  after delivery must not un-deliver a parcel. `isForwardStep` refuses any backwards move.
+- **A canonical scan shape**, so nothing downstream ever parses carrier JSON.
+- **The simulated behaviour**, named rather than scattered through the client.
+
+What is **not** there, deliberately: the HTTP calls. Both carriers use OAuth2 REST APIs whose
+request and response shapes cannot be verified without sandbox credentials, and code written
+from memory against an API nobody has exercised is worse than an honest gap, because it looks
+finished. `fetchScans` returns `not-configured` without credentials and **throws** with a
+configured carrier, naming the file to implement. `/api/carriers` records that per package and
+reports it, so the gap is loud and located.
+
+To finish it: get sandbox credentials, implement `fetchScans` for one carrier returning scans
+through `normalizeScan()`, and verify against that sandbox. The mapping, the ordering guard
+and the notification wiring are already done and tested.
 
 ## Files
 
 - `index.html`, `landing.css`, `landing.js` public landing
 - `app.html`, `styles.css`, `app.js` the app shell and all views
 - `scripts/vapid.mjs` generates a VAPID keypair for push (`npm run vapid`)
-- `netlify/functions/` the API (auth, role administration, push, customer orders, workspace
+- `netlify/functions/` the API (auth, role administration, push, carriers, customer orders, workspace
   state, ingest, public tracking, health)
 - `test/` regression tests for the function logic
 - `barcode.js` pure-JS Code 128 (Set B) to SVG

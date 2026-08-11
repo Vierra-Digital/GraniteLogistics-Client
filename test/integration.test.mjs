@@ -44,7 +44,7 @@ function getStore({ name }) {
   };
 }
 
-let authFn, ordersFn, stateFn, trackFn, healthFn, ingestFn, adminFn, pushFn, sign;
+let authFn, ordersFn, stateFn, trackFn, healthFn, ingestFn, adminFn, pushFn, carrierFn, sign;
 // Tokens for the operator-granted ops accounts. /api/state authorizes by role now, not by
 // the public demo key, so these tests have to sign in the way a real ops user does.
 let adminToken, viewerToken;
@@ -66,6 +66,7 @@ before(async () => {
   ingestFn = (await import("../netlify/functions/orders.mjs")).default;
   adminFn = (await import("../netlify/functions/admin.mjs")).default;
   pushFn = (await import("../netlify/functions/push.mjs")).default;
+  carrierFn = (await import("../netlify/functions/carriers.mjs")).default;
   sign = (await import("../netlify/functions/_auth.mjs")).sign;
 
   adminToken = await register(ADMIN_EMAIL, "pass1234", "Ops Admin");
@@ -460,6 +461,70 @@ test("webhook ingest numbers a batch uniquely and survives a clobber", async () 
   assert.equal(new Set(batchIds).size, 3, "the batch reused an id");
   const allIds = pkgs.map((p) => p.id);
   assert.equal(new Set(allIds).size, allIds.length, "workspace contains duplicate ids");
+});
+
+// ---- carrier tracking ----
+
+const carrierReq = (init = {}) => new Request("https://x/api/carriers", {
+  method: init.method || "GET",
+  headers: init.token === null ? {} : { authorization: "Bearer " + (init.token || adminToken) },
+});
+
+test("carrier status is public and says plainly that tracking is simulated", async () => {
+  // Unauthenticated on purpose: the ops UI needs this to decide whether to label its
+  // tracking numbers as real, before anyone is signed in.
+  const j = await body(await carrierFn(carrierReq({ token: null })));
+  assert.equal(j.ok, true);
+  assert.deepEqual(j.configured, []);
+  assert.equal(j.simulated, true);
+  assert.match(j.detail, /generated locally/);
+});
+
+test("refreshing carrier tracking needs a writing ops role", async () => {
+  const customer = await register("carrier-nosy@example.com");
+  assert.equal((await carrierFn(carrierReq({ method: "POST", token: customer }))).status, 403);
+  // Viewer is an ops role but read-only, and this writes the workspace.
+  assert.equal((await carrierFn(carrierReq({ method: "POST", token: viewerToken }))).status, 403);
+  assert.equal((await carrierFn(carrierReq({ method: "POST", token: null }))).status, 401);
+});
+
+test("with no carrier configured, a refresh reports that instead of inventing scans", async () => {
+  const res = await carrierFn(carrierReq({ method: "POST" }));
+  assert.equal(res.status, 503);
+  const j = await body(res);
+  assert.equal(j.ok, false);
+  assert.equal(j.reason, "not-configured");
+  assert.equal(j.refreshed, 0);
+  assert.match(j.error, /generated locally/);
+});
+
+test("a configured but unimplemented carrier fails loudly, per package", async () => {
+  // The request layer is deliberately not written. That must surface as a located error,
+  // not as a silent no-op that looks like everything is fine.
+  const saved = [process.env.GL_UPS_CLIENT_ID, process.env.GL_UPS_CLIENT_SECRET];
+  process.env.GL_UPS_CLIENT_ID = "id"; process.env.GL_UPS_CLIENT_SECRET = "secret";
+  try {
+    // Put an in-flight UPS parcel in the workspace.
+    const view = await body(await stateFn(asOps()));
+    view.packages.push({
+      id: "GL-9500", status: "InTransit", carrier: "UPS", tracking: "1Z999AA10123456784",
+      item: { description: "Carrier probe" }, customer: { name: "N" }, history: [], photos: {},
+    });
+    await stateFn(asOps({ method: "PUT", body: view }));
+
+    const j = await body(await carrierFn(carrierReq({ method: "POST" })));
+    assert.equal(j.ok, false, "an unimplemented carrier reported success");
+    assert.ok(j.checked >= 1, "the in-flight parcel was not even attempted");
+    assert.equal(j.moved, 0);
+    const failure = j.failures.find((f) => f.id === "GL-9500");
+    assert.ok(failure, "no failure recorded for the probe package: " + JSON.stringify(j.failures));
+    assert.match(failure.error, /not implemented/i);
+    // The error has to say where to implement it.
+    assert.match(failure.error, /_carriers\.mjs/);
+  } finally {
+    if (saved[0] === undefined) delete process.env.GL_UPS_CLIENT_ID; else process.env.GL_UPS_CLIENT_ID = saved[0];
+    if (saved[1] === undefined) delete process.env.GL_UPS_CLIENT_SECRET; else process.env.GL_UPS_CLIENT_SECRET = saved[1];
+  }
 });
 
 // ---- credential throttling ----

@@ -12,6 +12,7 @@ import { json, tenants } from "./_lib.mjs";
 import { adminEmails, roleMap, readGrants, grantedRole, OPS_ROLES } from "./_auth.mjs";
 import { emailConfigured } from "./_email.mjs";
 import { pushConfigured } from "./_push.mjs";
+import { configuredCarriers } from "./_carriers.mjs";
 
 // An address already counted via env config must not be counted twice.
 const envRoleForCount = (email, admins, named) =>
@@ -42,6 +43,11 @@ async function readiness() {
     pushNotifications: { ok: pushConfigured(), detail: pushConfigured() ? "configured" : "GL_VAPID_PUBLIC / GL_VAPID_PRIVATE not set; run `npm run vapid` to generate a keypair" },
     // Customer status updates need at least one channel to actually reach anyone.
     statusUpdates: { ok: emailConfigured() || pushConfigured(), detail: (emailConfigured() || pushConfigured()) ? "at least one channel configured" : "no email or push configured; transitions are recorded but nothing is delivered" },
+    // Optional, but the difference between a demo and a shipment somebody is waiting on.
+    carrierTracking: (() => {
+      const live = configuredCarriers();
+      return { ok: live.length > 0, detail: live.length ? live.join(", ") + " configured" : "no carrier credentials; tracking numbers and scans are generated locally" };
+    })(),
     // Optional: only needed for machine callers that read a workspace.
     machineApiKeys: { ok: true, detail: tenants() ? "GL_TENANTS configured; the public demo keys are disabled" : "using the public demo keys, which are valid for /api/orders ingest only" },
   };

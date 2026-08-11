@@ -13,6 +13,8 @@ import { sign, verifyToken, bearer, sessionSuperseded } from "../netlify/functio
 import { emailConfigured, sendEmail, resetEmail, parseSender, statusEmail } from "../netlify/functions/_email.mjs";
 import { detectStatusChanges, unannounced, isNotifiable, NOTIFY_STAGES, pruneAnnounced, ANNOUNCED_LIMIT } from "../netlify/functions/_notify.mjs";
 import { evaluate, afterFailure, LOGIN_LIMITS, RESET_LIMITS } from "../netlify/functions/_throttle.mjs";
+import { carrierConfigured, configuredCarriers, mapCarrierStatus, isException, isForwardStep,
+         normalizeScan, applyScans, fetchScans, simulatedTracking } from "../netlify/functions/_carriers.mjs";
 
 const opsPkg = (id, status = "Won") => ({ id, status });
 const custPkg = (id, status = "Won", email = "jane@x.com") => ({ id, status, customerEmail: email });
@@ -212,6 +214,135 @@ test("envRoleFor grants Customer unless the operator config says otherwise", () 
     if (saved[0] === undefined) delete process.env.GL_ADMIN_EMAILS; else process.env.GL_ADMIN_EMAILS = saved[0];
     if (saved[1] === undefined) delete process.env.GL_ROLES; else process.env.GL_ROLES = saved[1];
   }
+});
+
+// ---------------------------------------------------------------------------
+// Carrier seam. The HTTP layer is deliberately unimplemented, so what is tested is
+// the part that exists: config detection, status mapping, and the guarantee that a
+// carrier can never drag a parcel backwards.
+// ---------------------------------------------------------------------------
+test("carriers report as unconfigured until their credentials are set", () => {
+  const saved = [process.env.GL_UPS_CLIENT_ID, process.env.GL_UPS_CLIENT_SECRET];
+  delete process.env.GL_UPS_CLIENT_ID; delete process.env.GL_UPS_CLIENT_SECRET;
+  try {
+    assert.equal(carrierConfigured("UPS"), false);
+    // Half-configured is not configured: one key without the other cannot authenticate.
+    process.env.GL_UPS_CLIENT_ID = "id-only";
+    assert.equal(carrierConfigured("UPS"), false, "a partial credential set read as configured");
+    process.env.GL_UPS_CLIENT_SECRET = "secret";
+    assert.equal(carrierConfigured("UPS"), true);
+    assert.ok(configuredCarriers().includes("UPS"));
+    assert.equal(carrierConfigured("Pigeon"), false);
+  } finally {
+    if (saved[0] === undefined) delete process.env.GL_UPS_CLIENT_ID; else process.env.GL_UPS_CLIENT_ID = saved[0];
+    if (saved[1] === undefined) delete process.env.GL_UPS_CLIENT_SECRET; else process.env.GL_UPS_CLIENT_SECRET = saved[1];
+  }
+});
+
+test("carrier status codes map onto this app's stages", () => {
+  assert.equal(mapCarrierStatus("UPS", "I"), "InTransit");
+  assert.equal(mapCarrierStatus("UPS", "D"), "Delivered");
+  assert.equal(mapCarrierStatus("UPS", "O"), "OutforDelivery");
+  assert.equal(mapCarrierStatus("FedEx", "DL"), "Delivered");
+  assert.equal(mapCarrierStatus("FedEx", "OD"), "OutforDelivery");
+  // A facility arrival or departure still means in transit.
+  assert.equal(mapCarrierStatus("FedEx", "AR"), "InTransit");
+  assert.equal(mapCarrierStatus("FedEx", "DP"), "InTransit");
+  // Case and whitespace come from a wire format, not a keyboard.
+  assert.equal(mapCarrierStatus("FedEx", " dl "), "Delivered");
+});
+
+test("an unknown or non-stage code changes nothing", () => {
+  // This is what makes the table safe to write before it can be tested against a sandbox:
+  // anything unrecognised is inert rather than wrong.
+  ["ZZ", "", null, undefined, "42"].forEach((c) =>
+    assert.equal(mapCarrierStatus("UPS", c), null, "code " + JSON.stringify(c) + " produced a stage"));
+  assert.equal(mapCarrierStatus("Pigeon", "I"), null);
+  // Label-created and cancelled are real codes that correspond to no stage here.
+  assert.equal(mapCarrierStatus("UPS", "M"), null);
+  assert.equal(mapCarrierStatus("FedEx", "OC"), null);
+  assert.equal(mapCarrierStatus("FedEx", "CA"), null);
+});
+
+test("exceptions are flagged, not treated as a stage", () => {
+  assert.equal(isException("UPS", "X"), true);
+  assert.equal(isException("FedEx", "DE"), true);
+  assert.equal(isException("UPS", "I"), false);
+  // An exception must not also move the parcel.
+  assert.equal(mapCarrierStatus("UPS", "X"), null);
+});
+
+test("a carrier can never drag a parcel backwards", () => {
+  // Carriers repeat and reorder scans, and a late facility scan arriving after delivery
+  // must not un-deliver the parcel.
+  assert.equal(isForwardStep("InTransit", "Delivered"), true);
+  assert.equal(isForwardStep("Delivered", "InTransit"), false);
+  assert.equal(isForwardStep("InTransit", "InTransit"), false);
+  assert.equal(isForwardStep("Won", "PickedUp"), true);
+  assert.equal(isForwardStep("InTransit", null), false);
+  assert.equal(isForwardStep("InTransit", "Nonsense"), false);
+  // An unknown current status should not block a legitimate first scan.
+  assert.equal(isForwardStep("???", "InTransit"), true);
+});
+
+test("applyScans takes the furthest forward scan and reports exceptions", () => {
+  const pkg = { status: "PickedUp" };
+  const scan = (code, carrier = "FedEx") => normalizeScan(carrier, { status: code });
+
+  // Out of order on purpose: the result must be the furthest along, not the last seen.
+  const r = applyScans(pkg, [scan("DL"), scan("AR"), scan("OD")]);
+  assert.equal(r.stage, "Delivered");
+  assert.equal(r.exception, false);
+  assert.equal(r.changed, true);
+
+  // Nothing forward means no change at all.
+  const none = applyScans({ status: "Delivered" }, [scan("AR"), scan("IT")]);
+  assert.equal(none.stage, null);
+  assert.equal(none.changed, false);
+
+  // An exception is reported even when the parcel did not move.
+  const exc = applyScans({ status: "InTransit" }, [scan("DE")]);
+  assert.equal(exc.stage, null);
+  assert.equal(exc.exception, true);
+  assert.equal(exc.changed, true);
+
+  assert.equal(applyScans(pkg, []).changed, false);
+  assert.equal(applyScans(pkg, null).changed, false);
+});
+
+test("normalizeScan hides carrier-specific field names", () => {
+  const s = normalizeScan("UPS", { status: "I", date: "2026-08-11T10:00:00Z", location: "Columbus, OH", description: "Departed" });
+  assert.deepEqual(s, {
+    carrier: "UPS", code: "I", stage: "InTransit", exception: false,
+    at: "2026-08-11T10:00:00Z", where: "Columbus, OH", note: "Departed",
+  });
+  // Missing fields become null rather than undefined, so the shape is stable.
+  const bare = normalizeScan("FedEx", {});
+  assert.equal(bare.code, null);
+  assert.equal(bare.stage, null);
+  assert.equal(bare.at, null);
+});
+
+test("fetchScans refuses rather than inventing scans", async () => {
+  const saved = [process.env.GL_UPS_CLIENT_ID, process.env.GL_UPS_CLIENT_SECRET];
+  delete process.env.GL_UPS_CLIENT_ID; delete process.env.GL_UPS_CLIENT_SECRET;
+  try {
+    assert.deepEqual(await fetchScans("Pigeon", "X"), { ok: false, reason: "unknown-carrier", carrier: "Pigeon" });
+    assert.deepEqual(await fetchScans("UPS", "1Z999"), { ok: false, reason: "not-configured", carrier: "UPS" });
+
+    // Configured but unimplemented must be loud, so nobody ships believing it works.
+    process.env.GL_UPS_CLIENT_ID = "id"; process.env.GL_UPS_CLIENT_SECRET = "secret";
+    await assert.rejects(() => fetchScans("UPS", "1Z999"), /not implemented/i);
+  } finally {
+    if (saved[0] === undefined) delete process.env.GL_UPS_CLIENT_ID; else process.env.GL_UPS_CLIENT_ID = saved[0];
+    if (saved[1] === undefined) delete process.env.GL_UPS_CLIENT_SECRET; else process.env.GL_UPS_CLIENT_SECRET = saved[1];
+  }
+});
+
+test("simulated tracking numbers look like each carrier's format", () => {
+  assert.match(simulatedTracking("UPS"), /^1Z/);
+  assert.match(simulatedTracking("FedEx"), /^\d{4} \d{4} \d{4}$/);
+  assert.match(simulatedTracking("Dayton Freight"), /^PRO-/);
 });
 
 // ---------------------------------------------------------------------------
