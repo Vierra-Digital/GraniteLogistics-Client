@@ -1193,6 +1193,19 @@ test("health reports what is missing, and leaks no secret values", async () => {
     // Configuring a channel satisfies statusUpdates.
     assert.equal(j.readiness.checks.statusUpdates.ok, true, "email is configured at this point");
 
+    // The env diagnostic must name variables, never reveal their contents.
+    assert.ok(j.env.present.includes("GL_AUTH_SECRET"));
+    assert.ok(j.env.present.includes("GL_ADMIN_EMAILS"));
+    assert.ok(j.env.missing.includes("GL_UPS_CLIENT_ID"));
+    // A misspelled variable is the thing this exists to catch.
+    process.env.GL_ADMIN_EMAIL = "typo@example.com";       // singular: read by nothing
+    try {
+      const t = await body(await healthFn(new Request("https://x/api/health")));
+      assert.ok(t.env.unrecognised.includes("GL_ADMIN_EMAIL"), "a misspelled variable was not flagged");
+      assert.match(t.env.hint, /spelling/i);
+      assert.ok(!JSON.stringify(t.env).includes("typo@example.com"), "the diagnostic leaked a value");
+    } finally { delete process.env.GL_ADMIN_EMAIL; }
+
     // The response must not contain any secret value, or any privileged email.
     const raw = JSON.stringify(j);
     ["s3cr3t-value-must-not-appear", "xkeysib-must-not-appear", "tenant-key-must-not-appear",

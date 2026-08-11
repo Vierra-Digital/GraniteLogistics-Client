@@ -18,6 +18,34 @@ import { configuredCarriers } from "./_carriers.mjs";
 const envRoleForCount = (email, admins, named) =>
   (admins.includes(email) || OPS_ROLES.includes(named[email])) ? 1 : 0;
 
+// Every variable this app reads. Used to tell "you have not set it" apart from "you set
+// something close to it", which is otherwise indistinguishable from the outside and is the
+// single most likely reason a correctly-set variable appears missing.
+const KNOWN_VARS = [
+  "GL_AUTH_SECRET", "GL_ADMIN_EMAILS", "GL_ROLES", "GL_TENANTS",
+  "GL_BREVO_KEY", "GL_MAIL_FROM", "GL_VAPID_PUBLIC", "GL_VAPID_PRIVATE",
+  "GL_UPS_CLIENT_ID", "GL_UPS_CLIENT_SECRET", "GL_FEDEX_CLIENT_ID", "GL_FEDEX_CLIENT_SECRET",
+  "GL_WEBHOOK_SECRET", "GL_CHROME",
+];
+
+// Names only, never values. A name is not a secret, and without this a misspelled or
+// wrongly-scoped variable looks exactly like an unset one.
+function envDiagnostic() {
+  const present = KNOWN_VARS.filter((k) => !!process.env[k]);
+  const unrecognised = Object.keys(process.env)
+    .filter((k) => /^GL_/.test(k) && KNOWN_VARS.indexOf(k) < 0)
+    .sort();
+  return {
+    present,
+    missing: KNOWN_VARS.filter((k) => !process.env[k]),
+    // Anything here is set on the deployment but read by nothing: almost always a typo.
+    unrecognised,
+    hint: unrecognised.length
+      ? "These GL_ variables are set but this app reads none of them. Check the spelling against `present` and `missing`."
+      : "No unrecognised GL_ variables. A variable in `missing` is genuinely not visible to the deployed functions: confirm it is set for the Production context and that a deploy has happened since.",
+  };
+}
+
 async function readiness() {
   const admins = adminEmails();
   const named = roleMap();
@@ -65,6 +93,7 @@ export default async () =>
     storage: "netlify-blobs",
     time: new Date().toISOString(),
     readiness: await readiness(),
+    env: envDiagnostic(),
   });
 
 export const config = { path: "/api/health" };
