@@ -488,6 +488,13 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 /* Counts and captions sit next to a flexible search box. Without this they shrink below
    their own text width and break mid-phrase -- "6 events" stacked as "6" over "events". */
 .head-actions > .muted{flex:none;white-space:nowrap}
+/* A head-actions that holds a search box is content-sized by default, so the input settled
+   at its 130px flex-basis and clipped its own placeholder ("Search id, customer, cit").
+   Let those -- and only those -- claim the leftover room; button-only heads keep sitting
+   flush right where space-between puts them. */
+.card-head .head-actions:has(.search-input){flex:1 1 auto;justify-content:flex-end}
+/* ...but capped, so a wide card does not hand a 900px search box to a six-row list. */
+.card-head .search-input{max-width:340px}
 .row-item{flex-wrap:wrap}
 .search-input{min-width:0}
 .card-head .search-input{flex:1 1 200px}
