@@ -11,7 +11,7 @@
 // so a screen that needs a signed-in customer or an operator gets one without touching a
 // real account.
 import puppeteer from "puppeteer";
-import { mkdirSync, existsSync } from "node:fs";
+import { mkdirSync, existsSync, rmSync } from "node:fs";
 
 const BASE = process.env.GL_BASE || "http://localhost:8080";
 const OUT = "shots";
@@ -151,6 +151,7 @@ Start the site first, then run this again:
   process.exit(2);
 }
 
+const failed = [];
 const browser = await launch();
 console.log("Rendering " + SHOTS.length + " screens from " + BASE + " into " + OUT + "/\n");
 
@@ -192,12 +193,21 @@ for (const shot of SHOTS) {
     });
   }
 
-  const resp = await page.goto(BASE + shot.url, { waitUntil: "networkidle2", timeout: 30000 }).catch((e) => {
-    console.error("  " + shot.name + ": navigation failed - " + e.message);
-    return null;
-  });
+  // python -m http.server is single-threaded and drops the occasional connection when a
+  // page opens several requests at once, so a shot fails maybe one run in ten. Retry
+  // before giving up -- silently skipping left the PREVIOUS run's PNG on disk, which looks
+  // exactly like a fresh one and quietly invalidates whatever the screenshot was meant to
+  // prove.
+  let resp = null;
+  for (let attempt = 1; attempt <= 3 && !(resp && resp.ok()); attempt++) {
+    resp = await page.goto(BASE + shot.url, { waitUntil: "load", timeout: 30000 }).catch(() => null);
+    if (!(resp && resp.ok()) && attempt < 3) await new Promise((r) => setTimeout(r, 400));
+  }
   if (!resp || !resp.ok()) {
-    console.error("  " + shot.name + ": skipped, " + shot.url + " did not load");
+    // Remove the stale file so a failure can never be mistaken for a current render.
+    rmSync(OUT + "/" + shot.name + ".png", { force: true });
+    console.error("  " + shot.name + ": FAILED after 3 attempts, " + shot.url + " did not load (stale PNG deleted)");
+    failed.push(shot.name);
     await page.close();
     continue;
   }
@@ -217,4 +227,12 @@ for (const shot of SHOTS) {
 }
 
 await browser.close();
-console.log("\nDone. Open the files in " + OUT + "/\n");
+
+// Exit non-zero on any failure. A run that reports success while a screen is missing
+// invites reviewing a screenshot that was never taken.
+if (failed.length) {
+  console.error("\n" + failed.length + " of " + SHOTS.length + " screens FAILED: " + failed.join(", "));
+  console.error("Re-run to retry. Do not trust shots/ until this is clean.\n");
+  process.exit(1);
+}
+console.log("\nAll " + SHOTS.length + " screens rendered into " + OUT + "/\n");

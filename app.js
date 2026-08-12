@@ -2380,7 +2380,7 @@
     $("#scan-select").innerHTML = scannable.map(function (p) {
       return '<option value="' + p.id + '">' + p.id + " · " + p.item.description + " (" + stageLabelFor(p) + ")</option>";
     }).join("") || '<option value="">No packages staged</option>';
-    $("#scan-result").innerHTML = '<p class="muted">Scan a label to retrieve package details.</p>';
+    $("#scan-result").innerHTML = '<div class="empty-state"><div class="es-ico" aria-hidden="true">◎</div><b>No label scanned</b><span>Scan a Code&nbsp;128 label, or pick a parcel from the list to simulate one. Destination details appear here.</span></div>';
   }
   function processScan(id) {
     if (!id) return;
