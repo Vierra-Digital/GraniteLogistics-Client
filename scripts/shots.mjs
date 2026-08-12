@@ -129,6 +129,9 @@ const SHOTS = [
   // Empty states: what a brand-new account and a brand-new workspace actually look like.
   { name: "20-customer-empty-phone", url: "/app.html", viewport: PHONE, seed: emptyCustomerSeed(), view: "custhome" },
   { name: "21-ops-empty-desktop", url: "/app.html", viewport: DESK, seed: emptyOpsSeed(), view: "runner" },
+  // The demo workspace carries the connector source names, so this is the only shot that
+  // exercises a source actually receiving orders rather than sitting idle.
+  { name: "22-ops-ingest-receiving-desktop", url: "/app.html", viewport: DESK, seed: emptyOpsSeed(), view: "ingest" },
 ];
 
 if (!existsSync(OUT)) mkdirSync(OUT);

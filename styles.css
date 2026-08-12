@@ -305,7 +305,10 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .connector{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:8px}
 .connector .c-top{display:flex;justify-content:space-between;align-items:center}
 .connector .c-name{font-weight:700}
-.connector .c-status{font-size:.76rem;font-weight:700;color:var(--emerald);display:flex;align-items:center;gap:6px}
+.connector .c-status{font-size:.76rem;font-weight:700;color:var(--emerald);display:flex;align-items:center;gap:6px;white-space:nowrap}
+/* A source with nothing coming in is not an error, so it reads as muted, not amber-alarming. */
+.connector .c-status.c-idle{color:var(--slate-500);font-weight:600}
+.connector .c-status.c-idle .dot{background:var(--slate-400)}
 .connector .c-meta{font-size:.8rem;color:var(--slate-500)}
 .ingest-feed{display:flex;flex-direction:column;gap:10px}
 .ingest-item{border:1px solid var(--line);border-radius:11px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;gap:12px;animation:fade .3s}

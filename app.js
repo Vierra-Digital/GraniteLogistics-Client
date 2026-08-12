@@ -1767,11 +1767,17 @@
   function renderIngest() {
     var bySource = {};
     state.packages.forEach(function (p) { bySource[p.source] = (bySource[p.source] || 0) + 1; });
+    // Every source posts through the same /api/orders endpoint, which is real. What does
+    // not exist is a per-store OAuth app, so a hard-coded "Connected" plus "OAuth 2.0"
+    // claimed three live integrations we have not built. Report what actually happened:
+    // a source is receiving once orders have arrived from it, and idle until then.
     $("#connectors").innerHTML = SOURCES.map(function (s) {
+      var n = bySource[s] || 0;
       return '<div class="connector"><div class="c-top"><span class="c-name">' + s +
-        '</span><span class="c-status"><span class="dot ok"></span> Connected</span></div>' +
-        '<div class="c-meta">OAuth 2.0 · webhook: orders/create</div>' +
-        '<div class="c-meta"><b>' + (bySource[s] || 0) + '</b> orders ingested</div></div>';
+        '</span><span class="c-status' + (n ? '' : ' c-idle') + '"><span class="dot' + (n ? ' ok' : '') + '"></span> ' +
+        (n ? 'Receiving' : 'No orders yet') + '</span></div>' +
+        '<div class="c-meta">Posts to /api/orders with an API key</div>' +
+        '<div class="c-meta"><b>' + n + '</b> ' + (n === 1 ? 'order' : 'orders') + ' ingested</div></div>';
     }).join("");
     renderFeed();
     var wc = $("#webhook-curl");
