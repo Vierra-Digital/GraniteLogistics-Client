@@ -228,7 +228,9 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 /* Funnel */
 .funnel{display:flex;flex-direction:column;gap:9px}
 .funnel-row{display:grid;grid-template-columns:150px 1fr 38px;align-items:center;gap:10px;font-size:.85rem}
-.funnel-bar{height:22px;border-radius:7px;background:linear-gradient(90deg,#2f9bd6,#10b981);min-width:6px}
+/* No min-width: a zero value must draw nothing. renderReports() already floors non-zero
+   bars at 4% of the track, which is wider than 6px at every viewport we support. */
+.funnel-bar{height:22px;border-radius:7px;background:linear-gradient(90deg,#2f9bd6,#10b981)}
 .funnel-row .fn{font-weight:600}
 
 /* Carrier mix */
@@ -480,6 +482,9 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .card-head{flex-wrap:wrap}
 .head-actions{flex-wrap:nowrap;align-items:center;min-width:0}
 .head-actions .search-input{flex:1 1 130px;min-width:0}
+/* Counts and captions sit next to a flexible search box. Without this they shrink below
+   their own text width and break mid-phrase -- "6 events" stacked as "6" over "events". */
+.head-actions > .muted{flex:none;white-space:nowrap}
 .row-item{flex-wrap:wrap}
 .search-input{min-width:0}
 .card-head .search-input{flex:1 1 200px}

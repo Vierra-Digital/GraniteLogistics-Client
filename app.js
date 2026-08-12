@@ -311,6 +311,8 @@
   var fmtTime = function (ts) { return new Date(ts).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); };
   var pillClass = function (st) { return "pill st-" + st.replace(/\s/g, ""); };
   var money = function (n) { return "$" + n.toLocaleString(); };
+  // "1 package", not "1 packages". Every count shown in the UI goes through this.
+  var plural = function (n, one, many) { return n + " " + (n === 1 ? one : (many || one + "s")); };
 
   // ---- Toasts ----
   // ---- Label association ----
@@ -398,16 +400,16 @@
     account: ["Account", "Your profile and sign-out."],
     order: ["Place an Order", "Create a new shipment and track it from pickup to delivery."],
     overview: ["Executive Overview", "Real-time visibility from auction win to delivery confirmation."],
-    ingest: ["Order Ingest", "Orders pulled directly from client commerce backends. Zero manual entry."],
-    runner: ["Runner Dashboard", "Daily pickups, condition photos, and label generation."],
-    presort: ["Pre-Sort & Staging", "ZIP pre-sort and load-ready consolidation before carrier handoff."],
-    batch: ["Batch & Lane Routing", "Group items into carrier manifests and assign dock lanes."],
+    ingest: ["Order Ingest", "Orders arrive automatically from client commerce backends — or add them manually or by CSV."],
+    runner: ["Runner Dashboard", "Daily pickups, condition photos, and Code 128 label generation."],
+    presort: ["Pre-Sort & Staging", "Pre-sort by ZIP to bypass initial hub handling, then build load-ready units."],
+    batch: ["Batch & Manifests", "Group picked-up items into a carrier manifest and assign a dock lane."],
     driver: ["Driver Scan", "Scan a label to retrieve destination details instantly."],
     home: ["Home", "Your tasks at a glance."],
-    tracking: ["Chain of Custody", "Tamper-evident, end-to-end package history."],
-    returns: ["Returns", "Reverse logistics: manage return requests through to receipt."],
+    tracking: ["Chain of Custody", "Every custody handoff for every package, timestamped end to end."],
+    returns: ["Returns", "Reverse logistics: return requests from initiation through to receipt."],
     reports: ["Reports & Analytics", "Operational metrics computed from your live data."],
-    activity: ["Activity Log", "Tamper-evident audit trail of every event, newest first."],
+    activity: ["Activity Log", "Every event across the workspace, newest first."],
     settings: ["Settings", "Company profile, defaults, and data management."],
     admin: ["Team & Roles", "Grant and revoke operations access."]
   };
@@ -1126,8 +1128,15 @@
     var sbox = $("#chome-recent"); if (sbox) sbox.removeAttribute("aria-busy");
     var u = (typeof currentUser === "function") ? currentUser() : null;
     var greet = $("#chome-greeting");
-    if (greet) greet.textContent = "Welcome back" + (u && u.name ? ", " + u.name.split(" ")[0] : "");
     var mine = state.packages.filter(function (p) { return email && p.customerEmail === email; });
+    // Someone with no orders has never been here before: "Welcome back" and "here's what's
+    // happening with your orders" are both wrong on a first visit.
+    var first = u && u.name ? ", " + u.name.split(" ")[0] : "";
+    if (greet) greet.textContent = (mine.length ? "Welcome back" : "Welcome") + first;
+    var gsub = $("#chome-sub");
+    if (gsub) gsub.textContent = mine.length
+      ? "Here's what's happening with your orders."
+      : "Place your first order and you'll be able to follow it here.";
     var cc = $("#chome-count"); if (cc) cc.textContent = mine.length ? (mine.length + (mine.length === 1 ? " order" : " orders")) : "";
     var box = $("#chome-recent");
     var viewAll = $("#chome-viewall");
@@ -1944,7 +1953,7 @@
       return '<div class="row-item"><div class="ri-main"><div class="ri-title">' + m.id +
         ' <span class="cm-badge" style="background:' + (CARRIER_COLOR[m.carrier] || "#334155") + '">' + m.carrier + '</span>' +
         (m.transmitted ? ' <span class="pill st-Delivered">transmitted</span>' : '') + '</div>' +
-        '<div class="ri-sub">' + manifestPkgs(m).length + ' packages · ' + m.lane + ' · ' + fmtTime(m.ts) + '</div></div>' +
+        '<div class="ri-sub">' + plural(manifestPkgs(m).length, "package") + ' · ' + m.lane + ' · ' + fmtTime(m.ts) + '</div></div>' +
         '<div class="head-actions"><button class="btn sm" data-mprint="' + m.id + '"><span aria-hidden="true">🖨</span> Print</button>' +
         '<button class="btn sm" data-mcsv="' + m.id + '"><span aria-hidden="true">↓</span> CSV</button>' +
         '<button class="btn sm" data-mlabels="' + m.id + '"><span aria-hidden="true">🏷</span> Labels PDF</button>' +
@@ -1987,12 +1996,17 @@
     var transit = delivered.map(function (p) { var a = stamp(p, "Won"), b = stamp(p, "Delivered"); return (a && b) ? (b - a) / 3600000 : null; }).filter(function (v) { return v != null; });
     var avgTransit = transit.length ? transit.reduce(function (a, b) { return a + b; }, 0) / transit.length : 0;
     var valueDelivered = delivered.reduce(function (a, p) { return a + p.item.value; }, 0);
-    var onTime = delivered.filter(function (p) { return slaStatus(p) === "On-time"; }).length;
-    var onTimePct = delivered.length ? Math.round(onTime / delivered.length * 100) : 100;
+    // Only parcels with both a promised date and a recorded delivery can be judged against
+    // an SLA. Dividing by every delivered parcel understates the rate whenever timing is
+    // simply unknown, and "100%" off zero deliveries is a number nobody earned.
+    var rated = delivered.filter(function (p) { var s = slaStatus(p); return s === "On-time" || s === "Late"; });
+    var onTime = rated.filter(function (p) { return slaStatus(p) === "On-time"; }).length;
     var openExc = pkgs.filter(function (p) { return p.exception; }).length;
     var kpis = [
-      ["Avg Transit Time", avgTransit.toFixed(1) + " h", delivered.length + " delivered"],
-      ["On-Time Rate", onTimePct + "%", onTime + "/" + delivered.length + " on time"],
+      ["Avg Transit Time", transit.length ? avgTransit.toFixed(1) + " h" : "—",
+        transit.length ? plural(transit.length, "delivery", "deliveries") + " timed" : "no timed deliveries yet"],
+      ["On-Time Rate", rated.length ? Math.round(onTime / rated.length * 100) + "%" : "—",
+        rated.length ? onTime + "/" + rated.length + " on time" : "no promised dates yet"],
       ["Value Delivered", money(valueDelivered), "lifetime"],
       ["Open Exceptions", openExc, openExc === 0 ? "all clear" : "needs attention"]
     ];
@@ -2021,7 +2035,9 @@
     return items.map(function (i) {
       var disp = i.fmt ? i.fmt(i.val) : (i.val + (i.suffix || ""));
       return '<div class="funnel-row" style="grid-template-columns:180px 1fr 70px"><span class="fn">' + i.label + '</span>' +
-        '<div class="funnel-bar" style="width:' + Math.max(4, (i.val / max) * 100) + '%"></div>' +
+        // The 4% floor keeps a small non-zero value visible. Applying it to zero drew a bar
+        // for every "0 h" stage, which read as equal non-zero durations across the board.
+        '<div class="funnel-bar" style="width:' + (i.val > 0 ? Math.max(4, (i.val / max) * 100) : 0) + '%"></div>' +
         '<span class="muted">' + disp + '</span></div>';
     }).join("");
   }
@@ -2053,7 +2069,7 @@
         '<div class="act-note">' + e.note + '</div></div>' +
         '<div class="act-time">' + fmtTime(e.ts) + '</div></div>';
     }).join("") : '<p class="muted">No activity matches “' + activityQuery + '”.</p>';
-    var count = $("#activity-count"); if (count) count.textContent = events.length + " events";
+    var count = $("#activity-count"); if (count) count.textContent = plural(events.length, "event");
   }
 
   // ---- Settings ----
@@ -2241,14 +2257,14 @@
   // restore auto-sync if the permission has since been granted.
   function cloudPush() {
     saveCloudInputs(); resetSyncBlock(); cloudStatus("Pushing…"); cloudBusy(true);
-    pushState().then(function (o) { cloudStatus("✓ Pushed " + o.count + " packages · " + new Date().toLocaleTimeString()); toast("Pushed to cloud", "api"); })
+    pushState().then(function (o) { cloudStatus("✓ Pushed " + plural(o.count, "package") + " · " + new Date().toLocaleTimeString()); toast("Pushed to cloud", "api"); })
       .catch(function (e) { manualSyncFailed(e, "Push"); })
       .finally(function () { cloudBusy(false); });
   }
   function cloudPull() {
     saveCloudInputs(); resetSyncBlock(); cloudStatus("Pulling…"); cloudBusy(true);
     pullState().then(function (s) {
-      if (applyPulled(s)) { cocSelected = null; trackQuery = ""; cloudStatus("✓ Pulled " + state.packages.length + " packages · " + new Date().toLocaleTimeString()); toast("Pulled from cloud", "api"); applyRole(); go(allowedViews()[0]); }
+      if (applyPulled(s)) { cocSelected = null; trackQuery = ""; cloudStatus("✓ Pulled " + plural(state.packages.length, "package") + " · " + new Date().toLocaleTimeString()); toast("Pulled from cloud", "api"); applyRole(); go(allowedViews()[0]); }
       else { cloudStatus("No data found for this workspace yet. Push first."); }
     }).catch(function (e) { manualSyncFailed(e, "Pull"); })
       .finally(function () { cloudBusy(false); });
@@ -2575,7 +2591,10 @@
     if (!p.promisedTs) return null;
     if (p.status === "Delivered") {
       var d = (p.history.find(function (h) { return h.stage === "Delivered"; }) || {}).ts;
-      return (d && d <= p.promisedTs) ? "On-time" : "Late";
+      // No delivery timestamp means we do not know when it arrived. Unknown is not Late:
+      // reporting it as a breach invents an SLA failure that may never have happened.
+      if (!d) return null;
+      return d <= p.promisedTs ? "On-time" : "Late";
     }
     var now = Date.now();
     if (now > p.promisedTs) return "Late";

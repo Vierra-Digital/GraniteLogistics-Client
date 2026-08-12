@@ -70,6 +70,21 @@ const opsSeed = () => ({
   },
 });
 
+// A freshly-registered customer and a freshly-provisioned workspace, so the empty states
+// get looked at too -- they are the first thing a real new user sees.
+const emptyCustomerSeed = () => ({
+  auth: { token: "shot-token", user: { email: "new@example.com", name: "Sam Reed", role: "Customer", emailVerified: true } },
+  state: { settings: { role: "Customer", roleChosen: true }, packages: [], manifests: [], loadUnits: [], events: [] },
+});
+
+const emptyOpsSeed = () => ({
+  auth: { token: "shot-token", user: { email: "ops@example.com", name: "Ken Filbert", role: "Admin", emailVerified: true } },
+  state: {
+    settings: { role: "Admin", roleChosen: true, cloud: { url: "", key: "granite-dev-key", autoSync: false } },
+    packages: [], manifests: [], loadUnits: [], events: [],
+  },
+});
+
 function pkg(n, status, carrier, description, value) {
   const now = Date.now();
   const cities = [["Dayton", "OH", "45402"], ["Columbus", "OH", "43004"], ["Cincinnati", "OH", "45202"]];
@@ -100,6 +115,20 @@ const SHOTS = [
   { name: "08-ops-overview-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "overview" },
   { name: "09-ops-tracking-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "tracking" },
   { name: "10-ops-roles-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "admin" },
+  // Every remaining operator view. These had never been rendered, so nothing had ever
+  // checked their layout at a real viewport.
+  { name: "11-ops-ingest-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "ingest" },
+  { name: "12-ops-runner-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "runner" },
+  { name: "13-ops-presort-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "presort" },
+  { name: "14-ops-batch-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "batch" },
+  { name: "15-ops-driver-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "driver" },
+  { name: "16-ops-returns-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "returns" },
+  { name: "17-ops-reports-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "reports" },
+  { name: "18-ops-activity-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "activity" },
+  { name: "19-ops-settings-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "settings" },
+  // Empty states: what a brand-new account and a brand-new workspace actually look like.
+  { name: "20-customer-empty-phone", url: "/app.html", viewport: PHONE, seed: emptyCustomerSeed(), view: "custhome" },
+  { name: "21-ops-empty-desktop", url: "/app.html", viewport: DESK, seed: emptyOpsSeed(), view: "runner" },
 ];
 
 if (!existsSync(OUT)) mkdirSync(OUT);
