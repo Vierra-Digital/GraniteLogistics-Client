@@ -1703,12 +1703,14 @@
     state.packages.forEach(function (p) { if (p.carrier && p.status !== "Delivered" && stageIdx(p.status) >= 3) activeCarrierSet[p.carrier] = 1; });
     var activeCarriers = Object.keys(activeCarrierSet).length;
     var dwp = state.packages.filter(function (p) { return p.status === "Delivered" && p.photos && p.photos.delivery; }).length;
-    var photoPct = delivered ? Math.round(dwp / delivered * 100) : 100;
     var kpis = [
-      ["Active Packages", total, nonDelivered + " in motion"],
-      ["In Transit Now", inTransit, activeCarriers + " carrier" + (activeCarriers === 1 ? "" : "s") + " active"],
-      ["Delivered", delivered, photoPct + "% photo-verified"],
-      ["Goods In Custody", money(custodyValue), nonDelivered + " shipments"]
+      // The headline was `total`, which counted delivered parcels as active while the
+      // sub-label beside it gave the real figure.
+      ["Active Packages", nonDelivered, plural(total, "package") + " all time"],
+      ["In Transit Now", inTransit, plural(activeCarriers, "carrier") + " active"],
+      // "100% photo-verified" off zero deliveries is a number nobody earned.
+      ["Delivered", delivered, delivered ? Math.round(dwp / delivered * 100) + "% photo-verified" : "none yet"],
+      ["Goods In Custody", money(custodyValue), plural(nonDelivered, "shipment")]
     ];
     $("#kpi-row").innerHTML = kpis.map(function (k) {
       return '<div class="kpi"><div class="k-label">' + k[0] + '</div><div class="k-val">' + k[1] +
@@ -1731,7 +1733,9 @@
     var max = Math.max.apply(null, STAGES.map(function (s) { return c[s]; })) || 1;
     $("#funnel").innerHTML = STAGES.map(function (s) {
       return '<div class="funnel-row"><span class="fn">' + STAGE_LABEL[s] + '</span>' +
-        '<div class="funnel-bar" style="width:' + Math.max(6, (c[s] / max) * 100) + '%"></div>' +
+        // Zero draws nothing, same as barRows(): a stub bar on an empty stage read as
+        // "one or two in here" when the count beside it said 0.
+        '<div class="funnel-bar" style="width:' + (c[s] > 0 ? Math.max(6, (c[s] / max) * 100) : 0) + '%"></div>' +
         '<span class="muted">' + c[s] + '</span></div>';
     }).join("");
 
