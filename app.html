@@ -235,11 +235,6 @@
           <button class="btn block primary" id="acct-push-on" type="button"><span aria-hidden="true">🔔</span> Turn on notifications</button>
           <button class="btn block" id="acct-push-off" type="button" hidden>Turn off on this device</button>
         </div>
-        <div class="card">
-          <div class="card-head"><h2>Help</h2></div>
-          <button class="btn block" id="acct-tour" type="button"><span aria-hidden="true">▶</span> Show me how it works</button>
-          <button class="btn block" id="acct-support" type="button"><span aria-hidden="true">✉</span> Contact support</button>
-        </div>
         <!-- Shown only when the address is unconfirmed AND this deployment can send mail.
              Never a gate: the account works either way. -->
         <div class="card acct-verify" id="acct-verify-card" hidden>
@@ -249,6 +244,11 @@
             picked up, out for delivery and delivered.
           </p>
           <button class="btn block" id="acct-verify-resend" type="button">Send the link again</button>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Help</h2></div>
+          <button class="btn block" id="acct-tour" type="button"><span aria-hidden="true">▶</span> Show me how it works</button>
+          <button class="btn block" id="acct-support" type="button"><span aria-hidden="true">✉</span> Contact support</button>
         </div>
         <!-- Only shown with a real server session: there is nothing to export or close in
              local demo mode. Revealed by renderAccountView(). -->

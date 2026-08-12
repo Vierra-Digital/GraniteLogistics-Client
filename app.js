@@ -469,6 +469,17 @@
     var an = $("#am-name"); if (an) an.textContent = au ? (au.name || au.email) : "Guest";
     var ae = $("#am-email"); if (ae) ae.textContent = au ? au.email : "";
   }
+  // The sidebar nav scrolls when the role has more destinations than the viewport fits.
+  // At 1440x900 with the Admin role, 115px of it sits below the fold — including the whole
+  // Administration group, which is where Settings and Team & Roles live. Nothing indicated
+  // that, so those two were effectively invisible on a normal laptop. This adds the missing
+  // affordance: a fade at the bottom edge whenever there is more nav below.
+  function updateNavScrollHint() {
+    var nav = $(".nav"); if (!nav) return;
+    var more = nav.scrollHeight - nav.clientHeight - nav.scrollTop > 4;
+    nav.classList.toggle("nav-has-more", more);
+  }
+
   function applyRole() {
     var allowed = allowedViews();
     $$(".nav-item").forEach(function (b) {
@@ -483,6 +494,7 @@
       g.style.display = any ? "" : "none";
     });
     updateRoleUI();
+    updateNavScrollHint();
     var active = $(".nav-item.active") ? $(".nav-item.active").dataset.view : null;
     if (allowed.indexOf(active) < 0) go(allowed[0]);
   }
@@ -555,6 +567,7 @@
       lastWide = wide;
       toggleSidebar(false);
       if (savedRole() !== "Customer" && currentUser()) { applyRole(); renderBottomNav(); }
+      updateNavScrollHint();
     });
   })();
   function applyTheme() {
@@ -755,7 +768,9 @@
     var allowed = allowedViews();
     var isCustomer = currentRole() === "Customer";
     var primary = allowed.length > 4 ? allowed.slice(0, 4) : allowed.slice();
-    var active = $(".nav-item.active") ? $(".nav-item.active").dataset.view : allowed[0];
+    // Tracked directly, not inferred from the sidebar: custhome and account have no
+    // sidebar item, so reading it back from the DOM highlighted the wrong tab.
+    var active = currentView || allowed[0];
     var html = primary.map(function (v) {
       var ico = BN_ICON[v] || (document.querySelector('.nav-item[data-view="' + v + '"] .ico') || {}).textContent || "•";
       var on = v === active;
@@ -872,6 +887,7 @@
   // Adds the entrance class for exactly one play. The timeout is the animation budget
   // (slow duration + the longest row stagger) plus a little slack; leaving the class on
   // would make the next re-render animate again.
+  var currentView = null; // the view go() last switched to, for the bottom nav
   var viewEnterTimer = null;
   function animateViewEntrance(el) {
     if (!el) return;
@@ -888,6 +904,7 @@
     if (typeof stopScan === "function") stopScan(); // release camera when navigating
     if (typeof toggleSidebar === "function") toggleSidebar(false); // close mobile drawer
     $$(".nav-item").forEach(function (b) { b.classList.toggle("active", b.dataset.view === view); });
+    currentView = view;
     $$(".view").forEach(function (v) { v.classList.remove("active", "view-enter"); });
     var target = $("#view-" + view);
     target.classList.add("active");
@@ -932,10 +949,33 @@
   // The status pill for one of a customer's own orders. A queued order says so; one the
   // server refused says that instead, because leaving it on "Syncing" would promise a
   // delivery that is never going to happen.
+  // The date line beside an order. Never repeats the status pill: for a delivered parcel
+  // the useful fact is when it arrived, not the word "Delivered" a second time.
+  function custWhen(p) {
+    var d = new Date(p.status === "Delivered" ? deliveredAt(p) : p.promisedTs);
+    if (isNaN(d.getTime())) return "";
+    var when = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    return p.status === "Delivered" ? ("Arrived " + when) : ("Est. " + when);
+  }
+  function deliveredAt(p) {
+    var h = (p.history || []).filter(function (x) { return x && x.stage === "Delivered"; }).pop();
+    return (h && h.ts) || p.promisedTs;
+  }
   function custStatusPill(p) {
     if (p.syncRejected) return '<span class="pill sla-late" title="' + String(p.syncRejected).replace(/"/g, "&quot;") + '">⚠ Needs attention</span>';
     if (p.pendingSync) return '<span class="pill sla-risk">⟲ Syncing…</span>';
     return '<span class="' + pillClass(p.status) + '">' + (CUST_STATUS[p.status] || stageLabelFor(p)) + '</span>';
+  }
+  // A customer scans this list for "where is my stuff": the parcel furthest along and
+  // arriving soonest belongs at the top, and anything already delivered belongs at the
+  // bottom. Insertion order put a delivered parcel above one out for delivery today.
+  function custOrderSort(a, b) {
+    var doneA = a.status === "Delivered" ? 1 : 0, doneB = b.status === "Delivered" ? 1 : 0;
+    if (doneA !== doneB) return doneA - doneB;              // active first
+    if (doneA) return (b.promisedTs || 0) - (a.promisedTs || 0); // delivered: newest first
+    var sa = stageIdx(a.status), sb = stageIdx(b.status);
+    if (sa !== sb) return sb - sa;                          // furthest along first
+    return (a.promisedTs || 0) - (b.promisedTs || 0);        // then soonest due
   }
   var custQuery = ""; // current filter on the customer's own order list
   // Server-scoped orders: when signed in with a real (non-local) session, a customer's
@@ -1081,9 +1121,8 @@
         '<span>Place your first order and it\'ll show up here so you can follow it the whole way.</span></div>';
       return;
     }
-    box.innerHTML = mine.slice().reverse().slice(0, 3).map(function (p) {
-      var eta = p.status === "Delivered" ? "Delivered"
-        : ("Est. " + new Date(p.promisedTs).toLocaleDateString(undefined, { month: "short", day: "numeric" }));
+    box.innerHTML = mine.slice().sort(custOrderSort).slice(0, 3).map(function (p) {
+      var eta = custWhen(p);
       var pill = custStatusPill(p);
       return '<button class="cust-order" data-id="' + p.id + '">' +
         '<div class="co-main"><b>' + p.item.description + '</b>' +
@@ -1483,9 +1522,8 @@
       var ts = $("#try-sample"); if (ts) ts.addEventListener("click", fillSampleOrder);
       return;
     }
-    box.innerHTML = mine.slice().reverse().map(function (p) {
-      var eta = p.status === "Delivered" ? "Delivered"
-        : ("Est. " + new Date(p.promisedTs).toLocaleDateString(undefined, { month: "short", day: "numeric" }));
+    box.innerHTML = mine.slice().sort(custOrderSort).map(function (p) {
+      var eta = custWhen(p);
       var pill = custStatusPill(p);
       return '<button class="cust-order" data-id="' + p.id + '">' +
         '<div class="co-main"><b>' + p.item.description + '</b>' +
@@ -1681,7 +1719,12 @@
         '<span class="muted">' + carriers[k] + '</span></div>';
     }).join("") : '<p class="muted">No active outbound right now.</p>';
 
-    var rows = state.packages.slice().sort(function (a, b) { return stageIdx(b.status) - stageIdx(a.status); }).slice(0, 9);
+    // Tiebroken by id so the table is deterministic. Sorting by stage alone leaves
+    // same-stage rows in an unspecified order, which makes the list appear to shuffle
+    // between renders during the 1.5s sync loop.
+    var rows = state.packages.slice().sort(function (a, b) {
+      return (stageIdx(b.status) - stageIdx(a.status)) || String(a.id).localeCompare(String(b.id));
+    }).slice(0, 9);
     $("#overview-table").innerHTML =
       '<thead><tr><th>Package</th><th>Customer</th><th>Destination</th><th>Carrier</th><th>Status</th></tr></thead><tbody>' +
       (rows.length ? "" : '<tr><td colspan="5" class="muted" style="padding:20px;text-align:center">No shipments yet. Pull or add orders in Order Ingest.</td></tr>') +
@@ -2995,6 +3038,18 @@
   if (pushOn) pushOn.addEventListener("click", enablePush);
   var pushOff = $("#acct-push-off");
   if (pushOff) pushOff.addEventListener("click", disablePush);
+  var navEl = $(".nav");
+  if (navEl) {
+    navEl.addEventListener("scroll", updateNavScrollHint, { passive: true });
+    // Calling this from applyRole() alone was not enough: at boot the measurement ran
+    // before layout settled, so the hint never appeared on the one screen size where it
+    // was needed. A ResizeObserver fires whenever the nav's box or contents change, which
+    // is exactly the condition being tested.
+    if (typeof ResizeObserver === "function") {
+      try { new ResizeObserver(updateNavScrollHint).observe(navEl); } catch (e) { }
+    }
+    requestAnimationFrame(updateNavScrollHint);
+  }
   var admSearch = $("#adm-search");
   if (admSearch) admSearch.addEventListener("input", function () { admQuery = this.value.trim().toLowerCase(); renderAdminList(); });
   var admRefresh = $("#adm-refresh");

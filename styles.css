@@ -54,21 +54,21 @@ h1,h2{margin:0}
 .brand-text{display:flex;flex-direction:column;line-height:1.2}
 .brand-text strong{color:#fff;font-size:.93rem;letter-spacing:.02em}
 .brand-text span{font-size:.68rem;color:var(--slate-400);text-transform:uppercase;letter-spacing:.1em}
-.role-chip{display:flex;align-items:center;gap:9px;margin:4px 4px 12px;padding:9px 11px;border-radius:11px;background:rgba(47,155,214,.1);border:1px solid rgba(47,155,214,.22)}
+.role-chip{display:flex;align-items:center;gap:9px;margin:4px 4px 8px;padding:7px 11px;border-radius:11px;background:rgba(47,155,214,.1);border:1px solid rgba(47,155,214,.22)}
 .role-chip .rc-ico{width:28px;height:28px;border-radius:8px;background:var(--blue);display:grid;place-items:center;color:#042235;font-size:.9rem;flex-shrink:0}
 .role-chip .rc-text{display:flex;flex-direction:column;line-height:1.18;min-width:0}
 .role-chip .rc-text b{color:#fff;font-size:.82rem}
 .role-chip .rc-text span{font-size:.64rem;color:var(--slate-400);text-transform:uppercase;letter-spacing:.08em}
 .nav{display:flex;flex-direction:column;gap:2px;margin-top:2px;overflow-y:auto}
-.nav-group{display:flex;flex-direction:column;gap:2px;margin-bottom:8px}
-.nav-label{font-size:.64rem;font-weight:700;text-transform:uppercase;letter-spacing:.13em;color:#566a80;padding:8px 12px 3px}
-.nav-item{display:flex;align-items:center;gap:11px;background:transparent;border:0;color:#aebccd;text-align:left;padding:9px 12px;border-radius:9px;cursor:pointer;font-size:.875rem;font-weight:500;transition:var(--tx-quick);width:100%}
+.nav-group{display:flex;flex-direction:column;gap:2px;margin-bottom:5px}
+.nav-label{font-size:.64rem;font-weight:700;text-transform:uppercase;letter-spacing:.13em;color:#566a80;padding:5px 12px 2px}
+.nav-item{display:flex;align-items:center;gap:11px;background:transparent;border:0;color:#aebccd;text-align:left;padding:7px 12px;border-radius:9px;cursor:pointer;font-size:.875rem;font-weight:500;transition:var(--tx-quick);width:100%}
 .nav-item .ico{width:18px;text-align:center;opacity:.85}
 .nav-item:hover{background:rgba(255,255,255,.05);color:#fff}
 .nav-item.active{background:rgba(47,155,214,.15);color:#fff;box-shadow:inset 3px 0 0 var(--blue-l)}
 .badge-api{margin-left:auto;font-style:normal;font-size:.58rem;background:#0ea5e9;color:#fff;padding:2px 6px;border-radius:20px;letter-spacing:.05em}
-.sidebar-foot{margin-top:auto;display:flex;flex-direction:column;gap:10px;padding-top:14px;border-top:1px solid rgba(255,255,255,.06)}
-.btn-demo{background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:0;padding:11px;border-radius:11px;font-weight:700;cursor:pointer;font-size:.9rem;box-shadow:0 6px 16px rgba(16,185,129,.3)}
+.sidebar-foot{margin-top:auto;display:flex;flex-direction:column;gap:8px;padding-top:10px;border-top:1px solid rgba(255,255,255,.06)}
+.btn-demo{background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:0;padding:8px;border-radius:11px;font-weight:700;cursor:pointer;font-size:.9rem;box-shadow:0 6px 16px rgba(16,185,129,.3)}
 .btn-demo:hover{filter:brightness(1.05)}
 .btn-demo:disabled{opacity:.55;cursor:default;box-shadow:none}
 .env-pill{display:flex;align-items:center;gap:8px;font-size:.72rem;color:var(--slate-400);justify-content:center}
@@ -526,7 +526,7 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .linkbtn:hover{text-decoration:underline}
 
 /* ===== User chip + sidebar foot ===== */
-.user-chip{display:flex;align-items:center;gap:9px;padding:8px 6px 10px}
+.user-chip{display:flex;align-items:center;gap:9px;padding:6px 6px 6px}
 .user-chip .uc-avatar{width:30px;height:30px;border-radius:50%;background:var(--blue);color:#042235;display:grid;place-items:center;font-weight:800;font-size:.82rem;flex-shrink:0}
 .user-chip .uc-text{min-width:0;line-height:1.25}
 .user-chip .uc-text b{display:block;color:#fff;font-size:.8rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -785,6 +785,20 @@ body[data-role="Customer"] .view-wrap{padding-bottom:calc(74px + env(safe-area-i
 /* An unconfirmed address is a nudge, not an error: amber accent rather than red, and it
    disappears the moment the link is clicked. */
 .acct-verify{border-left:3px solid var(--amber)}
+
+/* Tells you the sidebar nav has more below. Added because at a normal laptop height the
+   Administration group — Settings and Team & Roles — sat below the fold with nothing to
+   suggest the nav scrolled at all. Pointer-events none so it never eats a click. */
+.nav{position:relative}
+.nav.nav-has-more::after{
+  content:"";position:sticky;bottom:0;left:0;right:0;display:block;
+  /* flex:none is load-bearing: .nav is a column flex container and it only overflows when
+     this hint is needed, so the default flex-shrink collapsed the fade to 0px height and
+     made it invisible exactly when it mattered. */
+  flex:none;height:28px;min-height:28px;margin-top:-28px;
+  background:linear-gradient(to bottom,rgba(14,26,43,0),rgba(14,26,43,.92));
+  pointer-events:none
+}
 
 /* ---- Team & roles (Admin only) ---- */
 .adm-bar{display:flex;gap:10px;align-items:center;margin-bottom:12px}

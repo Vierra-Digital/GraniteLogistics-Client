@@ -18,6 +18,9 @@ vapid-keys.local.txt
 .env.local
 **/.env.local
 
+# Rendered screenshots from `npm run shots`
+shots/
+
 # Local tooling
 .claude/launch.json
 
