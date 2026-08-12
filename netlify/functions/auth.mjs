@@ -5,7 +5,7 @@
 import { getStore } from "@netlify/blobs";
 import crypto from "node:crypto";
 import { CORS, json, sign, verifyToken, bearer, sessionSuperseded, effectiveRoleFor } from "./_auth.mjs";
-import { sendEmail, resetEmail, emailConfigured } from "./_email.mjs";
+import { sendEmail, resetEmail, verifyEmail, emailConfigured } from "./_email.mjs";
 import { checkThrottle, recordAttempt, clearThrottle, LOGIN_LIMITS, RESET_LIMITS } from "./_throttle.mjs";
 
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -15,7 +15,22 @@ function store() { return getStore({ name: "granite-users", consistency: "strong
 function hashPw(pw, salt) { return crypto.scryptSync(String(pw), salt, 64).toString("hex"); }
 // iat lets us invalidate sessions minted before a password change (see GET below).
 function tokenFor(u) { return sign({ email: u.email, name: u.name, role: u.role, iat: Date.now(), exp: Date.now() + SESSION_MS }); }
-const publicUser = (u) => ({ email: u.email, name: u.name, role: u.role });
+const publicUser = (u) => ({ email: u.email, name: u.name, role: u.role, emailVerified: !!u.emailVerified });
+const VERIFY_MS = 7 * 24 * 60 * 60 * 1000; // a verification link is worth keeping usable for a week
+
+// Sending the link is best-effort and never fails the request that triggered it: an account
+// that exists but has an unsent verification email is recoverable, a registration that
+// 500s because a mail provider hiccuped is not.
+async function sendVerification(req, user) {
+  if (!emailConfigured()) return false;
+  try {
+    const token = sign({ email: user.email, kind: "verify", exp: Date.now() + VERIFY_MS });
+    const link = siteBase(req) + "/app.html?verify=" + encodeURIComponent(token);
+    const msg = verifyEmail(user.name, link);
+    const r = await sendEmail({ to: user.email, subject: msg.subject, html: msg.html, text: msg.text });
+    return !!(r && r.ok);
+  } catch (e) { return false; }
+}
 function samePw(pw, u) {
   const cand = Buffer.from(hashPw(pw, u.salt), "hex"), real = Buffer.from(u.hash, "hex");
   return cand.length === real.length && crypto.timingSafeEqual(cand, real);
@@ -100,6 +115,39 @@ export default async (req) => {
     return json({ ok: true, token: tokenFor(updated), user: publicUser(updated) });
   }
 
+  // Redeem an emailed verification link.
+  if (action === "verify-confirm") {
+    const p = verifyToken(String(d.token || ""));
+    if (!p || p.kind !== "verify" || !p.email) {
+      return json({ ok: false, error: "That confirmation link is invalid or has expired. Ask for a new one from your Account tab." }, 400);
+    }
+    const u = await s.get(p.email, { type: "json" });
+    if (!u) return json({ ok: false, error: "That account no longer exists." }, 404);
+    // Already verified is a success, not an error: people click the link twice.
+    if (!u.emailVerified) await s.setJSON(p.email, { ...u, emailVerified: true, emailVerifiedAt: new Date().toISOString() });
+    return json({ ok: true, user: publicUser({ ...u, emailVerified: true }) });
+  }
+
+  // Ask for another link. Requires a session, so it cannot be used to mail strangers,
+  // and is throttled anyway because it does send mail.
+  if (action === "verify-request") {
+    const p = verifyToken(bearer(req));
+    if (!p || p.kind || !p.email) return json({ ok: false, error: "Sign in required." }, 401);
+    if (!emailConfigured()) {
+      return json({ ok: false, error: "Email isn't set up on this deployment yet, so there's nothing to confirm." }, 503);
+    }
+    const gate = await checkThrottle("verify", p.email, RESET_LIMITS);
+    if (!gate.allowed) {
+      return new Response(JSON.stringify({ ok: false, error: "We've just sent one. Check your inbox, or try again in a few minutes.", retryAfter: gate.retryAfter }),
+        { status: 429, headers: { ...CORS, "Retry-After": String(gate.retryAfter) } });
+    }
+    await recordAttempt("verify", p.email, RESET_LIMITS);
+    const u = await s.get(p.email, { type: "json" });
+    if (!u) return json({ ok: false, error: "Sign in required." }, 401);
+    if (u.emailVerified) return json({ ok: true, alreadyVerified: true });
+    return json({ ok: true, sent: await sendVerification(req, u) });
+  }
+
   // ---- Register / login ----
   if (!email || !pw) return json({ ok: false, error: "Email and password are required." }, 400);
   if (pw.length < 4) return json({ ok: false, error: "Password must be at least 4 characters." }, 400);
@@ -111,9 +159,13 @@ export default async (req) => {
     // d.role is ignored on purpose: the caller does not get to pick its own privileges.
     const role = await effectiveRoleFor(email);
     const name = String(d.name || "").trim() || email.split("@")[0];
-    const user = { email, name, role, salt, hash: hashPw(pw, salt), createdAt: new Date().toISOString() };
+    const user = { email, name, role, salt, hash: hashPw(pw, salt), createdAt: new Date().toISOString(), emailVerified: false };
     await s.setJSON(email, user);
-    return json({ ok: true, token: tokenFor(user), user: publicUser(user) });
+    // The account works immediately either way. Verification confirms we can reach them
+    // about a shipment; it is not a gate on using the service.
+    const sent = await sendVerification(req, user);
+    return json({ ok: true, token: tokenFor(user), user: publicUser(user),
+                  verification: { available: emailConfigured(), sent } });
   }
 
   if (action === "login") {
@@ -142,7 +194,8 @@ export default async (req) => {
     const role = await effectiveRoleFor(email);
     const fresh = role === u.role ? u : { ...u, role };
     if (fresh !== u) await s.setJSON(email, fresh);
-    return json({ ok: true, token: tokenFor(fresh), user: publicUser(fresh) });
+    return json({ ok: true, token: tokenFor(fresh), user: publicUser(fresh),
+                  verification: { available: emailConfigured(), sent: false } });
   }
 
   return json({ ok: false, error: "Unknown action" }, 400);

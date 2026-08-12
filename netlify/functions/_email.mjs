@@ -85,6 +85,29 @@ export function statusEmail(pkg, stageLabel) {
   };
 }
 
+// Confirm an address at signup. Deliberately not framed as a gate: the account already
+// works, and this is how we know we can reach them when a parcel moves.
+export function verifyEmail(name, link) {
+  const who = name ? name.split(" ")[0] : "there";
+  return {
+    subject: "Confirm your email for Granite Logistics",
+    text: "Hi " + who + ",\n\nConfirm this address so we can send you delivery updates:\n" +
+      link + "\n\nYour account already works. This just makes sure we can reach you about a shipment.\n\n" +
+      "If you didn't sign up, you can ignore this email.\n\nGranite Logistics",
+    html:
+      '<div style="font-family:Segoe UI,system-ui,Arial,sans-serif;max-width:520px;margin:0 auto;padding:28px 24px;color:#101828">' +
+      '<div style="font-weight:800;letter-spacing:.08em;color:#0f1b2c;font-size:15px;margin-bottom:22px">GRANITE LOGISTICS</div>' +
+      '<h1 style="font-size:20px;margin:0 0 12px">Confirm your email</h1>' +
+      '<p style="color:#697587;font-size:15px;line-height:1.55;margin:0 0 22px">Hi ' + who +
+      ', your account is already set up. Confirming this address lets us tell you when a ' +
+      'parcel is picked up, out for delivery and delivered.</p>' +
+      '<a href="' + link + '" style="display:inline-block;background:#2f9bd6;color:#fff;text-decoration:none;' +
+      'font-weight:700;padding:13px 22px;border-radius:10px;font-size:15px">Confirm my email</a>' +
+      '<p style="color:#9aa6b4;font-size:13px;line-height:1.55;margin:24px 0 0">' +
+      "If you didn't sign up for Granite Logistics, you can safely ignore this email.</p></div>",
+  };
+}
+
 // Plain, on-brand reset email. Kept inline (no template engine) to stay dependency-free.
 export function resetEmail(name, link) {
   const who = name ? name.split(" ")[0] : "there";

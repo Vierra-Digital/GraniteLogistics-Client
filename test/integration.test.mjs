@@ -613,6 +613,108 @@ test("a configured but unimplemented carrier fails loudly, per package", async (
   }
 });
 
+// ---- email verification ----
+//
+// Verification confirms we can reach someone about a shipment. It is deliberately not a
+// gate on using the service, so the tests check that the account works throughout.
+
+test("signup sends a confirmation link and the account works unverified", async () => {
+  const mail = captureMail();
+  try {
+    const email = "verify-me@example.com";
+    const reg = await body(await authFn(post({ action: "register", email, pw: "pass1234", name: "Vera Fyer" })));
+    assert.equal(reg.ok, true);
+    assert.equal(reg.user.emailVerified, false);
+    assert.equal(reg.verification.available, true);
+    assert.equal(reg.verification.sent, true);
+    assert.equal(mail.sent.length, 1);
+    assert.match(mail.sent[0].subject, /confirm your email/i);
+    assert.match(mail.sent[0].htmlContent, /app\.html\?verify=/);
+
+    // Unverified must not block anything: they can place an order straight away.
+    const placed = await body(await ordersFn(asUser(reg.token, { method: "POST", body: { item: "Unverified order" } })));
+    assert.equal(placed.ok, true, "an unverified account was blocked from ordering");
+  } finally { mail.restore(); }
+});
+
+test("a confirmation link verifies the address, and is safe to click twice", async () => {
+  const email = "clicktwice@example.com";
+  await register(email);
+  const token = sign({ email, kind: "verify", exp: Date.now() + 60000 });
+
+  const first = await body(await authFn(post({ action: "verify-confirm", token })));
+  assert.equal(first.ok, true);
+  assert.equal(first.user.emailVerified, true);
+
+  // People click the link again, or a mail client prefetches it. That is not an error.
+  const second = await body(await authFn(post({ action: "verify-confirm", token })));
+  assert.equal(second.ok, true);
+  assert.equal(second.user.emailVerified, true);
+
+  // And it sticks across a fresh sign-in.
+  const login = await body(await authFn(post({ action: "login", email, pw: "pass1234" })));
+  assert.equal(login.user.emailVerified, true);
+});
+
+test("a verification token is not a session, and a session is not a verification token", async () => {
+  const email = "crosstoken@example.com";
+  const token = await register(email);
+  // A verify token must not authenticate anything.
+  const verifyTok = sign({ email, kind: "verify", exp: Date.now() + 60000 });
+  assert.equal((await authFn(new Request("https://x/api/auth", { headers: { authorization: "Bearer " + verifyTok } }))).status, 401);
+  assert.equal((await stateFn(stateReq({ token: verifyTok }))).status, 401);
+  // And a session token must not be redeemable as a confirmation.
+  const asVerify = await authFn(post({ action: "verify-confirm", token }));
+  assert.equal(asVerify.status, 400);
+  // A reset token must not verify an address either.
+  const resetTok = sign({ email, kind: "reset", exp: Date.now() + 60000 });
+  assert.equal((await authFn(post({ action: "verify-confirm", token: resetTok }))).status, 400);
+});
+
+test("resending a confirmation needs a session and is throttled", async () => {
+  const mail = captureMail();
+  try {
+    const email = "resend@example.com";
+    const token = await register(email);
+    mail.sent.length = 0; // ignore the signup email
+
+    // No session: cannot be used to mail strangers.
+    assert.equal((await authFn(post({ action: "verify-request" }))).status, 401);
+
+    const req = () => authFn(new Request("https://x/api/auth", {
+      method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+      body: JSON.stringify({ action: "verify-request" }),
+    }));
+    for (let i = 0; i < 3; i++) assert.equal((await req()).status, 200);
+    const limited = await req();
+    assert.equal(limited.status, 429, "resend was not throttled");
+    assert.equal(mail.sent.length, 3, "sent more confirmations than the limit allows");
+
+    // Once verified, resending is a no-op rather than more mail.
+    await authFn(post({ action: "verify-confirm", token: sign({ email, kind: "verify", exp: Date.now() + 60000 }) }));
+    // Throttle is still engaged, so clear it the way a real flow would: a fresh window.
+    const { clearThrottle } = await import("../netlify/functions/_throttle.mjs");
+    await clearThrottle("verify", email);
+    const after = await body(await req());
+    assert.equal(after.alreadyVerified, true);
+    assert.equal(mail.sent.length, 3, "mailed an already-verified address");
+  } finally { mail.restore(); }
+});
+
+test("with no mail provider, signup does not pretend a confirmation was sent", async () => {
+  const email = "nomail@example.com";
+  const reg = await body(await authFn(post({ action: "register", email, pw: "pass1234" })));
+  assert.equal(reg.verification.available, false);
+  assert.equal(reg.verification.sent, false);
+  // And asking for one says so plainly rather than failing silently.
+  const res = await authFn(new Request("https://x/api/auth", {
+    method: "POST", headers: { authorization: "Bearer " + reg.token, "content-type": "application/json" },
+    body: JSON.stringify({ action: "verify-request" }),
+  }));
+  assert.equal(res.status, 503);
+  assert.match((await body(res)).error, /isn't set up/i);
+});
+
 // ---- credential throttling ----
 
 test("repeated wrong passwords lock an address, and the right one still works before that", async () => {
@@ -674,9 +776,11 @@ test("completing a password reset clears a lock", async () => {
 });
 
 test("reset requests are throttled harder, since each one mails somebody", async () => {
-  const mail = captureMail();
   const email = "resetspam@example.com";
+  // Registered before mail capture starts: signup now sends a verification email of its
+  // own, and counting it here would make the assertion about resets untrue.
   await register(email);
+  const mail = captureMail();
   try {
     // Three go through, the fourth is refused.
     for (let i = 0; i < 3; i++) {

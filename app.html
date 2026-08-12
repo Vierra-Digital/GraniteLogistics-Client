@@ -240,6 +240,16 @@
           <button class="btn block" id="acct-tour" type="button"><span aria-hidden="true">▶</span> Show me how it works</button>
           <button class="btn block" id="acct-support" type="button"><span aria-hidden="true">✉</span> Contact support</button>
         </div>
+        <!-- Shown only when the address is unconfirmed AND this deployment can send mail.
+             Never a gate: the account works either way. -->
+        <div class="card acct-verify" id="acct-verify-card" hidden>
+          <div class="card-head"><h2>Confirm your email</h2></div>
+          <p class="muted small" id="acct-verify-note">
+            We sent a link to your address. Confirming it lets us tell you when your parcel is
+            picked up, out for delivery and delivered.
+          </p>
+          <button class="btn block" id="acct-verify-resend" type="button">Send the link again</button>
+        </div>
         <!-- Only shown with a real server session: there is nothing to export or close in
              local demo mode. Revealed by renderAccountView(). -->
         <div class="card" id="acct-data-card" hidden>

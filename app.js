@@ -611,12 +611,14 @@
   }
   function registerUser(name, email, pw, role) {
     return postAuth("register", { name: name, email: email, pw: pw, role: role }).then(function (j) {
+      if (j && j.verification) mailAvailable = !!j.verification.available;
       if (j && j.ok) { authSave({ token: j.token, user: j.user }); return { ok: true }; }
       return { ok: false, error: (j && j.error) || "Could not create account." };
     }).catch(function () { return localRegister(name, email, pw, role); });
   }
   function loginUser(email, pw) {
     return postAuth("login", { email: email, pw: pw }).then(function (j) {
+      if (j && j.verification) mailAvailable = !!j.verification.available;
       if (j && j.ok) { authSave({ token: j.token, user: j.user }); return { ok: true }; }
       return { ok: false, error: (j && j.error) || "Incorrect email or password." };
     }).catch(function () { return localLogin(email, pw); });
@@ -1256,6 +1258,8 @@
   // for notification permission the app cannot honour is the fastest way to get denied
   // permanently, so the card stays hidden rather than failing on tap.
   var pushInfo = null; // {configured, publicKey} once /api/push has answered
+  // Set from the register/login response. null means we have not been told yet.
+  var mailAvailable = null;
 
   function pushSupported() {
     return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
@@ -1348,12 +1352,38 @@
       .catch(function () { pushInfo = { configured: false, publicKey: null }; renderPushCard(); });
   }
 
+  function resendVerification() {
+    var btn = $("#acct-verify-resend");
+    if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
+    var done = function () { if (btn) { btn.disabled = false; btn.textContent = "Send the link again"; } };
+    fetch("/api/auth", { method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + authToken() },
+      body: JSON.stringify({ action: "verify-request" }) })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { j._status = r.status; return j; }); })
+      .then(function (j) {
+        done();
+        if (j.alreadyVerified) {
+          // Confirmed in another tab or on another device; reflect it rather than resend.
+          var a = authData(); if (a.user) { a.user.emailVerified = true; authSave(a); }
+          renderAccountView();
+          toast("Your email is already confirmed.", "ok");
+          return;
+        }
+        if (!j.ok) { toast(j.error || "Couldn't send the link.", "warn", 8000); return; }
+        toast("Confirmation link sent. Check your inbox.", "ok");
+      })
+      .catch(function () { done(); toast("Couldn't reach the server.", "warn"); });
+  }
+
   // Customer's Account tab: profile + sign out, replacing the header account dropdown.
   function renderAccountView() {
     var u = (typeof currentUser === "function") ? currentUser() : null;
     var av = $("#acct-avatar"); if (av) av.textContent = ((u && (u.name || u.email)) || "U").charAt(0).toUpperCase();
     var nm = $("#acct-name"); if (nm) nm.textContent = u ? (u.name || u.email) : "Guest";
     var em = $("#acct-email"); if (em) em.textContent = u ? u.email : "";
+    // The nudge to confirm an address, shown only when it is both needed and possible.
+    var vc = $("#acct-verify-card");
+    if (vc) vc.hidden = !(hasServerAuth() && u && u.emailVerified === false && mailAvailable !== false);
     // Export and closure need the server. In local demo mode there is nothing to act on.
     var dc = $("#acct-data-card"); if (dc) dc.hidden = !hasServerAuth();
     loadPushInfo();
@@ -2955,6 +2985,8 @@
 
   var searchInput = $("#track-search");
   if (searchInput) searchInput.addEventListener("input", function () { trackQuery = this.value.trim().toLowerCase(); renderTracking(); });
+  var acctResend = $("#acct-verify-resend");
+  if (acctResend) acctResend.addEventListener("click", resendVerification);
   var acctExport = $("#acct-export");
   if (acctExport) acctExport.addEventListener("click", exportMyData);
   var acctClose = $("#acct-close");
@@ -3241,8 +3273,33 @@
   updateRoleUI();
   renderBottomNav();
   // Arriving from a password-reset email takes priority over any cached session.
-  var bootReset = null;
-  try { bootReset = new URLSearchParams(location.search).get("reset"); } catch (e) { }
+  var bootReset = null, bootVerify = null;
+  try {
+    var qs = new URLSearchParams(location.search);
+    bootReset = qs.get("reset");
+    bootVerify = qs.get("verify");
+  } catch (e) { }
+
+  // Redeemed before anything renders, so the account screen never shows a stale nudge to
+  // confirm an address that was just confirmed.
+  if (bootVerify) {
+    fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "verify-confirm", token: bootVerify }) })
+      .then(function (r) { return r.json().catch(function () { return {}; }); })
+      .then(function (j) {
+        if (j && j.ok) {
+          var a = authData();
+          if (a.user) { a.user.emailVerified = true; authSave(a); }
+          toast("Thanks, your email is confirmed.", "ok", 6000);
+        } else {
+          toast((j && j.error) || "That confirmation link didn't work.", "warn", 9000);
+        }
+        renderAccountView();
+        // Drop the token from the URL so it is not left in history or a shared link.
+        try { history.replaceState(null, "", location.pathname); } catch (e) { }
+      })
+      .catch(function () { toast("Couldn't reach the server to confirm your email.", "warn"); });
+  }
   associateLabels(document);
   if (bootReset) {
     showResetForm(bootReset);

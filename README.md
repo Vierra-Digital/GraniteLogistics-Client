@@ -36,7 +36,7 @@ being offline. To exercise the real API, deploy to Netlify or run `netlify dev`.
 npm test
 ```
 
-137 tests, no network and no browser required, in two layers:
+142 tests, no network and no browser required, in two layers:
 
 - **Unit** (`test/functions.test.mjs`) covers the pure logic: workspace merging, id
   allocation, session tokens, tenant and api-key resolution, role assignment, the public
@@ -113,7 +113,7 @@ rejected by `/api/state`, which reads. For a real machine integration set `GL_TE
 |---|---|---|
 | `GET /api/health` | none | Liveness and storage backend. |
 | `GET /api/track?n=` | none | Public shipment lookup behind shareable tracking links. Returns a deliberately minimal view (status, dates, destination city, carrier) because tracking numbers are sequential and guessable. No recipient details, contents, or photos. |
-| `POST /api/auth` | none | `register`, `login`, `reset-request`, `reset-confirm`. `login` and `reset-request` are throttled per address and answer `429` with `Retry-After`. |
+| `POST /api/auth` | none (`verify-request` needs a token) | `register`, `login`, `reset-request`, `reset-confirm`, `verify-request`, `verify-confirm`. `login` and `reset-request` are throttled per address and answer `429` with `Retry-After`. |
 | `GET /api/auth` | Bearer token | Validates a session and returns the current user. |
 | `GET/POST/DELETE /api/my-orders` | Bearer token | A customer's own orders. Email comes from the verified token, so callers can only reach their own rows. `DELETE` cancels, and only before pickup. `POST` is rate limited per account (3/minute, 12/hour) and answers `429` with `Retry-After`; reads and cancellations are never limited. |
 | `GET/PUT /api/state` | Bearer token with an ops role, or a `GL_TENANTS` key | An ops client's whole workspace. Every recipient's name, address and phone lives here, so this is the one endpoint with real authorization: a Customer session gets 403, `Viewer` may read but not `PUT`, and the public demo keys are refused. |
@@ -227,6 +227,8 @@ also accepts an optional `x-signature` HMAC of the body using `GL_WEBHOOK_SECRET
 ## What works for real
 
 - Real accounts with hashed passwords, cross-device sessions, and password reset.
+- Email confirmation at signup. Deliberately not a gate: the account works immediately, and
+  the nudge only appears when the address is unconfirmed *and* the deployment can send mail.
 - Server-side authorization: the ops workspace is gated on the signed-in account's role,
   re-derived per request, so revoking access takes effect immediately.
 - **Team & Roles**: an Admin grants and revokes operations access in-app, with an audit

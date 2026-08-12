@@ -13,6 +13,8 @@ server/data.json
 
 # Env files (never commit secrets)
 .env
+# VAPID keypair written by `npm run vapid` — contains a private key
+vapid-keys.local.txt
 .env.local
 **/.env.local
 

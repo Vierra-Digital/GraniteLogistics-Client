@@ -782,6 +782,10 @@ body[data-role="Customer"] .view-wrap{padding-bottom:calc(74px + env(safe-area-i
 .modal-backdrop.closing{display:flex;animation:backdrop-in var(--dur) var(--ease-in) reverse both}
 .modal-backdrop.closing .modal{animation:modal-out var(--dur) var(--ease-in) both}
 
+/* An unconfirmed address is a nudge, not an error: amber accent rather than red, and it
+   disappears the moment the link is clicked. */
+.acct-verify{border-left:3px solid var(--amber)}
+
 /* ---- Team & roles (Admin only) ---- */
 .adm-bar{display:flex;gap:10px;align-items:center;margin-bottom:12px}
 .adm-bar .cust-search{flex:1}
