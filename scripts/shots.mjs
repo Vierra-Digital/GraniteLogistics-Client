@@ -109,9 +109,9 @@ const SHOTS = [
   { name: "02-landing-phone", url: "/", viewport: PHONE },
   { name: "03-privacy-desktop", url: "/privacy.html", viewport: DESK },
   { name: "04-track-desktop", url: "/track.html?n=GL-1041", viewport: DESK },
-  { name: "05-customer-home-phone", url: "/app.html", viewport: PHONE, seed: customerSeed(), view: "custhome" },
-  { name: "06-customer-order-phone", url: "/app.html", viewport: PHONE, seed: customerSeed(), view: "order" },
-  { name: "07-customer-account-phone", url: "/app.html", viewport: PHONE, seed: customerSeed(false), view: "account" },
+  { name: "05-customer-home-phone", full: true, url: "/app.html", viewport: PHONE, seed: customerSeed(), view: "custhome" },
+  { name: "06-customer-order-phone", full: true, url: "/app.html", viewport: PHONE, seed: customerSeed(), view: "order" },
+  { name: "07-customer-account-phone", full: true, url: "/app.html", viewport: PHONE, seed: customerSeed(false), view: "account" },
   { name: "08-ops-overview-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "overview" },
   { name: "09-ops-tracking-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "tracking" },
   { name: "10-ops-roles-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "admin" },
@@ -127,7 +127,7 @@ const SHOTS = [
   { name: "18-ops-activity-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "activity" },
   { name: "19-ops-settings-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "settings" },
   // Empty states: what a brand-new account and a brand-new workspace actually look like.
-  { name: "20-customer-empty-phone", url: "/app.html", viewport: PHONE, seed: emptyCustomerSeed(), view: "custhome" },
+  { name: "20-customer-empty-phone", full: true, url: "/app.html", viewport: PHONE, seed: emptyCustomerSeed(), view: "custhome" },
   { name: "21-ops-empty-desktop", url: "/app.html", viewport: DESK, seed: emptyOpsSeed(), view: "runner" },
   // The demo workspace carries the connector source names, so this is the only shot that
   // exercises a source actually receiving orders rather than sitting idle.
@@ -221,7 +221,9 @@ for (const shot of SHOTS) {
   await new Promise((r) => setTimeout(r, 900));
 
   const path = OUT + "/" + shot.name + ".png";
-  await page.screenshot({ path, fullPage: !shot.view });
+  // Phone views scroll, so a viewport-only shot hides everything below the fold --
+  // which is where a sign-out button or a form's last field tends to live.
+  await page.screenshot({ path, fullPage: shot.full !== undefined ? shot.full : !shot.view });
   console.log("  " + path);
   await page.close();
 }
