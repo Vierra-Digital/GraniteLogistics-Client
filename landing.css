@@ -14,7 +14,13 @@ html{scroll-behavior:smooth}
 body{
   margin:0;background:var(--navy);color:#dfe5ec;font-family:var(--body);
   -webkit-font-smoothing:antialiased;line-height:1.5;overflow-x:hidden;
+  /* Short pages (tracking, privacy, terms) used to leave a band of bare background below
+     the footer, which read as an unfinished page. This pins the footer to the bottom
+     without changing anything on a page tall enough to scroll. */
+  min-height:100dvh;display:flex;flex-direction:column;
 }
+body>main{flex:1 0 auto}
+body>.site-footer{margin-top:auto}
 a{color:inherit;text-decoration:none}
 
 /* ---------- Header (shared: landing + track) ---------- */

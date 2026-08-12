@@ -1002,7 +1002,24 @@
   function mergeCustomerOrders(serverOrders, email) {
     if (!email || !Array.isArray(serverOrders)) return;
     var pending = state.packages.filter(function (p) { return p.customerEmail === email && p.pendingSync; });
-    state.packages = state.packages.filter(function (p) { return p.customerEmail !== email; }).concat(serverOrders).concat(pending);
+    var incoming = serverOrders.filter(Boolean).concat(pending);
+
+    // Deduplicate by id, keeping the first occurrence, which is the server's copy.
+    var seen = {}, unique = [];
+    incoming.forEach(function (p) {
+      if (!p || !p.id || seen[p.id]) return;
+      seen[p.id] = true;
+      unique.push(p);
+    });
+
+    // Previously this dropped only rows matching the signed-in email and then appended
+    // whatever arrived. Anything the incoming list carried under a different email was
+    // appended alongside the copy already held, so the same id appeared twice: duplicate
+    // rows in every list, and getPkg() silently resolving to whichever came first.
+    state.packages = state.packages.filter(function (p) {
+      return p && p.customerEmail !== email && !seen[p.id];
+    }).concat(unique);
+
     syncSeqFromPackages(); // server-numbered orders must not collide with local ids
     save();
   }
@@ -2459,7 +2476,7 @@
         '<div class="ri-main">' +
         '<div class="ri-title">' + p.id + " · " + p.item.description + (p.exception ? ' <span class="pill sla-late">exception</span>' : '') + '</div>' +
         '<div class="ri-sub">' + p.customer.name + " · " + p.customer.city + ", " + p.customer.state +
-        (p.customerEmail ? ' · <span class="ri-acct">' + p.customerEmail + '</span>' : '') + '</div></div>' +
+        (p.customerEmail ? '<span class="ri-acct">' + p.customerEmail + '</span>' : '') + '</div></div>' +
         '<span class="' + pillClass(p.status) + '">' + stageLabelFor(p) + '</span>' + slaPillHtml(p) + '</div>';
     }).join("") : '<p class="muted">No packages match “' + trackQuery + '”.</p>';
     $$("#tracking-list .row-item").forEach(function (el) {

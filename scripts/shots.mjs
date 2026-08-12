@@ -103,6 +103,22 @@ const SHOTS = [
 ];
 
 if (!existsSync(OUT)) mkdirSync(OUT);
+
+// Check the target is up first. Without this, goto() fails quietly and the first
+// page.evaluate throws "Execution context was destroyed", which says nothing about the
+// actual problem: the server is not running.
+try {
+  const probe = await fetch(BASE + "/", { method: "GET" });
+  if (!probe.ok) throw new Error("HTTP " + probe.status);
+} catch (e) {
+  console.error(`Cannot reach ${BASE} (${e.message}).
+
+Start the site first, then run this again:
+  python -m http.server 8080
+`);
+  process.exit(2);
+}
+
 const browser = await launch();
 console.log("Rendering " + SHOTS.length + " screens from " + BASE + " into " + OUT + "/\n");
 
@@ -125,7 +141,11 @@ for (const shot of SHOTS) {
     page.on("request", (req) => {
       const u = req.url();
       if (u.includes("/api/auth")) return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, user: s.auth.user, verification: { available: true, sent: false } }) });
-      if (u.includes("/api/my-orders")) return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, orders: s.state.packages.filter((p) => p.customerEmail) }) });
+      if (u.includes("/api/my-orders")) return req.respond({ status: 200, contentType: "application/json",
+        // Only the signed-in account's own rows, which is all the real endpoint ever
+        // returns. Returning another user's orders here duplicated them into the ops
+        // workspace and made the screenshots lie.
+        body: JSON.stringify({ ok: true, orders: s.state.packages.filter((p) => p.customerEmail === s.auth.user.email) }) });
       if (u.includes("/api/push")) return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, configured: false, publicKey: null }) });
       if (u.includes("/api/state")) return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify(s.state) });
       if (u.includes("/api/admin")) return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, you: s.auth.user.email, admins: 1,
@@ -140,7 +160,15 @@ for (const shot of SHOTS) {
     });
   }
 
-  await page.goto(BASE + shot.url, { waitUntil: "networkidle2", timeout: 30000 }).catch(() => {});
+  const resp = await page.goto(BASE + shot.url, { waitUntil: "networkidle2", timeout: 30000 }).catch((e) => {
+    console.error("  " + shot.name + ": navigation failed - " + e.message);
+    return null;
+  });
+  if (!resp || !resp.ok()) {
+    console.error("  " + shot.name + ": skipped, " + shot.url + " did not load");
+    await page.close();
+    continue;
+  }
   if (shot.view) {
     await page.evaluate((v) => {
       const el = document.querySelector('[data-bn="' + v + '"]') || document.querySelector('.nav-item[data-view="' + v + '"]');
