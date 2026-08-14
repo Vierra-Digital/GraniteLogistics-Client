@@ -71,6 +71,25 @@ const SHOTS = [
     act: () => document.getElementById("notif-btn").click() },
   { name: "34-modal-shipment-dark", url: "/app.html", viewport: DESK, seed: dark(opsSeed()), view: "overview",
     act: () => document.querySelector('#overview-table tr[data-id]').click() },
+  // The end of the customer's primary flow. Driven through the real three-step form rather
+  // than by setting .is-success directly, so the confirmation shows what a real order
+  // produces instead of an empty panel.
+  { name: "35-order-success-phone", full: true, url: "/app.html", viewport: PHONE, seed: customerSeed(), view: "order",
+    act: () => {
+      const f = document.getElementById("cust-order-form");
+      // querySelector, not f.elements[n]: a repeated name yields a RadioNodeList, which
+      // has no dispatchEvent.
+      const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (!el) return;
+        el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); };
+      set("item", "Herman Miller Aeron chair, size B");
+      set("value", "1290");
+      f.querySelector("[data-next]").click();
+      set("name", "Jane Doe"); set("address", "142 Birchwood Lane");
+      set("city", "Dayton"); set("state", "OH"); set("zip", "45402");
+      set("phone", "937-555-0142");
+      f.querySelectorAll("[data-next]")[1].click();
+      f.querySelector('[type="submit"]').click();
+    } },
 ];
 
 if (!existsSync(OUT)) mkdirSync(OUT);
@@ -114,7 +133,30 @@ page.on("request", (req) => {
   // Only the signed-in account's own rows, which is all the real endpoint ever returns.
   // Returning another user's orders here duplicated them into the ops workspace and made
   // the screenshots lie.
-  if (u.includes("/api/my-orders")) return j({ ok: true, orders: s.state.packages.filter((p) => p.customerEmail === s.auth.user.email) });
+  // A POST here is a customer placing an order. Answering it with {} made the client treat
+  // the order as unsynced and queue it, so the success shot showed the offline path -- a
+  // "Syncing…" pill and "we'll sync it once you're back online" -- rather than the normal
+  // one. Echo back a stored order instead.
+  if (u.includes("/api/my-orders")) {
+    if (req.method() === "POST") {
+      const body = (() => { try { return JSON.parse(req.postData() || "{}"); } catch (e) { return {}; } })();
+      // A full package, not just an echo of the payload. showOrderSuccess() reads
+      // order.customer.name, so a partial object throws inside the success handler and the
+      // client's catch treats it as a network failure -- which is how this shot ended up
+      // showing "we'll sync it once you're back online" instead of the confirmation.
+      const now = Date.now();
+      return j({ ok: true, order: {
+        id: "GL-1044", status: "Won", source: "Customer Order", orderRef: "#10412",
+        barcode: "GL1044", carrier: null, lane: null, batchId: null, tracking: null, photos: {},
+        item: { description: body.item || "Item", value: parseInt(body.value, 10) || 0, weight: 24 },
+        customer: { name: body.name || "-", address: body.address || "", city: body.city || "",
+          state: body.state || "", zip: body.zip || "", phone: body.phone || "" },
+        history: [{ stage: "Won", ts: now, note: "Order received." }],
+        promisedTs: now + 3 * 86400000, exception: null, customerEmail: s.auth.user.email,
+      } });
+    }
+    return j({ ok: true, orders: s.state.packages.filter((p) => p.customerEmail === s.auth.user.email) });
+  }
   if (u.includes("/api/push")) return j({ ok: true, configured: false, publicKey: null });
   if (u.includes("/api/state")) return j(s.state);
   if (u.includes("/api/admin")) return j({ ok: true, you: s.auth.user.email, admins: 1,
