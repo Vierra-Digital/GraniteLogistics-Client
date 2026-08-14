@@ -57,6 +57,39 @@ npm test
 The integration layer needs `--experimental-test-module-mocks`, which the npm script
 already passes.
 
+## Browser audits
+
+`npm test` needs no browser, so it cannot see anything about the rendered page. These do.
+Each drives a real browser over every view and both themes, and each exits non-zero with a
+list of what failed. Start a static server first (`python -m http.server 8080`), then:
+
+```bash
+npm run check      # contrast + layout + a11y, one summary, non-zero if any fail
+```
+
+| command | what it measures | coverage |
+| --- | --- | --- |
+| `npm run contrast` | WCAG 2.1 AA text contrast | 38 view/theme combinations, including the public pages |
+| `npm run layout` | horizontal overflow, clipped text, boxes escaping their container | 90 view/width combinations, 320px to 1920px |
+| `npm run a11y` | accessible names, alt text, heading order, duplicate ids, dangling aria, label association, keyboard reachability | 19 views |
+| `npm run shots` | renders 26 screens to `shots/` (gitignored) so they can be looked at | both themes, phone and desktop, empty states |
+
+They exist because every one of them caught something that reading the code did not: a
+34-failure contrast sweep (`.btn` hard-codes a white background the dark palette cannot
+reach, so every secondary button in dark mode was 1.75:1), a chart whose bars collapsed to
+0px at 981px, and an Executive Overview whose table rows opened a modal on click but could
+not be reached by Tab at all.
+
+Two things worth knowing before trusting a green run:
+
+- **A passing audit needs to be able to fail.** Each one has been mutation-tested -- revert
+  the fix and the finding comes back. A "0 failures" result once turned out to be a bug in
+  the audit itself, where a changed return type made every ratio `NaN`.
+- **`npm run shots` deletes a screenshot it could not take**, and exits non-zero, because a
+  stale PNG from the previous run is indistinguishable from a fresh one.
+
+`GL_BASE=https://usegl.com npm run check` points them at the deployed site instead.
+
 ## Deploy (Netlify)
 
 Connect the repo. `netlify.toml` needs no build command; the functions in
@@ -293,6 +326,10 @@ and the notification wiring are already done and tested.
 - `privacy.html`, `terms.html` legal pages, linked from the footer and in the sitemap
 - `app.html`, `styles.css`, `app.js` the app shell and all views
 - `scripts/vapid.mjs` generates a VAPID keypair for push (`npm run vapid`)
+- `scripts/check.mjs` runs every browser audit in one pass (`npm run check`); the audits
+  themselves are `contrast.mjs`, `layout.mjs` and `a11y.mjs`, with `shots.mjs` for
+  screenshots. `_browser.mjs` finds a usable browser and `_seeds.mjs` holds the app
+  states they all share
 - `netlify/functions/` the API (auth, role administration, push, carriers, customer orders, workspace
   state, ingest, public tracking, health)
 - `test/` regression tests for the function logic
