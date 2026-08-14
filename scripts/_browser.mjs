@@ -40,7 +40,11 @@ export async function launch() {
     ...SYSTEM.filter(existsSync).map((p) => [p, p]),
   ];
   for (const [executablePath, label] of order) {
-    try { return await puppeteer.launch({ headless: "new", executablePath, args: ["--no-sandbox"] }); }
+    // --disable-lcd-text forces greyscale antialiasing. With subpixel antialiasing on, light
+    // bold text on a dark card picks up a warm colour fringe that looks like a deliberate
+    // glow in a screenshot -- it cost a round of investigating a "0" with an amber halo that
+    // had no shadow, stroke or filter on it at all.
+    try { return await puppeteer.launch({ headless: "new", executablePath, args: ["--no-sandbox", "--disable-lcd-text"] }); }
     catch (e) { tried.push("  " + label + "\n    " + e.message.split("\n")[0]); }
   }
   // Report every failure: one generic line made a present-but-broken browser look
