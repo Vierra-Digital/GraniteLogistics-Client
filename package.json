@@ -9,7 +9,8 @@
     "vapid": "node scripts/vapid.mjs",
     "verify:live": "node scripts/verify-live.mjs",
     "shots": "node scripts/shots.mjs",
-    "contrast": "node scripts/contrast.mjs"
+    "contrast": "node scripts/contrast.mjs",
+    "layout": "node scripts/layout.mjs"
   },
   "dependencies": {
     "@netlify/blobs": "^8.1.0",

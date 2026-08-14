@@ -2044,7 +2044,10 @@
     var max = Math.max.apply(null, items.map(function (i) { return i.val; }).concat([1]));
     return items.map(function (i) {
       var disp = i.fmt ? i.fmt(i.val) : (i.val + (i.suffix || ""));
-      return '<div class="funnel-row" style="grid-template-columns:180px 1fr 70px"><span class="fn">' + i.label + '</span>' +
+      // Wider label and value columns than the stylesheet default, because these rows carry
+      // stage names and money. minmax so they can still give ground: at 981px the rigid
+      // version left the bar track with 0px and the chart drew no bars.
+      return '<div class="funnel-row" style="grid-template-columns:minmax(72px,180px) minmax(24px,1fr) 70px"><span class="fn">' + i.label + '</span>' +
         // The 4% floor keeps a small non-zero value visible. Applying it to zero drew a bar
         // for every "0 h" stage, which read as equal non-zero durations across the board.
         '<div class="funnel-bar" style="width:' + (i.val > 0 ? Math.max(4, (i.val / max) * 100) : 0) + '%"></div>' +

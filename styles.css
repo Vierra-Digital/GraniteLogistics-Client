@@ -232,7 +232,13 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;box-shadow:var(--shadow);margin-bottom:18px}
 .card-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}
 .card-head h2{font-size:1rem;font-weight:700;letter-spacing:-.01em;color:var(--ink)}
+/* Two columns only once there is room for both. Collapsing at 980px meant that from 981px to
+   about 1150px -- an ordinary small laptop, 256px of which is sidebar -- each card got around
+   300px and a chart row spent all of it on the label and value columns, leaving 24px of bar.
+   repeat(auto-fit, …) fixed that but opened a third track at 1920px which the two cards did
+   not fill, so the width is decided explicitly instead. */
 .grid-2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}
+@media (max-width:1279px){ .grid-2{grid-template-columns:minmax(0,1fr)} }
 
 /* Reusable tabbed layout, used by Settings, Order Ingest, and anywhere a view
    has several independent sections that don't need to be seen side-by-side. */
@@ -257,7 +263,12 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 
 /* Funnel */
 .funnel{display:flex;flex-direction:column;gap:9px}
-.funnel-row{display:grid;grid-template-columns:150px 1fr 38px;align-items:center;gap:10px;font-size:.85rem}
+/* The label column has to be able to give ground. With a rigid 150px/180px first column the
+   fixed tracks plus gaps consumed the whole card at 981px, the 1fr bar track collapsed to
+   0px, and the chart rendered labels and numbers with no bars at all. The value column stays
+   a fixed width because every row is its own grid -- sizing it to content would let the
+   numbers wander out of alignment from row to row. */
+.funnel-row{display:grid;grid-template-columns:minmax(72px,150px) minmax(24px,1fr) 38px;align-items:center;gap:10px;font-size:.85rem}
 /* No min-width: a zero value must draw nothing. renderReports() already floors non-zero
    bars at 4% of the track, which is wider than 6px at every viewport we support. */
 .funnel-bar{height:22px;border-radius:7px;background:linear-gradient(90deg,#2f9bd6,#10b981)}
@@ -419,9 +430,9 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 /* Order intake form + CSV import */
 .head-actions{display:flex;gap:8px}
 .order-form{display:flex;flex-direction:column;gap:11px}
-.ff{display:flex;flex-direction:column;gap:5px;flex:1}
+.ff{display:flex;flex-direction:column;gap:5px;flex:1;min-width:0}
 .ff label{font-size:.74rem;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:.04em}
-.ff input,.ff select{padding:9px 11px;border:1px solid var(--line);border-radius:9px;font-size:.9rem;background:#fff;font-family:inherit}
+.ff input,.ff select{padding:9px 11px;border:1px solid var(--line);border-radius:9px;font-size:.9rem;background:#fff;font-family:inherit;min-width:0}
 .ff input:focus,.ff select:focus,.search-input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(47,155,214,.15)}
 .ff-row{display:flex;gap:10px}
 .import-box{display:flex;flex-direction:column;gap:12px}
