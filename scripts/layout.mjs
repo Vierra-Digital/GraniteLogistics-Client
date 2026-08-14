@@ -15,7 +15,7 @@
 // Deliberate truncation (text-overflow: ellipsis) and deliberate scrolling
 // (overflow-x: auto/scroll) are not failures and are skipped.
 import { launch } from "./_browser.mjs";
-import { customerSeed, opsSeed, dark } from "./_seeds.mjs";
+import { customerSeed, opsSeed, dark, stressSeed, stressCustomerSeed } from "./_seeds.mjs";
 
 const BASE = process.env.GL_BASE || "http://localhost:8080";
 
@@ -33,6 +33,12 @@ const SCENARIOS = [
   ...CUST_VIEWS.flatMap((v) => CUST_WIDTHS.map((w) => ({ view: v, w, h: 844, mobile: w < 768, seed: customerSeed(false), label: `cust/${v}@${w}` }))),
   // One dark pass: a theme should not change geometry, and if it does that is worth knowing.
   ...OPS_VIEWS.map((v) => ({ view: v, w: 1280, h: 900, mobile: false, seed: dark(opsSeed()), label: `ops/${v}@1280/dark` })),
+  // Worst-case content at the tightest width each audience ships at, plus one roomy width
+  // to separate "this layout cannot hold long content" from "this layout is just narrow".
+  ...OPS_VIEWS.flatMap((v) => [981, 1440].map((w) =>
+    ({ view: v, w, h: 900, mobile: false, seed: stressSeed(), label: `stress-ops/${v}@${w}` }))),
+  ...CUST_VIEWS.flatMap((v) => [320, 390].map((w) =>
+    ({ view: v, w, h: 844, mobile: true, seed: stressCustomerSeed(), label: `stress-cust/${v}@${w}` }))),
 ];
 
 try {

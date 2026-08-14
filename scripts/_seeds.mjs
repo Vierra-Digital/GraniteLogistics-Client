@@ -70,3 +70,52 @@ export function pkg(n, status, carrier, description, value) {
   };
 }
 
+
+// Worst-case realistic content. Every seed above uses tidy 20-character strings, so the
+// layouts have only ever been measured against data that fits comfortably. Real logistics
+// data does not look like that: manufacturer part names run long, so do hyphenated
+// surnames and municipality names, declared values reach seven figures, and an
+// unrecognised carrier or a long exception reason has to land somewhere.
+//
+// Nothing here is padding for its own sake -- these lengths are the kind a real
+// integration produces.
+const LONG_ITEM = "Samsung 85\" QN900D Neo QLED 8K Smart TV with One Connect Box, Wall Mount Kit and 5-Year Protection Plan";
+const LONG_NAME = "Wilhelmina Fitzgerald-Montgomery III";
+const LONG_CITY = "Charlotte Amalie West-Fredriksted";
+const LONG_ADDR = "18845 Northwest Commonwealth Industrial Parkway, Building 7, Suite 1200, Loading Dock C";
+
+export const stressSeed = () => {
+  const now = Date.now();
+  const mk = (n, status, carrier, over) => ({
+    ...pkg(n, status, carrier, LONG_ITEM, 1249999),
+    customer: { name: LONG_NAME, address: LONG_ADDR, city: LONG_CITY, state: "VI", zip: "00802-1147",
+      phone: "+1 (340) 555-0142 ext. 88213" },
+    ...over,
+  });
+  return {
+    auth: { token: "shot-token", user: { email: "operations.coordinator@granite-logistics-partners.example.com",
+      name: "Wilhelmina Fitzgerald-Montgomery III", role: "Admin", emailVerified: true } },
+    state: {
+      settings: { role: "Admin", roleChosen: true, cloud: { url: "", key: "granite-dev-key", autoSync: false } },
+      packages: [
+        mk(1, "OutforDelivery", "UPS"),
+        mk(2, "InTransit", "FedEx", { exception: { type: "Refused at door, recipient disputes the declared contents", ts: now } }),
+        mk(3, "Delivered", "UPS"),
+        mk(4, "Staged", "UPS"),
+        mk(5, "PickedUp", null),
+        mk(6, "Won", null),
+      ],
+      manifests: [], loadUnits: [], events: [],
+    },
+  };
+};
+
+export const stressCustomerSeed = () => {
+  const s = stressSeed();
+  return {
+    auth: { token: "shot-token", user: { email: "wilhelmina.fitzgerald-montgomery@example.com",
+      name: "Wilhelmina Fitzgerald-Montgomery III", role: "Customer", emailVerified: true } },
+    state: { ...s.state, settings: { role: "Customer", roleChosen: true },
+      packages: s.state.packages.slice(0, 3).map((p) => ({ ...p, customerEmail: "wilhelmina.fitzgerald-montgomery@example.com" })) },
+  };
+};

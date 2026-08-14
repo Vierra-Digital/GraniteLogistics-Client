@@ -362,7 +362,13 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .pickup-list,.stage-list,.tracking-list{display:flex;flex-direction:column;gap:10px;max-height:64vh;overflow:auto}
 .row-item{border:1px solid var(--line);border-radius:12px;padding:13px 15px;display:flex;gap:14px;align-items:center}
 .row-item .ri-main{flex:1;min-width:0}
-.row-item .ri-title{font-weight:700;font-size:.92rem;overflow:hidden;text-overflow:ellipsis}
+/* text-overflow:ellipsis only acts on a single unwrapped line, and this had no
+   white-space:nowrap, so the declaration was inert and a long part name wrapped to five
+   lines -- Chain of Custody showed four packages where it should show six. nowrap would
+   truncate a product name far too early to tell two rows apart, so it clamps at two lines
+   instead: enough to distinguish items, bounded height either way. */
+.row-item .ri-title{font-weight:700;font-size:.92rem;overflow:hidden;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
 .row-item .ri-sub{font-size:.8rem;color:var(--slate-500);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* The account that placed a self-serve order: present but visually subordinate to the
    recipient, since ops scans by recipient first. */

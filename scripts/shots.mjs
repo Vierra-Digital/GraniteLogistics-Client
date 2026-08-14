@@ -12,7 +12,7 @@
 // real account.
 import { launch } from "./_browser.mjs";
 import { mkdirSync, existsSync, rmSync } from "node:fs";
-import { customerSeed, opsSeed, emptyCustomerSeed, emptyOpsSeed, dark } from "./_seeds.mjs";
+import { customerSeed, opsSeed, emptyCustomerSeed, emptyOpsSeed, dark, stressSeed, stressCustomerSeed } from "./_seeds.mjs";
 
 const BASE = process.env.GL_BASE || "http://localhost:8080";
 const OUT = "shots";
@@ -54,6 +54,13 @@ const SHOTS = [
   { name: "24-ops-reports-dark", url: "/app.html", viewport: DESK, seed: dark(opsSeed()), view: "reports" },
   { name: "25-ops-batch-dark", url: "/app.html", viewport: DESK, seed: dark(opsSeed()), view: "batch" },
   { name: "26-customer-home-dark-phone", full: true, url: "/app.html", viewport: PHONE, seed: dark(customerSeed()), view: "custhome" },
+  // Worst-case content: long part names, hyphenated surnames, seven-figure values. Every
+  // other seed uses tidy short strings, so these are the only shots that show what the
+  // layouts do when real data arrives.
+  { name: "27-stress-overview-desktop", url: "/app.html", viewport: DESK, seed: stressSeed(), view: "overview" },
+  { name: "28-stress-tracking-desktop", url: "/app.html", viewport: DESK, seed: stressSeed(), view: "tracking" },
+  { name: "29-stress-runner-desktop", url: "/app.html", viewport: DESK, seed: stressSeed(), view: "runner" },
+  { name: "30-stress-customer-home-phone", full: true, url: "/app.html", viewport: PHONE, seed: stressCustomerSeed(), view: "custhome" },
 ];
 
 if (!existsSync(OUT)) mkdirSync(OUT);
