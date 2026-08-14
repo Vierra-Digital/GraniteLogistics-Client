@@ -90,6 +90,38 @@ const SHOTS = [
       f.querySelectorAll("[data-next]")[1].click();
       f.querySelector('[type="submit"]').click();
     } },
+
+  // The entry point every user meets, and the two steps of the order form between the
+  // first screen and the confirmation. None of these had ever been rendered.
+  { name: "36-register-desktop", url: "/app.html", viewport: DESK },
+  { name: "37-register-phone", full: true, url: "/app.html", viewport: PHONE },
+  { name: "38-signin-phone", full: true, url: "/app.html", viewport: PHONE,
+    act: () => document.querySelector("#login-alt .linkbtn")?.click() },
+  { name: "39-order-step2-phone", full: true, url: "/app.html", viewport: PHONE, seed: customerSeed(), view: "order",
+    act: () => {
+      const f = document.getElementById("cust-order-form");
+      const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (!el) return;
+        el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); };
+      set("item", "Herman Miller Aeron chair, size B"); set("value", "1290");
+      f.querySelector("[data-next]").click();
+    } },
+  { name: "40-order-step3-phone", full: true, url: "/app.html", viewport: PHONE, seed: customerSeed(), view: "order",
+    act: () => {
+      const f = document.getElementById("cust-order-form");
+      const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (!el) return;
+        el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); };
+      set("item", "Herman Miller Aeron chair, size B"); set("value", "1290");
+      f.querySelector("[data-next]").click();
+      set("name", "Jane Doe"); set("address", "142 Birchwood Lane");
+      set("city", "Dayton"); set("state", "OH"); set("zip", "45402"); set("phone", "937-555-0142");
+      f.querySelectorAll("[data-next]")[1].click();
+    } },
+  // What a customer sees when they get it wrong, and the prompt guarding a destructive
+  // action. Both are states the app spends real time in and neither had been rendered.
+  { name: "41-order-validation-phone", full: true, url: "/app.html", viewport: PHONE, seed: customerSeed(), view: "order",
+    act: () => document.querySelector("#cust-order-form [data-next]").click() },
+  { name: "42-confirm-dialog-phone", full: true, url: "/app.html", viewport: PHONE, seed: customerSeed(), view: "account",
+    act: () => document.getElementById("acct-close").click() },
 ];
 
 if (!existsSync(OUT)) mkdirSync(OUT);

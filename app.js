@@ -1623,7 +1623,9 @@
     var addr = [stepVal("address"), stepVal("city"), stepVal("state").toUpperCase(), stepVal("zip")].filter(Boolean).join(", ") || "–";
     var rows = [
       ["Item", stepVal("item") || "–"],
-      ["Declared value", stepVal("value") ? "$" + stepVal("value") : "–"],
+      // money(), not "$" + raw: every other figure in the app is comma-grouped, and a
+      // seven-figure declared value rendered here as $1249999.
+      ["Declared value", stepVal("value") ? money(parseInt(stepVal("value"), 10) || 0) : "–"],
       ["Recipient", stepVal("name") || "–"],
       ["Address", addr],
       ["Phone", stepVal("phone") || "–"]
