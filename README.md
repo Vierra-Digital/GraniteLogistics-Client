@@ -286,6 +286,26 @@ also accepts an optional `x-signature` HMAC of the body using `GL_WEBHOOK_SECRET
 - A readiness report at `/api/health` naming any configuration still missing.
 - One motion system across the app, with a `prefers-reduced-motion` opt-out.
 
+## Storage budget
+
+The workspace lives in `localStorage`, which tops out at about **5,240,320 characters**
+here (measured by binary-searching the largest value the browser accepts). A condition
+photo is around **110,000 characters** once `downscalePhoto()` has taken it to 900px at
+JPEG q0.7 and it has been base64'd -- so roughly **23 parcels** carrying a pickup and a
+delivery photo fill the budget. That is a morning's work for one runner, not an edge case.
+
+The app says so rather than failing quietly:
+
+- At 75% the sidebar pill turns amber and reads "Storage NN% full", with a toast pointing
+  at Cloud Sync and the backup export, while there is still room to act.
+- If a write does fail, the pill reads "Not saving on this device" and a toast explains
+  it. Both latch, so they warn once rather than on every change, and clear the moment a
+  write succeeds again.
+
+Nothing is lost at that point: what is on screen is still correct, and a cloud push or a
+backup export still saves it. Moving photos to IndexedDB or to the server would raise the
+ceiling properly; neither is done.
+
 ## What is still simulated
 
 There are no payments. Carrier tracking numbers and scans are still generated locally: see

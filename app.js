@@ -243,12 +243,21 @@
   // Whether the last write to localStorage succeeded. Latched so the warning appears once
   // rather than on every keystroke, and cleared the moment a write succeeds again.
   var storageBroken = false;
+  // localStorage tops out around 5.24 million characters here, measured by binary-searching
+  // the largest value the browser would accept. A condition photo is ~110,000 characters
+  // once downscaled to 900px at JPEG q0.7 and base64'd, so roughly 23 parcels with a pickup
+  // and a delivery photo fill the budget -- a morning's work, not an edge case. Warn at 75%,
+  // while there is still room to act.
+  var STORAGE_LIMIT = 5240320;
+  var STORAGE_WARN_AT = Math.round(STORAGE_LIMIT * 0.75);
   function save() {
     var ok = true;
     // tombstones must persist: a deletion made while offline has to survive a reload,
     // or the server-side merge would resurrect the order on the next successful push.
-    try { localStorage.setItem(STORE_KEY, JSON.stringify({ packages: state.packages, manifests: state.manifests, loadUnits: state.loadUnits, events: state.events, settings: state.settings, seq: seq, tombstones: state.tombstones || [] })); }
+    var payload = JSON.stringify({ packages: state.packages, manifests: state.manifests, loadUnits: state.loadUnits, events: state.events, settings: state.settings, seq: seq, tombstones: state.tombstones || [] });
+    try { localStorage.setItem(STORE_KEY, payload); }
     catch (e) { ok = false; }
+    if (ok && payload.length > STORAGE_WARN_AT) storageFillingUp(payload.length);
     // This used to be swallowed. A full quota then meant an operator labelled a parcel,
     // saw "Labeled" and a confirmation toast, and lost the change on reload with nothing
     // said -- and condition photos are stored as data URLs, so the 5MB budget goes quickly.
@@ -256,24 +265,31 @@
     if (typeof scheduleAutoPush === "function") scheduleAutoPush();
     return ok;
   }
+  // Nearly full but still writing. Distinct from storageFailed(), which is the wall itself.
+  var storageNearWarned = false;
+  function storageFillingUp(len) {
+    if (storageNearWarned || storageBroken) return;
+    storageNearWarned = true;
+    var pct = Math.round(len / STORAGE_LIMIT * 100);
+    setPill("warn", "Storage " + pct + "% full");
+    toast("This device is " + pct + "% full and will stop saving soon. Push to cloud from Settings → Cloud Sync, or export a backup from Data Management.", "warn", 12000);
+  }
+  function setPill(kind, text) {
+    var pill = $("#env-pill"); if (!pill) return;
+    pill.classList.toggle("warn", kind === "warn");
+    pill.innerHTML = '<span class="dot' + (kind === "warn" ? "" : " ok") + '" aria-hidden="true"></span> ' + text;
+  }
   function storageFailed() {
     if (storageBroken) return;
     storageBroken = true;
-    var pill = $("#env-pill");
-    if (pill) {
-      pill.classList.add("warn");
-      pill.innerHTML = '<span class="dot" aria-hidden="true"></span> Not saving on this device';
-    }
+    setPill("warn", "Not saving on this device");
     toast("This device is out of storage, so changes are not being saved here. Export a backup from Settings → Data Management, or free some space.", "warn", 12000);
   }
   function storageRecovered() {
     if (!storageBroken) return;
     storageBroken = false;
-    var pill = $("#env-pill");
-    if (pill) {
-      pill.classList.remove("warn");
-      pill.innerHTML = '<span class="dot ok" aria-hidden="true"></span> Synced to this device';
-    }
+    storageNearWarned = false;
+    setPill("ok", "Synced to this device");
     toast("Saving on this device again.", "ok");
   }
   // Derive manifest records by grouping packages that share a batchId.
