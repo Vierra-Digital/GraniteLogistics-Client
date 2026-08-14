@@ -46,7 +46,7 @@
   .tk-status{font-family:var(--disp);font-weight:700;font-size:1.7rem;text-transform:uppercase;color:#13263a;line-height:1.1}
   .tk-eta{font-family:var(--disp);font-weight:600;color:var(--accent-d);text-transform:uppercase;letter-spacing:.04em;font-size:.92rem;text-align:right}
   .tk-steps{display:flex;margin:26px 0 22px}
-  .tk-step{flex:1;position:relative;text-align:center;font-size:.74rem;color:#8a96a4;font-weight:600}
+  .tk-step{flex:1;position:relative;text-align:center;font-size:.74rem;color:#6e7784;font-weight:600}
   .tk-step::before{content:"";position:absolute;top:9px;left:-50%;width:100%;height:3px;background:#dde3ea;z-index:0}
   .tk-step:first-child::before{display:none}
   .tk-step.done::before,.tk-step.cur::before{background:var(--accent)}
@@ -56,7 +56,7 @@
   .tk-step.done .tk-lbl,.tk-step.cur .tk-lbl{color:#13263a}
   .tk-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:8px}
   .tk-grid>div{display:flex;flex-direction:column;gap:3px;padding:10px 0;border-top:1px solid #eef2f6}
-  .tk-grid b{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#8a96a4}
+  .tk-grid b{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#6e7784}
   .tk-grid span{font-size:.96rem}
   .tk-grid .mono{font-family:"Consolas",monospace}
   .tk-photos{display:flex;gap:12px;margin-top:16px}
@@ -76,7 +76,10 @@
   </a>
   <nav class="site-nav">
     <a href="index.html">Home</a>
-    <a href="app.html">Platform</a>
+    <!-- These point at the landing page's explainer sections. They used to both go to
+         app.html, which made "Platform" and "Launch Platform" the same link in one header. -->
+    <a href="index.html#platform">Platform</a>
+    <a href="index.html#api">API</a>
   </nav>
   <a class="btn-ghost" href="app.html">Launch Platform</a>
 </header>

@@ -46,6 +46,11 @@
     </span>
     <span class="wm-text">GRANITE<strong>LOGISTICS</strong></span>
   </a>
+  <nav class="site-nav">
+    <a href="#platform">Platform</a>
+    <a href="#api">API</a>
+    <a href="track.html">Track</a>
+  </nav>
   <a class="btn-ghost" href="app.html">Launch Platform</a>
 </header>
 
@@ -78,6 +83,121 @@
     </form>
   </div>
 </main>
+
+<!-- What the platform actually does. Every claim below maps to shipped behaviour: if a
+     capability is not in the code, it is not on this page. Notably absent on purpose:
+     carrier tracking integration (netlify/functions/_carriers.mjs fetchScans throws for a
+     configured carrier -- there are no UPS/FedEx credentials yet) and payments. -->
+<section class="band" id="platform">
+  <div class="band-inner">
+    <p class="eyebrow"><span class="tick" aria-hidden="true"></span>The platform</p>
+    <h2 class="band-h">Everything between the order and the doorstep.</h2>
+    <p class="band-sub">One workspace for the people moving freight and the customers waiting on it.</p>
+
+    <div class="cap-grid">
+      <article class="cap">
+        <h3>Order ingest</h3>
+        <p>Your store POSTs an order and it lands in the operator's queue. Nothing to key in.
+          Manual entry and CSV import are there for the exceptions.</p>
+      </article>
+      <article class="cap">
+        <h3>Labels &amp; manifests</h3>
+        <p>Code&nbsp;128 labels as print-ready PDFs, carrier manifests as CSV, batched by
+          carrier and assigned to a dock lane.</p>
+      </article>
+      <article class="cap">
+        <h3>Pre-sort &amp; staging</h3>
+        <p>Sort outbound volume by ZIP to bypass initial hub handling, then consolidate into
+          load-ready units before handoff.</p>
+      </article>
+      <article class="cap">
+        <h3>Chain of custody</h3>
+        <p>Every handoff timestamped end to end, with condition photos captured at pickup and
+          at delivery so damage disputes are settled with evidence.</p>
+      </article>
+      <article class="cap">
+        <h3>Customer tracking</h3>
+        <p>Your customer follows their own parcel and can get email or push updates as the
+          status changes. The public page shows status, dates and destination city — never the
+          recipient's name, address or contents.</p>
+      </article>
+      <article class="cap">
+        <h3>Roles &amp; access</h3>
+        <p>Administrator, Runner, Driver and Viewer, granted per person and revocable, with an
+          audit trail of who changed whose access.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- The API. This is the whole positioning, so it shows the real endpoint rather than
+     describing it: header name, field names and response shape all match
+     netlify/functions/orders.mjs and makeOrder() in _lib.mjs. -->
+<section class="band band-alt" id="api">
+  <div class="band-inner">
+    <p class="eyebrow"><span class="tick" aria-hidden="true"></span>API-first</p>
+    <h2 class="band-h">One POST and the parcel exists.</h2>
+    <div class="api-split">
+      <div class="api-copy">
+        <p>Send one order or a batch. Every order is written and then read back to confirm it
+          stored, because a webhook that is told "created" for an order we dropped is a
+          shipment nobody knows about.</p>
+        <p>A partial batch returns <code>503</code> and names what stored, so your retry only
+          resends what is actually missing.</p>
+        <p class="api-note">Ask for a key at
+          <a href="mailto:ken@usegl.com">ken@usegl.com</a>.</p>
+      </div>
+      <div class="api-code">
+        <div class="code-head"><span>POST</span> /api/orders</div>
+<pre><code>curl -X POST https://usegl.com/api/orders \
+  -H "x-api-key: $GL_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name":  "Jane Doe",
+    "address":"142 Birchwood Lane",
+    "city":  "Dayton", "state": "OH", "zip": "45402",
+    "item":  "LG 55\" OLED TV",
+    "value": 1299,
+    "source":"Shopify"
+  }'</code></pre>
+        <div class="code-head code-head-res"><span>201</span> Created</div>
+<pre><code>{ "ok": true, "created": 1,
+  "packages": [ { "id": "GL-1042", "status": "Won",
+                  "barcode": "GL1042" } ] }</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- The real pipeline, in the order the app records it. Stage names match STAGES in app.js,
+     using the customer-facing label for the first one rather than the auction wording. -->
+<section class="band" id="flow">
+  <div class="band-inner">
+    <p class="eyebrow"><span class="tick" aria-hidden="true"></span>How a shipment moves</p>
+    <h2 class="band-h">Seven stages, each one stamped.</h2>
+    <ol class="flow">
+      <li><span class="fl-n">1</span><b>Order received</b><span>By API, by CSV, or keyed in.</span></li>
+      <li><span class="fl-n">2</span><b>Intake &amp; label</b><span>Condition photo, Code&nbsp;128 label.</span></li>
+      <li><span class="fl-n">3</span><b>Picked up</b><span>Collected from the store.</span></li>
+      <li><span class="fl-n">4</span><b>Staged at dock</b><span>Pre-sorted, batched, lane assigned.</span></li>
+      <li><span class="fl-n">5</span><b>In transit</b><span>Manifested to the carrier.</span></li>
+      <li><span class="fl-n">6</span><b>Out for delivery</b><span>On the final vehicle.</span></li>
+      <li><span class="fl-n">7</span><b>Delivered</b><span>Photo on handoff.</span></li>
+    </ol>
+  </div>
+</section>
+
+<section class="band band-cta">
+  <div class="band-inner band-inner-center">
+    <h2 class="band-h">Put a parcel through it.</h2>
+    <p class="band-sub">The platform runs on sample data until you connect a store, so you can
+      walk the whole pipeline before committing anything.</p>
+    <div class="cta-row center">
+      <a class="btn-primary" href="app.html">Open the Platform &rarr;</a>
+      <a class="btn-outline" href="mailto:ken@usegl.com">Talk to us</a>
+    </div>
+  </div>
+</section>
 
 <!-- Footer -->
 <footer class="site-footer">

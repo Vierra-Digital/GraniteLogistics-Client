@@ -19,11 +19,25 @@ const OPS_VIEWS = ["overview", "ingest", "runner", "presort", "batch", "driver",
                    "tracking", "reports", "activity", "settings", "admin"];
 const CUST_VIEWS = ["custhome", "order", "account"];
 
+// The public pages have their own palette in landing.css and are the first thing a
+// prospect sees, so they are audited too -- they were outside this tool while the whole
+// marketing section below the hero was being written.
+const STATIC = [
+  { url: "/index.html", name: "landing" },
+  { url: "/track.html?n=GL-1041", name: "track" },
+  { url: "/privacy.html", name: "privacy" },
+  { url: "/terms.html", name: "terms" },
+];
+
 const SCENARIOS = [
   ...OPS_VIEWS.map((v) => ({ label: "ops/" + v + "/light", seed: opsSeed(), view: v, mobile: false })),
   ...OPS_VIEWS.map((v) => ({ label: "ops/" + v + "/dark", seed: dark(opsSeed()), view: v, mobile: false })),
   ...CUST_VIEWS.map((v) => ({ label: "cust/" + v + "/light", seed: customerSeed(false), view: v, mobile: true })),
   ...CUST_VIEWS.map((v) => ({ label: "cust/" + v + "/dark", seed: dark(customerSeed(false)), view: v, mobile: true })),
+  ...STATIC.flatMap((s) => [
+    { label: "public/" + s.name + "/desktop", staticUrl: s.url, mobile: false },
+    { label: "public/" + s.name + "/phone", staticUrl: s.url, mobile: true },
+  ]),
 ];
 
 try {
@@ -128,6 +142,9 @@ await page.setRequestInterception(true);
 page.on("request", (req) => {
   const u = req.url();
   const seed = current.seed;
+  // Static public pages carry no seed. track.html calls /api/track, so without this the
+  // handler would throw on seed.auth and the request would hang.
+  if (!seed) return req.continue();
   const j = (o) => req.respond({ status: 200, contentType: "application/json", body: JSON.stringify(o) });
   if (u.includes("/api/auth")) return j({ ok: true, user: seed.auth.user, verification: { available: true, sent: false } });
   if (u.includes("/api/my-orders")) return j({ ok: true, orders: seed.state.packages.filter((p) => p.customerEmail === seed.auth.user.email) });
@@ -142,9 +159,9 @@ page.on("request", (req) => {
 // the static server, which is a successful navigation. Checking ok() made every scenario
 // after the first look like a load failure.
 const loaded = (r) => r && r.status() < 400;
-const nav = async (opts) => {
+const nav = async (path = "/app.html") => {
   for (let i = 1; i <= 3; i++) {
-    const r = await page.goto(BASE + "/app.html", { waitUntil: "load", timeout: 30000, ...opts }).catch(() => null);
+    const r = await page.goto(BASE + path, { waitUntil: "load", timeout: 30000 }).catch(() => null);
     if (loaded(r)) return r;
   }
   return null;
@@ -156,6 +173,20 @@ for (const sc of SCENARIOS) {
   await page.setViewport(sc.mobile
     ? { width: 390, height: 844, deviceScaleFactor: 1, isMobile: true, hasTouch: true }
     : { width: 1440, height: 900, deviceScaleFactor: 1 });
+
+  // A static public page has no seed and no view to open: load it and measure.
+  if (sc.staticUrl) {
+    if (!await nav(sc.staticUrl)) { console.error("  " + sc.label + ": page did not load, skipped"); skipped++; continue; }
+    await new Promise((r) => setTimeout(r, 400));
+    const theme = "light";
+    for (const r of await page.evaluate(audit)) {
+      if (r.got < MIN) continue;
+      const key = theme + "|" + r.sel + "|" + r.color + "|" + r.background;
+      if (!findings.has(key)) findings.set(key, { ...r, theme, where: [sc.label] });
+      else findings.get(key).where.push(sc.label);
+    }
+    continue;
+  }
 
   // Load once to get an origin we can write localStorage against, seed it, then reload so
   // the app boots from the seeded state.
