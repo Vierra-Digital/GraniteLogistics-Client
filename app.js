@@ -874,8 +874,24 @@
 
   // ---- Command palette (Ctrl/Cmd-K) ----
   var cmdItems = [], cmdSel = 0;
-  function openCmd() { var b = $("#cmd-backdrop"); if (!b) return; b.classList.add("open"); var i = $("#cmd-input"); i.value = ""; renderCmd(""); setTimeout(function () { i.focus(); }, 20); }
-  function closeCmd() { var b = $("#cmd-backdrop"); if (b) b.classList.remove("open"); }
+  // The palette is a modal dialog and was the one that never trapped focus: 11 of 12 Tab
+  // presses walked straight out of it and into the sidebar behind, and Escape dropped focus
+  // on the body instead of the control that opened it. trapFocus/releaseFocus is what every
+  // other dialog here already uses, and it restores focus to whatever was focused on open.
+  function openCmd() {
+    var b = $("#cmd-backdrop"); if (!b) return;
+    b.classList.add("open");
+    var i = $("#cmd-input"); i.value = ""; renderCmd("");
+    trapFocus($(".cmd", b));
+    // trapFocus focuses the first focusable, which is this input; the timeout keeps the
+    // caret behaviour identical to before.
+    setTimeout(function () { i.focus(); }, 20);
+  }
+  function closeCmd() {
+    var b = $("#cmd-backdrop"); if (!b || !b.classList.contains("open")) return;
+    b.classList.remove("open");
+    releaseFocus($(".cmd", b));
+  }
   function renderCmd(q) {
     q = (q || "").trim().toLowerCase();
     cmdItems = [];

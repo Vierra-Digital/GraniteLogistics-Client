@@ -419,6 +419,18 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .modal{background:var(--card);border-radius:18px;max-width:780px;width:100%;max-height:88vh;overflow:auto;padding:24px;box-shadow:0 30px 80px rgba(2,6,23,.4)}
 .modal h2{margin-bottom:4px}
 .modal-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;margin-top:14px}
+/* field() emits <div class="field"><b>label</b><span>value</span></div>, and the only rule
+   for it was scoped to .scan-result -- so in the shipment modal the pair was unstyled and
+   inline, printing "CustomerPriya Raman" and "Tracking1Z999AA10123456783" with no
+   separator at all. A label column and a wrapping value, matching the pattern the public
+   tracking card already uses. overflow-wrap because an address or a tracking number has
+   no obligation to contain a space. */
+.modal .field{display:flex;gap:10px;align-items:baseline;padding:7px 0;
+  border-bottom:1px solid var(--slate-100);font-size:.9rem}
+.modal .field:last-child{border-bottom:0}
+.modal .field b{flex:0 0 78px;color:var(--slate-500);font-weight:600;font-size:.72rem;
+  text-transform:uppercase;letter-spacing:.05em}
+.modal .field span{flex:1;min-width:0;overflow-wrap:anywhere}
 .modal .photos{display:flex;gap:10px;flex-wrap:wrap}
 .modal .photos img{width:120px;height:120px;border-radius:11px;object-fit:cover;border:1px solid var(--line)}
 .close-x{float:right;border:0;background:var(--slate-100);width:34px;height:34px;border-radius:9px;cursor:pointer;font-size:1.1rem}

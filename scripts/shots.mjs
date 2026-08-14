@@ -61,6 +61,16 @@ const SHOTS = [
   { name: "28-stress-tracking-desktop", url: "/app.html", viewport: DESK, seed: stressSeed(), view: "tracking" },
   { name: "29-stress-runner-desktop", url: "/app.html", viewport: DESK, seed: stressSeed(), view: "runner" },
   { name: "30-stress-customer-home-phone", full: true, url: "/app.html", viewport: PHONE, seed: stressCustomerSeed(), view: "custhome" },
+
+  // States that only exist after an interaction. Everything above is a view at rest.
+  { name: "31-modal-shipment-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "overview",
+    act: () => document.querySelector('#overview-table tr[data-id]').click() },
+  { name: "32-command-palette-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "overview",
+    act: () => document.getElementById("search-trigger").click() },
+  { name: "33-notifications-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "overview",
+    act: () => document.getElementById("notif-btn").click() },
+  { name: "34-modal-shipment-dark", url: "/app.html", viewport: DESK, seed: dark(opsSeed()), view: "overview",
+    act: () => document.querySelector('#overview-table tr[data-id]').click() },
 ];
 
 if (!existsSync(OUT)) mkdirSync(OUT);
@@ -165,6 +175,13 @@ for (const shot of SHOTS) {
       const el = document.querySelector('[data-bn="' + v + '"]') || document.querySelector('.nav-item[data-view="' + v + '"]');
       if (el) el.click();
     }, shot.view);
+  }
+  // Anything that only exists after an interaction -- a modal, the command palette, the
+  // notification panel, the order-success panel. Without this every shot is a default
+  // view state, and the states a user spends real time in are never looked at.
+  if (shot.act) {
+    await new Promise((r) => setTimeout(r, 450));
+    await page.evaluate(shot.act);
   }
   // Let entrance animations settle so nothing is caught mid-fade.
   await new Promise((r) => setTimeout(r, 900));

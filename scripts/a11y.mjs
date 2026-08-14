@@ -16,6 +16,9 @@
 //   positive-tabindex    tabindex > 0, which overrides document order for the whole page
 //   label-not-associated a form control with no label, aria-label or aria-labelledby
 //   unreachable-control  a visible control that cannot be tabbed to
+//   mouse-only-control   cursor:pointer on something neither focusable nor interactive
+//   dialog-not-modal     role=dialog without aria-modal, so the page behind stays live
+//   dialog-unnamed       a dialog with no accessible name
 import { launch } from "./_browser.mjs";
 import { customerSeed, opsSeed } from "./_seeds.mjs";
 
@@ -108,6 +111,19 @@ function audit() {
       const missing = el.getAttribute(attr).split(/\s+/).filter((id) => id && !document.getElementById(id));
       if (missing.length) add("dangling-aria", el, attr + ' -> missing id "' + missing.join(", ") + '"');
     });
+  });
+
+  // Dialogs are hidden when a view is at rest, so this one check deliberately ignores
+  // visibility. aria-modal is what tells a screen reader the rest of the page is inert;
+  // the command palette shipped without it while every other dialog had it, and it turned
+  // out not to trap focus either -- 11 of 12 Tab presses walked out into the page behind.
+  // The trap itself needs interaction to test, but the missing attribute is the tell.
+  document.querySelectorAll('[role="dialog"], [role="alertdialog"]').forEach((el) => {
+    if (el.getAttribute("aria-modal") !== "true") {
+      add("dialog-not-modal", el, 'role="' + el.getAttribute("role") + '" without aria-modal="true"');
+    }
+    const named = (el.getAttribute("aria-label") || "").trim() || el.getAttribute("aria-labelledby");
+    if (!named) add("dialog-unnamed", el, "a dialog announced only as its role");
   });
 
   document.querySelectorAll("[tabindex]").forEach((el) => {
