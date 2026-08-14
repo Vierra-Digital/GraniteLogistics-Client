@@ -425,6 +425,19 @@
     Driver: ["home", "driver", "tracking"],
     Viewer: ["overview", "tracking", "reports", "activity"]
   };
+  // Where a role lands, which is a separate question from what it may open. The landing
+  // view used to be allowedViews()[0], but that list is ordered to match the sidebar
+  // grouping -- ORDERING sits above DASHBOARD -- so an Administrator signing in to an
+  // operations platform arrived at the customer order form, while app.html marked
+  // Executive Overview as the active nav item. The markup and the code disagreed.
+  var ROLE_HOME = {
+    Customer: "custhome", Admin: "overview", Runner: "home", Driver: "home", Viewer: "overview"
+  };
+  function homeView() {
+    var allowed = allowedViews();
+    var home = ROLE_HOME[savedRole()];
+    return (home && allowed.indexOf(home) !== -1) ? home : allowed[0];
+  }
   var ROLE_META = {
     Customer: { label: "Customer", ico: "🛒", tag: "Place orders" },
     Admin: { label: "Administrator", ico: "▦", tag: "Full access" },
@@ -550,7 +563,7 @@
     }
     state.settings.role = role; state.settings.roleChosen = true; save();
     resetSyncBlock(); // a different role may well be allowed to sync
-    closeGate(); applyRole(); go(allowedViews()[0]);
+    closeGate(); applyRole(); go(homeView());
     toast("Workspace: " + ROLE_META[role].label, "ok");
   }
   function toggleSidebar(open) {
@@ -747,7 +760,7 @@
           state.settings.role = "Customer";
           save();
           applyRole();
-          go(allowedViews()[0]);
+          go(homeView());
           toast("This account no longer has operations access.", "warn", 8000);
         }
         updateRoleUI();
@@ -761,7 +774,7 @@
     resetSyncBlock();
     if (u) { state.settings.role = u.role || state.settings.role; state.settings.roleChosen = true; save(); }
     hideLogin();
-    updateRoleUI(); applyRole(); go(allowedViews()[0]); renderBottomNav(); renderNotifs(); bootSync();
+    updateRoleUI(); applyRole(); go(homeView()); renderBottomNav(); renderNotifs(); bootSync();
   }
 
   // ---- Bottom tab bar: the customer's ONLY navigation, at every screen size.
@@ -1185,7 +1198,7 @@
     });
   }
   function renderAdmin() {
-    if (!canManageRoles()) { go(allowedViews()[0]); return; }
+    if (!canManageRoles()) { go(homeView()); return; }
     admStatus("Loading accounts…");
     admFetch().then(function (j) {
       if (!j.ok) {
@@ -2265,7 +2278,7 @@
     if (!workspaceSyncAllowed()) return;
     syncing = true;
     pullState().then(function (s) {
-      if (s && Array.isArray(s.packages) && s.packages.length) { applyPulled(s); applyRole(); go(allowedViews()[0]); toast("Synced from cloud", "api"); }
+      if (s && Array.isArray(s.packages) && s.packages.length) { applyPulled(s); applyRole(); go(homeView()); toast("Synced from cloud", "api"); }
       else { autoPush(); }
       syncing = false;
     }).catch(function (e) { syncing = false; syncFailed(e); });
@@ -2283,7 +2296,7 @@
   function cloudPull() {
     saveCloudInputs(); resetSyncBlock(); cloudStatus("Pulling…"); cloudBusy(true);
     pullState().then(function (s) {
-      if (applyPulled(s)) { cocSelected = null; trackQuery = ""; cloudStatus("✓ Pulled " + plural(state.packages.length, "package") + " · " + new Date().toLocaleTimeString()); toast("Pulled from cloud", "api"); applyRole(); go(allowedViews()[0]); }
+      if (applyPulled(s)) { cocSelected = null; trackQuery = ""; cloudStatus("✓ Pulled " + plural(state.packages.length, "package") + " · " + new Date().toLocaleTimeString()); toast("Pulled from cloud", "api"); applyRole(); go(homeView()); }
       else { cloudStatus("No data found for this workspace yet. Push first."); }
     }).catch(function (e) { manualSyncFailed(e, "Pull"); })
       .finally(function () { cloudBusy(false); });
@@ -3191,7 +3204,7 @@
       var keepRole = currentRole(), keepChosen = state.settings.roleChosen;
       seed(); state.settings.role = keepRole; state.settings.roleChosen = keepChosen; save();
       cocSelected = null; trackQuery = ""; toast("Demo data reset to seed.", "ok");
-      applyRole(); go(allowedViews()[0]);
+      applyRole(); go(homeView());
     });
   });
 
@@ -3416,7 +3429,7 @@
   } else if (currentUser()) {
     state.settings.role = currentUser().role || state.settings.role;
     state.settings.roleChosen = true;
-    if (!applyHash()) go(allowedViews()[0]);
+    if (!applyHash()) go(homeView());
     applyRole();
     renderNotifs();
     bootSync();

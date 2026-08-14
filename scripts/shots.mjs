@@ -82,66 +82,84 @@ Start the site first, then run this again:
 
 const failed = [];
 const browser = await launch();
-console.log("Rendering " + SHOTS.length + " screens from " + BASE + " into " + OUT + "/\n");
+console.log("Rendering " + SHOTS.length + " screens from " + BASE + " into " + OUT + "/" + String.fromCharCode(10));
 
-for (const shot of SHOTS) {
-  const page = await browser.newPage();
-  await page.setViewport(shot.viewport);
-  // The service worker would serve a cached build and make a screenshot lie about the
-  // code under test.
-  await page.setBypassServiceWorker?.(true).catch?.(() => {});
+// One page for every shot. Opening a tab per shot -- each with its own request
+// interception and its own evaluateOnNewDocument -- crashed the browser partway through
+// once the list passed about 26 ("Session with given id not found"). The seed is written
+// into localStorage and the page reloaded instead, which is what the app reads at boot.
+const page = await browser.newPage();
+// The service worker would serve a cached build and make a screenshot lie about the code
+// under test.
+await page.setBypassServiceWorker?.(true).catch?.(() => {});
+let current = SHOTS[0];
+await page.setRequestInterception(true);
+page.on("request", (req) => {
+  const u = req.url();
+  const s = current.seed;
+  // Public pages carry no seed and should reach the real static server.
+  if (!s || !u.includes("/api/")) return req.continue();
+  const j = (o) => req.respond({ status: 200, contentType: "application/json", body: JSON.stringify(o) });
+  if (u.includes("/api/auth")) return j({ ok: true, user: s.auth.user, verification: { available: true, sent: false } });
+  // Only the signed-in account's own rows, which is all the real endpoint ever returns.
+  // Returning another user's orders here duplicated them into the ops workspace and made
+  // the screenshots lie.
+  if (u.includes("/api/my-orders")) return j({ ok: true, orders: s.state.packages.filter((p) => p.customerEmail === s.auth.user.email) });
+  if (u.includes("/api/push")) return j({ ok: true, configured: false, publicKey: null });
+  if (u.includes("/api/state")) return j(s.state);
+  if (u.includes("/api/admin")) return j({ ok: true, you: s.auth.user.email, admins: 1,
+    users: [
+      { email: "ops@example.com", name: "Ken Filbert", role: "Admin", source: "env", grantedBy: null, grantedAt: null, createdAt: null },
+      { email: "dana@example.com", name: "Dana Ruiz", role: "Runner", source: "granted", grantedBy: "ops@example.com", grantedAt: "2026-08-10T09:00:00Z", createdAt: null },
+      { email: "jane@example.com", name: "Jane Doe", role: "Customer", source: "default", grantedBy: null, grantedAt: null, createdAt: null },
+    ],
+    audit: [{ email: "dana@example.com", from: "Customer", to: "Runner", by: "ops@example.com", at: "2026-08-10T09:00:00Z" }] });
+  return j({});
+});
 
-  if (shot.seed) {
-    const s = shot.seed;
-    await page.evaluateOnNewDocument((auth, state) => {
-      localStorage.setItem("gl-auth-v2", JSON.stringify(auth));
-      localStorage.setItem("gl-onboarded", "1");
-      localStorage.setItem("granite-logistics-state-v1", JSON.stringify(state));
-    }, s.auth, s.state);
-    // Answer the app's API calls so nothing renders an error state.
-    await page.setRequestInterception(true);
-    page.on("request", (req) => {
-      const u = req.url();
-      if (u.includes("/api/auth")) return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, user: s.auth.user, verification: { available: true, sent: false } }) });
-      if (u.includes("/api/my-orders")) return req.respond({ status: 200, contentType: "application/json",
-        // Only the signed-in account's own rows, which is all the real endpoint ever
-        // returns. Returning another user's orders here duplicated them into the ops
-        // workspace and made the screenshots lie.
-        body: JSON.stringify({ ok: true, orders: s.state.packages.filter((p) => p.customerEmail === s.auth.user.email) }) });
-      if (u.includes("/api/push")) return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, configured: false, publicKey: null }) });
-      if (u.includes("/api/state")) return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify(s.state) });
-      if (u.includes("/api/admin")) return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, you: s.auth.user.email, admins: 1,
-        users: [
-          { email: "ops@example.com", name: "Ken Filbert", role: "Admin", source: "env", grantedBy: null, grantedAt: null, createdAt: null },
-          { email: "dana@example.com", name: "Dana Ruiz", role: "Runner", source: "granted", grantedBy: "ops@example.com", grantedAt: "2026-08-10T09:00:00Z", createdAt: null },
-          { email: "jane@example.com", name: "Jane Doe", role: "Customer", source: "default", grantedBy: null, grantedAt: null, createdAt: null },
-        ],
-        audit: [{ email: "dana@example.com", from: "Customer", to: "Runner", by: "ops@example.com", at: "2026-08-10T09:00:00Z" }] }) });
-      if (u.includes("/api/")) return req.respond({ status: 200, contentType: "application/json", body: "{}" });
-      return req.continue();
-    });
-  }
-
-  // A shot used to fail sporadically and get silently skipped, leaving the PREVIOUS run's
-  // PNG on disk -- indistinguishable from a fresh one, which quietly invalidates whatever
-  // the screenshot was meant to prove. The cause was response.ok(), which is false for a
-  // 304: the static server returns Not Modified whenever the browser revalidates an
-  // unchanged file, so a perfectly good navigation read as a failure. Any status under 400
-  // is a successful load. The retry stays as cheap insurance.
-  const loaded = (r) => r && r.status() < 400;
+// A shot used to fail sporadically and get silently skipped, leaving the PREVIOUS run's
+// PNG on disk -- indistinguishable from a fresh one, which quietly invalidates whatever
+// the screenshot was meant to prove. The cause was response.ok(), which is false for a
+// 304: the static server returns Not Modified whenever the browser revalidates an
+// unchanged file, so a perfectly good navigation read as a failure. Any status under 400
+// is a successful load. The retry stays as cheap insurance.
+const loaded = (r) => r && r.status() < 400;
+const nav = async (url) => {
   let resp = null;
   for (let attempt = 1; attempt <= 3 && !loaded(resp); attempt++) {
-    resp = await page.goto(BASE + shot.url, { waitUntil: "load", timeout: 30000 }).catch(() => null);
+    resp = await page.goto(BASE + url, { waitUntil: "load", timeout: 30000 }).catch(() => null);
     if (!loaded(resp) && attempt < 3) await new Promise((r) => setTimeout(r, 400));
   }
-  if (!loaded(resp)) {
-    // Remove the stale file so a failure can never be mistaken for a current render.
+  return loaded(resp);
+};
+
+for (const shot of SHOTS) {
+  current = shot;
+  await page.setViewport(shot.viewport);
+
+  // Load once to get an origin to write against, then set or clear the seed and reload.
+  // Clearing matters: track.html falls back to localStorage when /api/track is
+  // unavailable, so a previous shot's packages would otherwise leak into it.
+  if (!await nav(shot.url)) {
     rmSync(OUT + "/" + shot.name + ".png", { force: true });
     console.error("  " + shot.name + ": FAILED after 3 attempts, " + shot.url + " did not load (stale PNG deleted)");
     failed.push(shot.name);
-    await page.close();
     continue;
   }
+  await page.evaluate((seed) => {
+    localStorage.clear();
+    if (!seed) return;
+    localStorage.setItem("gl-auth-v2", JSON.stringify(seed.auth));
+    localStorage.setItem("gl-onboarded", "1");
+    localStorage.setItem("granite-logistics-state-v1", JSON.stringify(seed.state));
+  }, shot.seed || null);
+  if (!await nav(shot.url)) {
+    rmSync(OUT + "/" + shot.name + ".png", { force: true });
+    console.error("  " + shot.name + ": FAILED, reload after seeding did not load (stale PNG deleted)");
+    failed.push(shot.name);
+    continue;
+  }
+
   if (shot.view) {
     await page.evaluate((v) => {
       const el = document.querySelector('[data-bn="' + v + '"]') || document.querySelector('.nav-item[data-view="' + v + '"]');
@@ -156,7 +174,6 @@ for (const shot of SHOTS) {
   // which is where a sign-out button or a form's last field tends to live.
   await page.screenshot({ path, fullPage: shot.full !== undefined ? shot.full : !shot.view });
   console.log("  " + path);
-  await page.close();
 }
 
 await browser.close();

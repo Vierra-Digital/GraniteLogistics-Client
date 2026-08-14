@@ -2,7 +2,7 @@
  * NETWORK-FIRST for the app shell: a fresh deploy shows up immediately whenever the
  * device is online, while a cache fallback keeps the app usable offline. This avoids
  * the "installed PWA is stuck on an old version" problem that cache-first causes. */
-var CACHE = "granite-logistics-v97";
+var CACHE = "granite-logistics-v98";
 var ASSETS = [
   "./", "./index.html", "./app.html", "./track.html", "./privacy.html", "./terms.html",
   "./landing.css", "./landing.js",
