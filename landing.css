@@ -213,3 +213,52 @@ a{color:inherit;text-decoration:none}
   .cap,.flow li{transition:background .18s ease}
 }
 .cap:hover,.flow li:hover{background:var(--navy-soft)}
+
+/* =====================================================================
+   PRINT (public pages)
+   These pages are dark by design. On paper that is a full page of navy ink,
+   and because most browsers drop backgrounds by default what actually comes
+   out is pale grey text on white. People do print these: a tracking page as
+   proof of shipment, a policy to file. app.html has had a print block all
+   along for labels and manifests; this is the public half.
+
+   !important throughout, deliberately. The colours being overridden are set by
+   more specific selectors (.home-hero h1, .band-h) and, on track.html, by a
+   <style> block that loads after this file -- so ordinary rules lose. Without
+   it the h1 on both the landing and tracking pages printed white on white.
+   ===================================================================== */
+@media print{
+  body{background:#fff !important;color:#111 !important;min-height:0;display:block}
+  /* Navigation, decoration and controls carry nothing onto paper. */
+  .site-header,.hero-grid-bg,.hero-glow,.toast-stack,.cta-row,.track-bar,.tk-form,
+  .band-cta,.btn-ghost,.btn-primary,.btn-outline{display:none !important}
+  .home-hero{min-height:0;padding:16px 0;background:none !important;display:block}
+  .hero-logo{width:220px;filter:none;animation:none}
+  h1,h2,h3,h4,b,strong,.band-h,.wm-text,.tk-status,.legal h1,.legal h2{color:#111 !important}
+  p,li,td,th,span,.sub,.hero-sub,.band-sub,.cap p,.api-copy p,
+  .flow span:not(.fl-n),.legal p,.legal li{color:#222 !important}
+  a{color:#111 !important;text-decoration:underline}
+  .eyebrow,.hero-tagline,.fl-n,.tk-eta,.tk-step,.tk-grid b,.legal-meta{color:#444 !important}
+  .eyebrow .tick{background:#444 !important}
+  /* Hairline-separated grids rely on a background showing through the gaps. */
+  .cap-grid,.flow{background:#999 !important;border-color:#999}
+  .cap,.flow li{background:#fff !important}
+  .band{border-color:#999;padding:16px 0;break-inside:avoid}
+  .api-code{background:#f4f4f4 !important;border-color:#999}
+  .api-code pre,.code-head{color:#111 !important;background:transparent !important}
+  .code-head span{background:#ddd !important;color:#111 !important}
+  .tk-card{box-shadow:none !important;border:1px solid #999;break-inside:avoid}
+  /* Progress has to survive the loss of colour: reached stages print solid, the ones
+     still ahead print light. Flattening all five to one grey threw away the only
+     thing the graphic is for. */
+  .tk-dot{background:#ccc !important;box-shadow:none !important;border-color:#fff !important}
+  .tk-step::before{background:#ccc !important}
+  .tk-step.done .tk-dot,.tk-step.cur .tk-dot,
+  .tk-step.done::before,.tk-step.cur::before{background:#111 !important}
+  .tk-step.done .tk-lbl,.tk-step.cur .tk-lbl{color:#111 !important;font-weight:700}
+  .legal{max-width:none;padding:0;color:#111 !important}
+  .legal-lead{border-left-color:#666;color:#111 !important}
+  .legal-note{border-color:#999}
+  .site-footer{background:none !important;color:#444 !important;border-top:1px solid #999;padding:12px 0}
+  .site-footer a,.site-footer .powered-by{color:#444 !important}
+}
