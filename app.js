@@ -2464,6 +2464,12 @@
     advance(p, next);
     var actionLabel = next === "InTransit" ? "Picked Up (In Transit)" : next === "OutforDelivery" ? "Out for Delivery" : "Delivered (photo captured)";
     toast(p.id + " → " + actionLabel, "ok");
+    // renderDriver() repaints the picker -- the scanned parcel's status just changed, so its
+    // option text is stale -- but it also resets #scan-result to its empty state. It used to
+    // run after the block below, which wiped the panel the scan exists to fill: the status
+    // advanced and a toast fired, and the driver was left looking at "No label scanned"
+    // with no destination, which is the one thing they scanned to find out.
+    renderDriver();
     $("#scan-result").innerHTML =
       field("Package", p.id, true) + field("Item", p.item.description) +
       field("Deliver To", p.customer.name) +
@@ -2474,7 +2480,6 @@
       '<div style="margin-top:12px"><button class="btn sm" data-open="' + p.id + '">View Chain of Custody</button></div>';
     var btn = $("#scan-result [data-open]");
     if (btn) btn.addEventListener("click", function () { openPackage(p.id); });
-    renderDriver();
     // On delivery, offer a real device-camera proof-of-delivery photo (non-blocking).
     if (next === "Delivered") {
       capturePhoto("DELIVERED", "#15803d").then(function (url) {
