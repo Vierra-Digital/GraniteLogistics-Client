@@ -72,7 +72,7 @@ npm run check      # contrast + layout + a11y, one summary, non-zero if any fail
 | `npm run contrast` | WCAG 2.1 AA text contrast | 38 view/theme combinations, including the public pages |
 | `npm run layout` | horizontal overflow, clipped text, boxes escaping their container | 134 view/width combinations, 320px to 1920px, including worst-case content |
 | `npm run a11y` | accessible names, alt text, heading order, duplicate ids, dangling aria, label association, keyboard reachability, mouse-only controls, dialog semantics, controls covered by an overlay | 26 views |
-| `npm run shots` | renders 44 screens to `shots/` (gitignored) so they can be looked at | both themes, phone and desktop, empty states, worst-case content, and every step of the sign-in and ordering flows |
+| `npm run shots` | renders 46 screens to `shots/` (gitignored) so they can be looked at | both themes, phone and desktop, empty states, worst-case content, and every step of the sign-in and ordering flows |
 
 They exist because every one of them caught something that reading the code did not: a
 34-failure contrast sweep (`.btn` hard-codes a white background the dark palette cannot

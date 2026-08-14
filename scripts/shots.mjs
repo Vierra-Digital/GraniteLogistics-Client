@@ -126,6 +126,11 @@ const SHOTS = [
   // MOBILE_ROLES, so nothing had ever rendered them at the width they are actually used at.
   { name: "43-driver-phone", full: true, url: "/app.html", viewport: PHONE, seed: roleSeed("Driver"), view: "driver" },
   { name: "44-runner-phone", full: true, url: "/app.html", viewport: PHONE, seed: roleSeed("Runner"), view: "runner" },
+  // Settings has three tabs and only the first had ever been rendered.
+  { name: "45-settings-data-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "settings",
+    act: () => document.querySelectorAll("#view-settings .tab-btn")[1].click() },
+  { name: "46-settings-cloud-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "settings",
+    act: () => document.querySelectorAll("#view-settings .tab-btn")[2].click() },
 ];
 
 if (!existsSync(OUT)) mkdirSync(OUT);
