@@ -445,13 +445,23 @@
     Driver: { label: "Carrier Driver", ico: "◎", tag: "Field" },
     Viewer: { label: "Viewer", ico: "⊶", tag: "Read-only" }
   };
-  // Mobile is the customer app. The ops roles (Admin/Runner/Driver/Viewer) are
-  // desktop-only for now, so a narrow viewport always renders the Customer
-  // experience regardless of the saved role. savedRole() is the stored value;
-  // currentRole() is what the UI should actually show.
+  // Mobile is the customer app, with two exceptions. A Driver and a Runner do their work
+  // on a phone -- scanning a label on the dock, photographing a parcel's condition at
+  // pickup -- so forcing them into the customer experience on a narrow viewport left the
+  // two roles whose jobs are inherently mobile unable to reach their own screens at all.
+  // Admin and Viewer stay desktop-only: their dashboards are dense tables that 390px
+  // cannot carry. This only decides what the UI offers; authorization is enforced
+  // server-side in state.mjs, which re-derives the role on every request.
   function isMobileViewport() { var w = window.innerWidth; return w > 0 && w <= 980; }
   function savedRole() { return (state.settings && state.settings.role) || "Customer"; }
-  function currentRole() { return isMobileViewport() ? "Customer" : savedRole(); }
+  function currentRole() {
+    var r = savedRole();
+    // Compared inline rather than against a lookup object: currentRole() is reached during
+    // boot before a `var` at this position has been assigned, so an object here is still
+    // undefined at the first call and throws.
+    if (isMobileViewport() && r !== "Driver" && r !== "Runner") return "Customer";
+    return r;
+  }
   function allowedViews() {
     var views = ROLE_VIEWS[currentRole()] || ROLE_VIEWS.Customer;
     // "admin" talks to /api/admin, which only exists on a real deployment and only
@@ -781,11 +791,25 @@
   // Ops roles also get it on narrow screens, alongside the sidebar drawer via "Menu". ----
   var BN_LABEL = { custhome: "Home", order: "Orders", account: "Account", overview: "Home", home: "Home", ingest: "Orders", runner: "Pickups", presort: "Pre-Sort", batch: "Manifests", driver: "Scan", tracking: "Tracking", returns: "Returns", reports: "Reports", activity: "Activity", settings: "Settings" };
   var BN_ICON = { custhome: "🏠", order: "🛒", account: "👤" };
+  // The four screens each mobile-capable ops role actually uses on the floor, in the order
+  // they use them. Anything not listed still reaches everything through the Menu tab.
+  var BN_PRIMARY = {
+    Runner: ["home", "runner", "presort", "tracking"],
+    Driver: ["home", "driver", "tracking"],
+  };
   function renderBottomNav() {
     var el = $("#bottom-nav"); if (!el) return;
     var allowed = allowedViews();
-    var isCustomer = currentRole() === "Customer";
-    var primary = allowed.length > 4 ? allowed.slice(0, 4) : allowed.slice();
+    var role = currentRole();
+    var isCustomer = role === "Customer";
+    // The first four allowed views are sidebar order, which for a Runner leads with Order
+    // Ingest -- an API configuration screen -- and pushes the Runner Dashboard to third.
+    // On a phone the bottom nav is the primary navigation, so the two mobile roles name
+    // the four screens their job actually uses. Filtered against `allowed` so this can
+    // never widen access.
+    var preferred = (BN_PRIMARY[role] || []).filter(function (v) { return allowed.indexOf(v) !== -1; });
+    var primary = preferred.length ? preferred
+      : (allowed.length > 4 ? allowed.slice(0, 4) : allowed.slice());
     // Tracked directly, not inferred from the sidebar: custhome and account have no
     // sidebar item, so reading it back from the DOM highlighted the wrong tab.
     var active = currentView || allowed[0];

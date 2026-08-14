@@ -12,7 +12,7 @@
 // real account.
 import { launch } from "./_browser.mjs";
 import { mkdirSync, existsSync, rmSync } from "node:fs";
-import { customerSeed, opsSeed, emptyCustomerSeed, emptyOpsSeed, dark, stressSeed, stressCustomerSeed } from "./_seeds.mjs";
+import { customerSeed, opsSeed, emptyCustomerSeed, emptyOpsSeed, dark, stressSeed, stressCustomerSeed, roleSeed } from "./_seeds.mjs";
 
 const BASE = process.env.GL_BASE || "http://localhost:8080";
 const OUT = "shots";
@@ -122,6 +122,10 @@ const SHOTS = [
     act: () => document.querySelector("#cust-order-form [data-next]").click() },
   { name: "42-confirm-dialog-phone", full: true, url: "/app.html", viewport: PHONE, seed: customerSeed(), view: "account",
     act: () => document.getElementById("acct-close").click() },
+  // The two roles that work on a phone. Their screens were unreachable below 980px until
+  // MOBILE_ROLES, so nothing had ever rendered them at the width they are actually used at.
+  { name: "43-driver-phone", full: true, url: "/app.html", viewport: PHONE, seed: roleSeed("Driver"), view: "driver" },
+  { name: "44-runner-phone", full: true, url: "/app.html", viewport: PHONE, seed: roleSeed("Runner"), view: "runner" },
 ];
 
 if (!existsSync(OUT)) mkdirSync(OUT);

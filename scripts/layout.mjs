@@ -15,7 +15,7 @@
 // Deliberate truncation (text-overflow: ellipsis) and deliberate scrolling
 // (overflow-x: auto/scroll) are not failures and are skipped.
 import { launch } from "./_browser.mjs";
-import { customerSeed, opsSeed, dark, stressSeed, stressCustomerSeed } from "./_seeds.mjs";
+import { customerSeed, opsSeed, dark, stressSeed, stressCustomerSeed, roleSeed } from "./_seeds.mjs";
 
 const BASE = process.env.GL_BASE || "http://localhost:8080";
 
@@ -39,6 +39,11 @@ const SCENARIOS = [
     ({ view: v, w, h: 900, mobile: false, seed: stressSeed(), label: `stress-ops/${v}@${w}` }))),
   ...CUST_VIEWS.flatMap((v) => [320, 390].map((w) =>
     ({ view: v, w, h: 844, mobile: true, seed: stressCustomerSeed(), label: `stress-cust/${v}@${w}` }))),
+  // Driver and Runner on a phone: a supported configuration, so it is measured like one.
+  ...["home", "driver", "tracking"].flatMap((v) => [320, 390].map((w) =>
+    ({ view: v, w, h: 844, mobile: true, seed: roleSeed("Driver"), label: `driver/${v}@${w}` }))),
+  ...["home", "runner", "presort", "tracking"].flatMap((v) => [320, 390].map((w) =>
+    ({ view: v, w, h: 844, mobile: true, seed: roleSeed("Runner"), label: `runner/${v}@${w}` }))),
 ];
 
 try {

@@ -1041,9 +1041,19 @@ h1,h2,.order-hero h2{text-wrap:balance}
 
   .bottom-nav{display:flex}
   .view-wrap{padding-bottom:calc(74px + env(safe-area-inset-bottom,0px))}
-  /* Mobile is the customer app: the ops workspaces are desktop-only, so there's
-     nothing to switch to from here (see isMobileViewport() in app.js). */
+  /* Mobile is the customer app for Admin and Viewer, so there is nothing to switch to
+     from here. Driver and Runner keep their own workspace on a phone -- see MOBILE_ROLES
+     in app.js -- but they reach it through the bottom nav, not this link. */
   .acct-switch{display:none}
+
+  /* An ops row is title + status pill + action on one line, which fits a 1440px table and
+     not a 390px phone. Stacked, the title gets the full width and the action gets a full
+     tap target -- these are one-handed tasks on a dock, not desk work. */
+  .row-item{flex-direction:column;align-items:stretch;gap:10px}
+  .row-item .ri-main{width:100%}
+  .row-item .ri-actions,.row-item .row-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .row-item .btn{flex:1 1 auto;justify-content:center;min-height:44px}
+  .row-item .pill{align-self:flex-start}
 }
 
 @media(max-width:760px){

@@ -119,3 +119,13 @@ export const stressCustomerSeed = () => {
       packages: s.state.packages.slice(0, 3).map((p) => ({ ...p, customerEmail: "wilhelmina.fitzgerald-montgomery@example.com" })) },
   };
 };
+
+// Driver and Runner keep their own workspace on a phone (MOBILE_ROLES in app.js), so the
+// audits need those roles at phone widths -- it is a supported configuration now, not a
+// desktop layout being viewed narrow.
+export const roleSeed = (role) => {
+  const s = opsSeed();
+  s.auth.user.role = role;
+  s.state.settings = { ...s.state.settings, role };
+  return s;
+};
