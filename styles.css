@@ -102,14 +102,9 @@ h1,h2{margin:0}
 .tb-titles h1{font-size:1.22rem;letter-spacing:-.01em}
 .tb-titles p{margin:1px 0 0;font-size:.83rem}
 .tb-right{display:flex;align-items:center;gap:12px;margin-left:auto}
-.global-search{position:relative;display:flex;align-items:center}
-.global-search::before{content:"⌕";position:absolute;left:13px;color:var(--slate-400);font-size:1.05rem;pointer-events:none}
-.global-search input{width:200px;max-width:38vw;padding:9px 14px 9px 32px;border:1px solid var(--line);border-radius:22px;font-size:.85rem;background:var(--slate-100);font-family:inherit;transition:var(--tx-quick)}
-.global-search input:focus{outline:none;background:#fff;border-color:var(--blue);box-shadow:0 0 0 3px rgba(47,155,214,.15)}
 .role-badge{display:flex;align-items:center;gap:8px;background:var(--slate-100);border:1px solid var(--line);padding:7px 13px;border-radius:22px;cursor:pointer;font-size:.83rem;font-weight:600;color:var(--slate-700);transition:var(--tx-quick)}
 .role-badge:hover{background:#fff;border-color:var(--blue);color:var(--blue-d)}
 .role-badge .rb-dot{width:8px;height:8px;border-radius:50%;background:var(--blue)}
-.role-badge .rb-switch{font-size:.68rem;color:var(--slate-400);font-weight:700;text-transform:uppercase;letter-spacing:.05em}
 .search-trigger{display:flex;align-items:center;gap:8px;background:var(--slate-100);border:1px solid var(--line);border-radius:22px;padding:8px 13px;cursor:pointer;color:var(--slate-500);font-size:.85rem;font-family:inherit;transition:var(--tx-quick)}
 .search-trigger:hover{background:#fff;border-color:var(--blue);color:var(--blue-d)}
 .search-trigger .st-ico{font-size:1.02rem}
@@ -179,8 +174,7 @@ html[data-theme="dark"] .topbar{background:rgba(13,22,35,.86)}
 html[data-theme="dark"] .icon-btn:hover,html[data-theme="dark"] .role-badge:hover{background:#1b2838}
 html[data-theme="dark"] .ff input,html[data-theme="dark"] .ff select,
 html[data-theme="dark"] .search-input,html[data-theme="dark"] .manifest-builder select,
-html[data-theme="dark"] #scan-select,html[data-theme="dark"] .global-search input,
-html[data-theme="dark"] .global-search input:focus{background:#1b2838;color:var(--ink);border-color:var(--line)}
+html[data-theme="dark"] #scan-select{background:#1b2838;color:var(--ink);border-color:var(--line)}
 html[data-theme="dark"] .data-table tbody tr:hover{background:#1b2838}
 html[data-theme="dark"] .label-card{background:#0f1a28;border-color:var(--line)}
 html[data-theme="dark"] .home-tile.attn{background:#241620}
@@ -485,9 +479,6 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .act-time{font-size:.78rem;color:var(--slate-500);white-space:nowrap}
 
 /* Role selector */
-.role-box{display:flex;flex-direction:column;gap:5px}
-.role-box label{font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)}
-.role-box select{background:#1e293b;color:#fff;border:1px solid rgba(255,255,255,.14);border-radius:9px;padding:9px 10px;font-size:.86rem;font-family:inherit}
 
 /* Reset button */
 .btn-reset{background:transparent;color:#94a3b8;border:1px solid rgba(255,255,255,.14);padding:9px;border-radius:10px;
@@ -598,8 +589,6 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
   background:radial-gradient(900px 500px at 75% -10%,#1d3a55,transparent 55%),#0a1622}
 .login-screen.open{display:flex}
 .login-card{width:100%;max-width:380px;background:var(--card);border-radius:18px;padding:28px;box-shadow:0 30px 80px rgba(0,0,0,.45);animation:fade .3s ease}
-.login-brand{display:flex;align-items:center;gap:9px;font-weight:700;letter-spacing:.06em;color:var(--ink);margin-bottom:20px;font-size:1.02rem}
-.login-brand strong{color:var(--blue-d);margin-left:.12em}
 .login-card h1{font-size:1.5rem;margin:0 0 4px;letter-spacing:-.01em}
 .login-sub{color:var(--slate-500);font-size:.9rem;margin:0 0 20px}
 .login-card .ff{margin-bottom:13px}
@@ -774,7 +763,6 @@ body[data-role="Customer"] .view-wrap{padding-bottom:calc(74px + env(safe-area-i
 .brand-mark{background:none}
 .brand-mark img{display:block}
 .pre-mark img{display:block}
-.login-logo{border-radius:10px;display:block;flex-shrink:0}
 .rg-brand img{display:block}
 /* Login screen: navy hero band showcasing the full logo lockup */
 .login-card{padding:0;overflow:hidden}
@@ -1043,7 +1031,6 @@ h1,h2,.order-hero h2{text-wrap:balance}
   .sidebar{padding-bottom:calc(74px + env(safe-area-inset-bottom,0px))}
   .grid-2{grid-template-columns:minmax(0,1fr)}
   .modal-grid{grid-template-columns:minmax(0,1fr)}
-  .global-search{display:none}
   .ff-row{flex-wrap:wrap}
 
   #view-tracking:not(.detail-open) .coc-detail-card{display:none}
@@ -1062,7 +1049,6 @@ h1,h2,.order-hero h2{text-wrap:balance}
      tap target -- these are one-handed tasks on a dock, not desk work. */
   .row-item{flex-direction:column;align-items:stretch;gap:10px}
   .row-item .ri-main{width:100%}
-  .row-item .ri-actions,.row-item .row-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
   .row-item .btn{flex:1 1 auto;justify-content:center;min-height:44px}
   .row-item .pill{align-self:flex-start}
 }
@@ -1103,7 +1089,7 @@ h1,h2,.order-hero h2{text-wrap:balance}
   .role-badge{position:relative}
   .role-badge::after{content:"";position:absolute;inset:-4px;border-radius:22px}
   .role-badge{padding:0;width:36px;height:36px;border-radius:50%;justify-content:center;flex-shrink:0}
-  .role-badge #role-badge-text,.role-badge .rb-switch{display:none}
+  .role-badge #role-badge-text{display:none}
   .role-badge .rb-dot{width:11px;height:11px}
   .rg-grid{grid-template-columns:minmax(0,1fr)}
 
