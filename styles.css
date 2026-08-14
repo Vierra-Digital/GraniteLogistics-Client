@@ -82,6 +82,11 @@ h1,h2{margin:0}
 .btn-demo:hover{filter:brightness(1.05)}
 .btn-demo:disabled{opacity:.55;cursor:default;box-shadow:none}
 .env-pill{display:flex;align-items:center;gap:8px;font-size:.72rem;color:var(--slate-400);justify-content:center}
+/* Storage is full and work is not being written to this device. Amber rather than red:
+   nothing is lost yet -- what is in front of the operator is still correct, and a cloud
+   push or a backup export still saves it. */
+.env-pill.warn{color:#fbbf24;font-weight:600}
+.env-pill.warn .dot{background:var(--amber)}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--amber);display:inline-block}
 .dot.ok{background:var(--emerald)}
 

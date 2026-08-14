@@ -240,11 +240,41 @@
   }
   var state = { packages: [], manifests: [], loadUnits: [], events: [], settings: defaultSettings() };
   function companyName() { return (state.settings && state.settings.company && state.settings.company.name) || "Granite Logistics"; }
+  // Whether the last write to localStorage succeeded. Latched so the warning appears once
+  // rather than on every keystroke, and cleared the moment a write succeeds again.
+  var storageBroken = false;
   function save() {
+    var ok = true;
     // tombstones must persist: a deletion made while offline has to survive a reload,
     // or the server-side merge would resurrect the order on the next successful push.
-    try { localStorage.setItem(STORE_KEY, JSON.stringify({ packages: state.packages, manifests: state.manifests, loadUnits: state.loadUnits, events: state.events, settings: state.settings, seq: seq, tombstones: state.tombstones || [] })); } catch (e) { /* quota / private mode */ }
+    try { localStorage.setItem(STORE_KEY, JSON.stringify({ packages: state.packages, manifests: state.manifests, loadUnits: state.loadUnits, events: state.events, settings: state.settings, seq: seq, tombstones: state.tombstones || [] })); }
+    catch (e) { ok = false; }
+    // This used to be swallowed. A full quota then meant an operator labelled a parcel,
+    // saw "Labeled" and a confirmation toast, and lost the change on reload with nothing
+    // said -- and condition photos are stored as data URLs, so the 5MB budget goes quickly.
+    if (ok) storageRecovered(); else storageFailed();
     if (typeof scheduleAutoPush === "function") scheduleAutoPush();
+    return ok;
+  }
+  function storageFailed() {
+    if (storageBroken) return;
+    storageBroken = true;
+    var pill = $("#env-pill");
+    if (pill) {
+      pill.classList.add("warn");
+      pill.innerHTML = '<span class="dot" aria-hidden="true"></span> Not saving on this device';
+    }
+    toast("This device is out of storage, so changes are not being saved here. Export a backup from Settings → Data Management, or free some space.", "warn", 12000);
+  }
+  function storageRecovered() {
+    if (!storageBroken) return;
+    storageBroken = false;
+    var pill = $("#env-pill");
+    if (pill) {
+      pill.classList.remove("warn");
+      pill.innerHTML = '<span class="dot ok" aria-hidden="true"></span> Synced to this device';
+    }
+    toast("Saving on this device again.", "ok");
   }
   // Derive manifest records by grouping packages that share a batchId.
   function rebuildManifests() {
