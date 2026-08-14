@@ -19,6 +19,7 @@
 //   mouse-only-control   cursor:pointer on something neither focusable nor interactive
 //   dialog-not-modal     role=dialog without aria-modal, so the page behind stays live
 //   dialog-unnamed       a dialog with no accessible name
+//   obscured-control     a control still covered by something after scrolling to it
 import { launch } from "./_browser.mjs";
 import { customerSeed, opsSeed, roleSeed } from "./_seeds.mjs";
 
@@ -149,6 +150,30 @@ function audit() {
     if (el.disabled) return;
     const ti = el.getAttribute("tabindex");
     if (ti !== null && parseInt(ti, 10) < 0) add("unreachable-control", el, "tabindex=" + ti + " on a visible control");
+  });
+
+  // Controls covered by something else. Geometry alone cannot answer this -- a fullPage
+  // screenshot composites fixed elements at their initial position and makes them look
+  // like they occlude things they do not -- so this hit-tests the control's centre and
+  // asks what is actually on top. It is how the sidebar drawer shipped with Reset and
+  // Sign out underneath the fixed bottom nav, in a drawer that does not scroll.
+  document.querySelectorAll("button, a[href], input, select, textarea, [role='button']").forEach((el) => {
+    if (!visible(el) || el.disabled) return;
+    // Scroll it into view first. Below the fold is a scrolling question, not an occlusion
+    // one -- the customer Account screen's Sign out sits under the nav at rest and clears
+    // it once scrolled, and flagging that would be crying wolf. What matters is whether a
+    // control is still covered when the user has scrolled as far as they can toward it.
+    try { el.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" }); } catch (e) { /* older engines */ }
+    const r = el.getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    if (cy < 0 || cy > innerHeight || cx < 0 || cx > innerWidth) return;
+    const hit = document.elementFromPoint(cx, cy);
+    if (!hit) return;
+    // Not `hit.contains(el)`: an ancestor painting over its own descendant -- a fixed
+    // ::before on a wrapper, say -- is exactly the occlusion worth catching, and that
+    // guard would hide every instance of it.
+    if (hit === el || el.contains(hit)) return;
+    add("obscured-control", el, "covered by " + sel(hit) + ' ("' + (el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 24) + '")');
   });
 
   // Mouse-only controls. A click listener cannot be read back from the DOM, but cursor:pointer

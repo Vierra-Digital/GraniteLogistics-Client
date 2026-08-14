@@ -1030,6 +1030,12 @@ h1,h2,.order-hero h2{text-wrap:balance}
   #app{grid-template-columns:minmax(0,1fr)}
   .sidebar{position:fixed;left:calc(-1 * (var(--sidebar-w) + 6px));top:0;width:var(--sidebar-w);transition:left .25s ease;z-index:40}
   .sidebar.open{left:0;box-shadow:0 0 60px rgba(0,0,0,.5)}
+  /* The drawer is 100vh and the bottom nav is fixed over its last 60px, so .sidebar-foot --
+     Reset and Sign out -- sat underneath it, and the drawer does not scroll (its content
+     fits exactly), leaving no way to reach them. .view-wrap already reserves this space;
+     the drawer has to as well. It only became reachable at all once Driver and Runner
+     gained a Menu tab: customers have no drawer to open. */
+  .sidebar{padding-bottom:calc(74px + env(safe-area-inset-bottom,0px))}
   .grid-2{grid-template-columns:minmax(0,1fr)}
   .modal-grid{grid-template-columns:minmax(0,1fr)}
   .global-search{display:none}
@@ -1097,7 +1103,10 @@ h1,h2,.order-hero h2{text-wrap:balance}
   .rg-grid{grid-template-columns:minmax(0,1fr)}
 
   /* Calmer, more focused screens */
-  .view-wrap{padding:16px 14px max(18px,env(safe-area-inset-bottom,0px))}
+  /* The bottom padding has to keep clearing the fixed bottom nav. This shorthand used to
+     reset it to 18px, undoing the calc(74px + safe-area) reservation set for <=980px, so
+     whatever sat at the bottom of a view ended up underneath the nav. */
+  .view-wrap{padding:16px 14px calc(74px + env(safe-area-inset-bottom,0px))}
   .lead{font-size:.9rem;margin-bottom:14px}
   .card{padding:16px;margin-bottom:14px}
   .card-head h2{font-size:.98rem}
