@@ -12,7 +12,7 @@
 // real account.
 import { launch } from "./_browser.mjs";
 import { mkdirSync, existsSync, rmSync } from "node:fs";
-import { customerSeed, opsSeed, emptyCustomerSeed, emptyOpsSeed, dark, stressSeed, stressCustomerSeed, roleSeed } from "./_seeds.mjs";
+import { customerSeed, opsSeed, emptyCustomerSeed, emptyOpsSeed, dark, stressSeed, stressCustomerSeed, roleSeed, firstRunSeed } from "./_seeds.mjs";
 
 const BASE = process.env.GL_BASE || "http://localhost:8080";
 const OUT = "shots";
@@ -131,6 +131,25 @@ const SHOTS = [
     act: () => document.querySelectorAll("#view-settings .tab-btn")[1].click() },
   { name: "46-settings-cloud-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "settings",
     act: () => document.querySelectorAll("#view-settings .tab-btn")[2].click() },
+  // First run: the welcome tour a brand-new account meets before anything else, and its
+  // last slide. Nothing had ever rendered either.
+  { name: "47-welcome-slide1-phone", url: "/app.html", viewport: PHONE, seed: firstRunSeed(),
+    act: () => {
+      const set = (id, v) => { const el = document.getElementById(id); el.value = v;
+        el.dispatchEvent(new Event("input", { bubbles: true })); };
+      set("login-name", "Sam Reed"); set("login-email", "sam@example.com");
+      set("login-password", "correct horse battery");
+      document.getElementById("login-submit").click();
+    } },
+  { name: "48-welcome-slide3-phone", url: "/app.html", viewport: PHONE, seed: firstRunSeed(),
+    act: () => {
+      const set = (id, v) => { const el = document.getElementById(id); el.value = v;
+        el.dispatchEvent(new Event("input", { bubbles: true })); };
+      set("login-name", "Sam Reed"); set("login-email", "sam@example.com");
+      set("login-password", "correct horse battery");
+      document.getElementById("login-submit").click();
+      setTimeout(() => { const n = document.getElementById("welcome-next"); n.click(); n.click(); }, 400);
+    } },
 ];
 
 if (!existsSync(OUT)) mkdirSync(OUT);
@@ -170,7 +189,7 @@ page.on("request", (req) => {
   // Public pages carry no seed and should reach the real static server.
   if (!s || !u.includes("/api/")) return req.continue();
   const j = (o) => req.respond({ status: 200, contentType: "application/json", body: JSON.stringify(o) });
-  if (u.includes("/api/auth")) return j({ ok: true, user: s.auth.user, verification: { available: true, sent: false } });
+  if (u.includes("/api/auth")) return j({ ok: true, token: s.auth.token, user: s.auth.user, verification: { available: true, sent: true } });
   // Only the signed-in account's own rows, which is all the real endpoint ever returns.
   // Returning another user's orders here duplicated them into the ops workspace and made
   // the screenshots lie.
@@ -242,6 +261,10 @@ for (const shot of SHOTS) {
   await page.evaluate((seed) => {
     localStorage.clear();
     if (!seed) return;
+    // A first-run shot has to arrive at the login screen and register for real: the welcome
+    // tour is only shown on a successful registration, not on a fresh load. So it writes
+    // neither the session nor gl-onboarded, and its `act` drives the form.
+    if (seed.firstRun) { localStorage.setItem("granite-logistics-state-v1", JSON.stringify(seed.state)); return; }
     localStorage.setItem("gl-auth-v2", JSON.stringify(seed.auth));
     localStorage.setItem("gl-onboarded", "1");
     localStorage.setItem("granite-logistics-state-v1", JSON.stringify(seed.state));

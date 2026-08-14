@@ -129,3 +129,13 @@ export const roleSeed = (role) => {
   s.state.settings = { ...s.state.settings, role };
   return s;
 };
+
+// A brand-new customer who has just created an account: signed in, nothing ordered, and
+// the welcome tour not yet seen. shots.mjs writes gl-onboarded for every other seed, so
+// this is the only way to reach the first-run experience -- the first thing a real user
+// meets, and the last screen here that had never been rendered.
+export const firstRunSeed = () => ({
+  auth: { token: "shot-token", user: { email: "new@example.com", name: "Sam Reed", role: "Customer", emailVerified: false } },
+  state: { settings: { role: "Customer", roleChosen: false }, packages: [], manifests: [], loadUnits: [], events: [] },
+  firstRun: true,
+});
