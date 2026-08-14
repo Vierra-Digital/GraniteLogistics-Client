@@ -341,8 +341,11 @@
     if (/^(BUTTON|A)$/.test(el.tagName)) { el.addEventListener("click", fn); return; }
     el.tabIndex = 0;
     // role=button only when the row holds no control of its own; claiming to be a button
-    // while wrapping a checkbox misdescribes it to a screen reader.
-    if (!el.querySelector("input, button, select, textarea, a")) el.setAttribute("role", "button");
+    // while wrapping a checkbox misdescribes it to a screen reader. A <tr> is excluded
+    // outright: role=button would take it out of the table structure, so a screen reader
+    // would lose the row/column relationships that make the table readable at all. Rows
+    // stay rows and become focusable, which is enough to reach and activate them.
+    if (el.tagName !== "TR" && !el.querySelector("input, button, select, textarea, a")) el.setAttribute("role", "button");
     el.addEventListener("click", fn);
     el.addEventListener("keydown", function (e) {
       if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
@@ -1763,8 +1766,11 @@
           '</td><td>' + p.customer.city + ", " + p.customer.state + '</td><td>' + (p.carrier || "–") +
           '</td><td><span class="' + pillClass(p.status) + '">' + stageLabelFor(p) + '</span></td></tr>';
       }).join("") + '</tbody>';
+    // These rows were the one clickable surface still wired with a bare click listener, so
+    // the Executive Overview -- the default landing view -- could not be operated by
+    // keyboard at all: 80 Tab presses never reached a row.
     $$("#overview-table tr[data-id]").forEach(function (tr) {
-      tr.addEventListener("click", function () { openPackage(tr.dataset.id); });
+      makeActivatable(tr, function () { openPackage(tr.dataset.id); });
     });
   }
 

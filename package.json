@@ -10,7 +10,8 @@
     "verify:live": "node scripts/verify-live.mjs",
     "shots": "node scripts/shots.mjs",
     "contrast": "node scripts/contrast.mjs",
-    "layout": "node scripts/layout.mjs"
+    "layout": "node scripts/layout.mjs",
+    "a11y": "node scripts/a11y.mjs"
   },
   "dependencies": {
     "@netlify/blobs": "^8.1.0",

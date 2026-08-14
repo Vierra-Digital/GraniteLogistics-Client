@@ -286,7 +286,9 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .data-table{width:100%;border-collapse:collapse;font-size:.86rem}
 .data-table th{text-align:left;color:var(--slate-500);font-weight:600;font-size:.74rem;text-transform:uppercase;letter-spacing:.05em;padding:8px 10px;border-bottom:1px solid var(--line)}
 .data-table td{padding:11px 10px;border-bottom:1px solid var(--slate-100)}
-.data-table tr{cursor:pointer}
+/* tbody only: the header row is not clickable, and a pointer cursor over it promises an
+   interaction that does not exist. */
+.data-table tbody tr{cursor:pointer}
 .data-table tbody tr:hover{background:var(--slate-100)}
 .mono{font-family:"Consolas",ui-monospace,monospace;font-size:.82rem}
 
@@ -553,10 +555,12 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .alert-row:focus-visible,.row-item:focus-visible,.coc-back:focus-visible,.btn-demo:focus-visible,
 .btn-reset:focus-visible,.menu-btn:focus-visible,.import-drop:focus-visible,
 .adm-role:focus-visible,.acct-switch:focus-visible,input:focus-visible,
-.chk input:focus-visible,.tk-check:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.chk input:focus-visible,.tk-check:focus-visible,
+.data-table tbody tr:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 /* Rows sit flush against each other, so an outline outside the box gets clipped by the
    neighbour. Inset it instead. */
-.row-item:focus-visible,.notif-item:focus-visible,.alert-row:focus-visible{outline-offset:-2px}
+.row-item:focus-visible,.notif-item:focus-visible,.alert-row:focus-visible,
+.data-table tbody tr:focus-visible{outline-offset:-2px}
 
 /* ===== Boot preloader ===== */
 .preloader{position:fixed;inset:0;z-index:200;background:#0a1622;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;transition:opacity .4s ease}
@@ -634,7 +638,7 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 /* Steps */
 .order-step{display:none;flex-direction:column;gap:13px}
 .order-step.active{display:flex;animation:fade var(--dur) var(--ease-out) both}
-.step-head h3{font-size:1.12rem;font-weight:700;letter-spacing:-.01em;color:var(--ink);margin:0 0 4px}
+.step-head h2{font-size:1.12rem;font-weight:700;letter-spacing:-.01em;color:var(--ink);margin:0 0 4px}
 .step-head p{font-size:.86rem;color:var(--slate-500);margin:0;line-height:1.45}
 .step-nav{display:flex;gap:10px;margin-top:6px}
 .step-nav .btn{flex:1}
@@ -664,7 +668,7 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .order-card.is-success .order-success{display:block;animation:fade var(--dur-slow) var(--ease-out) both}
 .os-check{width:54px;height:54px;margin:6px auto 14px;border-radius:50%;background:var(--emerald-btn);color:#fff;
   display:grid;place-items:center;font-size:1.7rem;font-weight:800;box-shadow:0 6px 16px rgba(16,185,129,.32)}
-.order-success h3{font-size:1.25rem;font-weight:800;letter-spacing:-.01em;color:var(--ink);margin:0 0 6px}
+.order-success h2{font-size:1.25rem;font-weight:800;letter-spacing:-.01em;color:var(--ink);margin:0 0 6px}
 .order-success>p{color:var(--slate-500);font-size:.9rem;line-height:1.5;max-width:38ch;margin:0 auto 18px}
 .os-ticket{display:flex;flex-direction:column;gap:4px;align-items:center;border:1px dashed var(--blue);background:var(--blue-soft);
   border-radius:12px;padding:14px;margin-bottom:16px}
@@ -985,7 +989,7 @@ body[data-role="Customer"] .view-wrap{padding-bottom:calc(74px + env(safe-area-i
 .modal-backdrop,.welcome-backdrop,.role-gate{overscroll-behavior:contain}
 
 /* Avoids a single trailing word on its own line in a heading. */
-h1,h2,.step-head h3,.order-hero h2{text-wrap:balance}
+h1,h2,.order-hero h2{text-wrap:balance}
 
 /* =====================================================================
    RESPONSIVE: exactly three tiers, each declared once, placed last so
