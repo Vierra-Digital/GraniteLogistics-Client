@@ -737,7 +737,6 @@
     $("#login-title").textContent = reg ? "Create your account" : "Sign in";
     $("#login-sub").textContent = reg ? "Set up your account to place and track orders." : "Welcome back. Sign in to see your orders.";
     $("#login-name-field").style.display = reg ? "" : "none";
-    $("#login-role-field").style.display = "none";
     $("#login-submit").textContent = reg ? "Create account" : "Sign in";
     $("#login-password").setAttribute("autocomplete", reg ? "new-password" : "current-password");
     $("#login-alt").innerHTML = reg
@@ -1372,13 +1371,56 @@
         '<select class="adm-role" data-email="' + attr(u.email) + '"' + (locked ? " disabled" : "") +
         ' aria-label="Role for ' + attr(u.email) + '">' + opts + '</select>' +
         (why ? '<span class="adm-why">' + why + '</span>' : '') +
+        // Your own account is excluded: the server refuses it, because resetting your own
+        // password would end the session making the request.
+        (isMe ? '' : '<button class="btn sm adm-pw" data-email="' + attr(u.email) + '">Reset password</button>') +
         '</div></div>';
     }).join("");
 
     $$("#adm-list .adm-role").forEach(function (sel) {
       sel.addEventListener("change", function () { setUserRole(sel.dataset.email, sel.value, sel); });
     });
+    $$("#adm-list .adm-pw").forEach(function (b) {
+      b.addEventListener("click", function () { promptResetPassword(b.dataset.email); });
+    });
     renderAdminAudit();
+  }
+  // Set a password on someone else's behalf. The recovery path when email is not
+  // configured -- otherwise a forgotten password has no route back at all. The value is
+  // never echoed afterwards: the admin has to pass it on themselves, and the account
+  // should change it once they are in.
+  function promptResetPassword(email) {
+    modal('<button class="close-x" data-close>&times;</button><h2>Reset password</h2>' +
+      '<p class="muted">' + attr(email) + '</p>' +
+      '<form id="pw-form" class="order-form" style="margin-top:12px" novalidate>' +
+      '<div class="ff"><label for="pw-new">New password</label>' +
+      '<input id="pw-new" name="pw" type="text" autocomplete="off" ' +
+      'placeholder="At least 4 characters" /></div>' +
+      '<p class="muted small">Their other sessions end immediately. Tell them the new ' +
+      'password yourself, over something other than email if email is not working, and ' +
+      'ask them to change it after signing in.</p>' +
+      '<div class="step-err" id="pw-err" role="alert"></div>' +
+      '<button class="btn primary" type="submit">Set password</button></form>');
+    var f = $("#pw-form"); if (!f) return;
+    f.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var pw = f.elements.namedItem("pw").value;
+      var err = $("#pw-err");
+      if (!pw || pw.length < 4) { if (err) err.textContent = "Password must be at least 4 characters."; return; }
+      var btn = f.querySelector('[type="submit"]');
+      if (btn) { btn.disabled = true; btn.textContent = "Setting…"; }
+      admFetch({ method: "POST", body: JSON.stringify({ action: "set-password", email: email, pw: pw }) })
+        .then(function (j) {
+          if (btn) { btn.disabled = false; btn.textContent = "Set password"; }
+          if (!j || !j.ok) {
+            if (err) err.textContent = (j && j.error) || "Could not set that password.";
+            return;
+          }
+          closeModal();
+          toast("Password set for " + email + ". Their other sessions have ended.", "ok", 9000);
+          renderAdmin();
+        });
+    });
   }
   // The grants record only holds what is true now, so this is the only place a revoked
   // role leaves a trace. Hidden entirely until there is something to show.

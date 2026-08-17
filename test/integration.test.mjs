@@ -1221,6 +1221,74 @@ test("the last administrator cannot be removed", async () => {
   }
 });
 
+// ---- admin password reset ----
+//
+// The recovery path when email is not configured. It writes a password hash, so its
+// guards matter more than its happy path -- these cover who may call it before what it
+// does when they may.
+
+const setPw = (email, pw, token) =>
+  adminFn(adminReq({ method: "POST", body: { action: "set-password", email, pw }, token }));
+
+test("only an admin can reset a password, and the endpoint hides from everyone else", async () => {
+  const victim = "reset-target@example.com";
+  await register(victim, "original1");
+  const customer = await register("not-an-admin@example.com");
+
+  // 404, not 403: same as the rest of this endpoint, it does not confirm it exists.
+  assert.equal((await setPw(victim, "hijacked1", customer)).status, 404);
+  assert.equal((await setPw(victim, "hijacked1", viewerToken)).status, 404);
+  assert.equal((await setPw(victim, "hijacked1", null)).status, 401);
+  // A reset-kind token is not an admin session.
+  const resetKind = sign({ email: ADMIN_EMAIL, kind: "reset", exp: Date.now() + 60000 });
+  assert.equal((await setPw(victim, "hijacked1", resetKind)).status, 401);
+
+  // None of that changed the password.
+  const still = await body(await authFn(post({ action: "login", email: victim, pw: "original1" })));
+  assert.equal(still.ok, true, "a refused reset must not have changed anything");
+});
+
+test("an admin reset lets the account sign in with the new password and kills old sessions", async () => {
+  const email = "locked-out@example.com";
+  const oldToken = await register(email, "forgotten1");
+
+  // The old session works right up to the reset.
+  assert.equal((await authFn(new Request("https://x/api/auth", { headers: { authorization: "Bearer " + oldToken } }))).status, 200);
+
+  const done = await body(await setPw(email, "brandnew1"));
+  assert.equal(done.ok, true, JSON.stringify(done));
+
+  // The old password is gone and the new one works.
+  assert.equal((await authFn(post({ action: "login", email, pw: "forgotten1" }))).status, 401);
+  const signedIn = await body(await authFn(post({ action: "login", email, pw: "brandnew1" })));
+  assert.equal(signedIn.ok, true);
+
+  // pwChangedAt moved, so the token issued before the reset is dead. Otherwise whoever
+  // held the old session would keep it after a recovery meant to lock them out.
+  assert.equal((await authFn(new Request("https://x/api/auth", { headers: { authorization: "Bearer " + oldToken } }))).status, 401);
+
+  // And it is on the record.
+  const listing = await body(await adminFn(adminReq()));
+  const entry = listing.audit.find((a) => a.email === email && a.kind === "password-reset");
+  assert.ok(entry, "the reset should be audited");
+  assert.equal(entry.by, ADMIN_EMAIL);
+});
+
+test("admin password reset refuses its own account, a missing one, and a short password", async () => {
+  await register("shorty@example.com", "original1");
+
+  // Self-reset would supersede the caller's own session mid-request.
+  const self = await setPw(ADMIN_EMAIL, "whatever1");
+  assert.equal(self.status, 409);
+
+  assert.equal((await setPw("ghost@example.com", "whatever1")).status, 404);
+
+  const short = await setPw("shorty@example.com", "ab");
+  assert.equal(short.status, 400);
+  // Still the original password after a rejected attempt.
+  assert.equal((await body(await authFn(post({ action: "login", email: "shorty@example.com", pw: "original1" })))).ok, true);
+});
+
 test("role administration validates its input", async () => {
   assert.equal((await grant("", "Admin")).status, 400);
   assert.equal((await grant("someone@example.com", "Wizard")).status, 400);

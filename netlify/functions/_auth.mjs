@@ -127,3 +127,17 @@ export function sessionSuperseded(tokenPayload, user) {
   if (!user || !user.pwChangedAt) return false;
   return !tokenPayload || !tokenPayload.iat || user.pwChangedAt > tokenPayload.iat;
 }
+
+// ---- Passwords ----
+//
+// scrypt with a per-user salt. This lived privately in auth.mjs; it moved here unchanged
+// so the admin reset path uses the identical scheme rather than a second copy of it. The
+// parameters are load-bearing: altering them invalidates every stored hash.
+export const MIN_PASSWORD = 4;
+export function hashPw(pw, salt) { return crypto.scryptSync(String(pw), salt, 64).toString("hex"); }
+// Returns the user with a fresh salt+hash and pwChangedAt bumped, which is what makes
+// sessionSuperseded() invalidate every token issued before the change.
+export function withNewPassword(user, pw) {
+  const salt = crypto.randomBytes(16).toString("hex");
+  return { ...user, salt, hash: hashPw(pw, salt), pwChangedAt: Date.now() };
+}

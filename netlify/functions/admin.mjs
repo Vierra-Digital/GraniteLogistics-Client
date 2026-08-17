@@ -19,7 +19,10 @@ import {
   CORS, json, verifyToken, bearer, getUser, sessionSuperseded, userStore,
   effectiveRoleFor, envRoleFor, readGrants, writeGrants, grantedRole, grantsStore,
   listUsers, normalizeEmail, ROLES, OPS_ROLES,
+  withNewPassword, MIN_PASSWORD,
 } from "./_auth.mjs";
+
+import { clearThrottle } from "./_throttle.mjs";
 
 const HEADERS = { ...CORS, "Access-Control-Allow-Methods": "GET, POST, OPTIONS" };
 const fail = (error, status, extra) => json({ ok: false, error, ...(extra || {}) }, status);
@@ -106,6 +109,44 @@ export default async (req) => {
       let d = {};
       try { d = await req.json(); } catch (e) {}
       const target = normalizeEmail(d.email);
+
+      // ---- Reset a password on behalf of an account ----
+      //
+      // The recovery path when email is not configured, which is every deployment until
+      // GL_BREVO_KEY and GL_MAIL_FROM are set: without this, a forgotten password means
+      // deleting the user record out of Blobs by hand.
+      //
+      // Reaching this requires an already-signed-in Admin, so it can only ever help
+      // somebody else -- an admin who has forgotten their own password cannot sign in to
+      // use it. That case still needs the environment route: add the address to
+      // GL_ADMIN_EMAILS, remove the stored account, and register it again.
+      if (d.action === "set-password") {
+        const pw = String(d.pw || "");
+        if (!target) return fail("An email address is required.", 400);
+        if (pw.length < MIN_PASSWORD) {
+          return fail("Password must be at least " + MIN_PASSWORD + " characters.", 400);
+        }
+        // Self-reset is refused rather than supported: it would supersede the caller's own
+        // session mid-request and sign them out, and they must already know their password
+        // to be here at all.
+        if (target === who.email) {
+          return fail("You can't reset your own password here. Ask another administrator.", 409);
+        }
+        const acct = await getUser(target);
+        if (!acct) return fail("No account exists for that address.", 404);
+
+        await userStore().setJSON(target, withNewPassword(acct, pw));
+        // They may have locked themselves out trying to remember it.
+        await clearThrottle("login", target);
+        await recordRoleChange({ email: target, kind: "password-reset", by: who.email });
+        return json({
+          ok: true, email: target,
+          // Said plainly because it is the surprising part: pwChangedAt moved, so every
+          // token issued to them before now is dead.
+          note: "Password set. Their other sessions have ended, and they should change it after signing in.",
+        });
+      }
+
       const role = String(d.role || "");
 
       if (!target) return fail("An email address is required.", 400);

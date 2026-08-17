@@ -286,6 +286,31 @@ also accepts an optional `x-signature` HMAC of the body using `GL_WEBHOOK_SECRET
 - A readiness report at `/api/health` naming any configuration still missing.
 - One motion system across the app, with a `prefers-reduced-motion` opt-out.
 
+## Recovering an account without email
+
+Password reset needs `GL_BREVO_KEY` and `GL_MAIL_FROM`. Until those are set, a forgotten
+password has no self-service route: `/api/auth` `reset-request` answers `503` and says so.
+
+So **Team & Roles** carries a per-account **Reset password** action. It is Admin-only, and
+the endpoint returns `404` to anyone else exactly like the rest of `/api/admin` -- it does
+not confirm it exists. The reset bumps `pwChangedAt`, which ends every session that
+account already had, clears its sign-in lockout, and is written to the access-history log
+with `kind: "password-reset"`. The new password is never echoed back: whoever ran the
+reset has to pass it on, and the account should change it after signing in.
+
+Two limits worth knowing:
+
+- It cannot reset **your own** password. You have to be signed in as an Admin to use it, so
+  it can only ever help somebody else, and resetting yourself would end the session making
+  the request.
+- If the **only** Admin is locked out, nothing in the app can help. That still needs the
+  environment route: add the address to `GL_ADMIN_EMAILS`, remove the stored account, and
+  register it again.
+
+`hashPw` moved from `auth.mjs` into `_auth.mjs` so this path and the emailed reset share
+one implementation. The scrypt parameters are load-bearing -- changing them invalidates
+every stored hash.
+
 ## Storage budget
 
 The workspace lives in `localStorage`, which tops out at about **5,240,320 characters**

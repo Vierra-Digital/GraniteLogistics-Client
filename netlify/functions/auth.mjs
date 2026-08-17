@@ -4,7 +4,7 @@
 // Set GL_AUTH_SECRET in the Netlify env for production; a dev fallback is used otherwise.
 import { getStore } from "@netlify/blobs";
 import crypto from "node:crypto";
-import { CORS, json, sign, verifyToken, bearer, sessionSuperseded, effectiveRoleFor } from "./_auth.mjs";
+import { CORS, json, sign, verifyToken, bearer, sessionSuperseded, effectiveRoleFor, hashPw, withNewPassword} from "./_auth.mjs";
 import { sendEmail, resetEmail, verifyEmail, emailConfigured } from "./_email.mjs";
 import { checkThrottle, recordAttempt, clearThrottle, LOGIN_LIMITS, RESET_LIMITS } from "./_throttle.mjs";
 
@@ -12,7 +12,6 @@ const SESSION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const RESET_MS = 30 * 60 * 1000;             // reset links are short-lived
 
 function store() { return getStore({ name: "granite-users", consistency: "strong" }); }
-function hashPw(pw, salt) { return crypto.scryptSync(String(pw), salt, 64).toString("hex"); }
 // iat lets us invalidate sessions minted before a password change (see GET below).
 function tokenFor(u) { return sign({ email: u.email, name: u.name, role: u.role, iat: Date.now(), exp: Date.now() + SESSION_MS }); }
 const publicUser = (u) => ({ email: u.email, name: u.name, role: u.role, emailVerified: !!u.emailVerified });
