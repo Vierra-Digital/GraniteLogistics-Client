@@ -1,0 +1,286 @@
+-- Granite Logistics — relational Supabase schema (proposed)
+--
+-- This supersedes schema.sql, which stores one jsonb blob per tenant. That shape works as a
+-- sync transport but throws away the main reason to move: with a single blob there is no
+-- row-level concurrency, which is exactly why appendOrderWithRepair() and the tombstone
+-- merge exist in netlify/functions/_lib.mjs. Rows make that class of bug impossible instead
+-- of repaired after the fact.
+--
+-- STATUS: not applied anywhere. Reviewed SQL, not a finished migration. See the staging
+-- order at the bottom -- photos first, auth last.
+--
+-- Mapping from the seven Blobs stores in use today:
+--   granite-users            -> auth.users + public.profiles
+--   granite-roles            -> public.role_grants + public.role_audit
+--   granite-workspaces       -> public.packages / package_events / manifests / load_units
+--   granite-push             -> public.push_subscriptions
+--   granite-throttle         -> public.auth_throttle
+--   granite-notify           -> public.notified
+--   granite-customer-orders  -> already legacy; nothing to carry over
+
+create extension if not exists "pgcrypto";
+
+-- ---------------------------------------------------------------------------
+-- Tenancy
+--
+-- One row per workspace. Today this is the string "default" plus whatever GL_TENANTS maps.
+-- ---------------------------------------------------------------------------
+create table if not exists public.tenants (
+  slug        text primary key,
+  name        text not null default 'Granite Logistics',
+  created_at  timestamptz not null default now()
+);
+insert into public.tenants (slug) values ('default') on conflict do nothing;
+
+-- ---------------------------------------------------------------------------
+-- People and roles
+--
+-- The authority chain today is: env config (GL_ADMIN_EMAILS/GL_ROLES) outranks in-app
+-- grants, which outrank Customer. That ordering is deliberate -- it is the break-glass path,
+-- because an operator can always restore access by editing environment variables when the
+-- stored grants are wrong.
+--
+-- Postgres has no environment. bootstrap_admins is the replacement, and it is writable ONLY
+-- by the service role, so it cannot be edited from the app even by an Admin. That preserves
+-- the property but moves the break-glass from "edit a Netlify variable" to "run one SQL
+-- statement in the dashboard". Weigh that before committing: it is a real change in how you
+-- recover from a lockout.
+-- ---------------------------------------------------------------------------
+create table if not exists public.bootstrap_admins (
+  email       text primary key,
+  note        text,
+  created_at  timestamptz not null default now()
+);
+
+create type public.gl_role as enum ('Customer', 'Viewer', 'Driver', 'Runner', 'Admin');
+
+create table if not exists public.profiles (
+  id            uuid primary key references auth.users (id) on delete cascade,
+  email         text unique not null,
+  name          text,
+  tenant        text not null default 'default' references public.tenants (slug),
+  created_at    timestamptz not null default now()
+);
+
+create table if not exists public.role_grants (
+  email       text primary key,
+  role        public.gl_role not null,
+  granted_by  text,
+  granted_at  timestamptz not null default now()
+);
+
+create table if not exists public.role_audit (
+  id          bigserial primary key,
+  email       text not null,
+  kind        text,                       -- null for a role change, 'password-reset' etc.
+  from_role   public.gl_role,
+  to_role     public.gl_role,
+  by_email    text,
+  at          timestamptz not null default now()
+);
+
+-- The effective role, resolved in the same order the app resolves it today. STABLE so the
+-- planner can call it once per statement inside a policy rather than once per row.
+create or replace function public.effective_role(p_email text)
+returns public.gl_role
+language sql stable security definer set search_path = public as $$
+  select case
+    when exists (select 1 from public.bootstrap_admins b where lower(b.email) = lower(p_email))
+      then 'Admin'::public.gl_role
+    else coalesce(
+      (select g.role from public.role_grants g where lower(g.email) = lower(p_email)),
+      'Customer'::public.gl_role)
+  end;
+$$;
+
+create or replace function public.my_role() returns public.gl_role
+language sql stable as $$ select public.effective_role(coalesce(auth.jwt() ->> 'email', '')); $$;
+
+create or replace function public.my_tenant() returns text
+language sql stable as $$
+  select coalesce((select tenant from public.profiles where id = auth.uid()), 'default');
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Shipments
+--
+-- One row per parcel, replacing an element inside a jsonb array. `uid` is the stable
+-- identity the client merge relies on; `id` stays the human-facing GL-#### label, unique
+-- per tenant rather than globally, because the sequence is per workspace today.
+--
+-- Photos are PATHS into Supabase Storage, never data URLs. That is the whole point of
+-- step 1 in the staging order: a condition photo is ~110,000 characters as a data URL and
+-- today two of them per parcel puts a hard ceiling near 23 parcels on a device.
+-- ---------------------------------------------------------------------------
+create table if not exists public.packages (
+  uid             uuid primary key default gen_random_uuid(),
+  tenant          text not null references public.tenants (slug),
+  id              text not null,
+  status          text not null,
+  source          text,
+  order_ref       text,
+  barcode         text,
+  carrier         text,
+  lane            text,
+  batch_id        text,
+  tracking        text,
+  item            jsonb not null default '{}'::jsonb,     -- {description, value, weight}
+  customer        jsonb not null default '{}'::jsonb,     -- {name, address, city, state, zip, phone}
+  customer_email  text,                                   -- the join to a signed-in customer
+  photo_pickup    text,                                   -- storage path, not a data URL
+  photo_delivery  text,
+  promised_at     timestamptz,
+  exception       jsonb,
+  return_state    jsonb,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  deleted_at      timestamptz,                            -- replaces the tombstone array
+  unique (tenant, id)
+);
+create index if not exists packages_tenant_status_idx on public.packages (tenant, status);
+create index if not exists packages_customer_idx on public.packages (lower(customer_email));
+create index if not exists packages_tracking_idx on public.packages (tracking);
+
+create table if not exists public.package_events (
+  id          bigserial primary key,
+  package_uid uuid not null references public.packages (uid) on delete cascade,
+  stage       text not null,
+  note        text,
+  at          timestamptz not null default now()
+);
+create index if not exists package_events_pkg_idx on public.package_events (package_uid, at desc);
+
+create table if not exists public.manifests (
+  id          text not null,
+  tenant      text not null references public.tenants (slug),
+  carrier     text,
+  lane        text,
+  created_at  timestamptz not null default now(),
+  primary key (tenant, id)
+);
+
+create table if not exists public.load_units (
+  id          text not null,
+  tenant      text not null references public.tenants (slug),
+  zip_prefix  text,
+  city        text,
+  state       text,
+  created_at  timestamptz not null default now(),
+  primary key (tenant, id)
+);
+
+-- ---------------------------------------------------------------------------
+-- Supporting stores
+-- ---------------------------------------------------------------------------
+create table if not exists public.push_subscriptions (
+  id          bigserial primary key,
+  email       text not null,
+  endpoint    text not null unique,
+  keys        jsonb not null,
+  created_at  timestamptz not null default now()
+);
+create index if not exists push_email_idx on public.push_subscriptions (lower(email));
+
+-- Counters, not sessions. Kept server-side so a locked address costs an attacker a
+-- rejection rather than a hash, exactly as _throttle.mjs does now.
+create table if not exists public.auth_throttle (
+  scope       text not null,              -- 'login' | 'reset'
+  email       text not null,
+  count       int  not null default 0,
+  first_at    timestamptz not null default now(),
+  locked_until timestamptz,
+  primary key (scope, email)
+);
+
+-- Dedupe for status notifications, so a flapping status cannot mail twice.
+create table if not exists public.notified (
+  tenant      text not null references public.tenants (slug),
+  package_id  text not null,
+  stage       text not null,
+  at          timestamptz not null default now(),
+  primary key (tenant, package_id, stage)
+);
+
+-- ---------------------------------------------------------------------------
+-- Row level security
+--
+-- The rule the app enforces today, restated where the database can hold it: a customer sees
+-- only their own parcels, an ops role sees the whole tenant, and only WRITE_ROLES may
+-- change anything. Getting this right is the entire security value of the move -- with the
+-- jsonb-blob schema, anyone holding the anon key and a tenant name reads everything.
+-- ---------------------------------------------------------------------------
+alter table public.packages          enable row level security;
+alter table public.package_events    enable row level security;
+alter table public.manifests         enable row level security;
+alter table public.load_units        enable row level security;
+alter table public.profiles          enable row level security;
+alter table public.role_grants       enable row level security;
+alter table public.role_audit        enable row level security;
+alter table public.push_subscriptions enable row level security;
+alter table public.bootstrap_admins  enable row level security;   -- no policies: service role only
+alter table public.auth_throttle     enable row level security;   -- no policies: service role only
+alter table public.notified          enable row level security;   -- no policies: service role only
+
+create policy "own profile" on public.profiles
+  for select using (id = auth.uid() or public.my_role() = 'Admin');
+
+create policy "packages readable by owner or ops" on public.packages
+  for select using (
+    deleted_at is null and tenant = public.my_tenant() and (
+      public.my_role() in ('Viewer','Driver','Runner','Admin')
+      or lower(customer_email) = lower(coalesce(auth.jwt() ->> 'email',''))
+    )
+  );
+
+-- Writes are ops-only. A customer creates an order through an edge function running as the
+-- service role, the same shape as /api/my-orders today, so the client never writes directly.
+create policy "packages writable by ops" on public.packages
+  for all using (tenant = public.my_tenant() and public.my_role() in ('Runner','Driver','Admin'))
+  with check (tenant = public.my_tenant() and public.my_role() in ('Runner','Driver','Admin'));
+
+create policy "events follow their package" on public.package_events
+  for select using (exists (
+    select 1 from public.packages p where p.uid = package_uid
+      and p.tenant = public.my_tenant()
+      and (public.my_role() in ('Viewer','Driver','Runner','Admin')
+           or lower(p.customer_email) = lower(coalesce(auth.jwt() ->> 'email','')))
+  ));
+
+create policy "manifests ops read"  on public.manifests  for select using (tenant = public.my_tenant() and public.my_role() <> 'Customer');
+create policy "loadunits ops read"  on public.load_units for select using (tenant = public.my_tenant() and public.my_role() <> 'Customer');
+create policy "grants admin only"   on public.role_grants for all using (public.my_role() = 'Admin') with check (public.my_role() = 'Admin');
+create policy "audit admin read"    on public.role_audit  for select using (public.my_role() = 'Admin');
+create policy "own push rows"       on public.push_subscriptions
+  for all using (lower(email) = lower(coalesce(auth.jwt() ->> 'email','')))
+  with check (lower(email) = lower(coalesce(auth.jwt() ->> 'email','')));
+
+-- ---------------------------------------------------------------------------
+-- Storage
+-- ---------------------------------------------------------------------------
+-- insert into storage.buckets (id, name, public) values ('condition-photos','condition-photos',false)
+--   on conflict do nothing;
+--
+-- Private bucket, read through short-lived signed URLs. Public tracking shows photos to a
+-- recipient who has the tracking number, so those URLs must be minted server-side and
+-- expire -- the public page deliberately exposes status, dates and destination city only,
+-- and a permanent photo URL would undo that.
+
+-- ---------------------------------------------------------------------------
+-- Staging order, and why
+-- ---------------------------------------------------------------------------
+-- 1. PHOTOS ONLY. Move condition photos to Storage, keep everything else exactly as it is.
+--    This is the live problem: the 5.24M-character localStorage budget, ~23 parcels. It is
+--    also the only step that is worth doing on its own merits even if the rest never
+--    happens, and it touches no auth.
+--
+-- 2. DATA. Move packages/manifests/events to the tables above, behind the existing
+--    provider === "supabase" seam in app.js. appendOrderWithRepair and the tombstone merge
+--    retire here, replaced by a unique constraint and deleted_at.
+--
+-- 3. AUTH LAST, and only for a reason. The current implementation is the most finished part
+--    of the system: scrypt with per-user salts, HMAC sessions, pwChangedAt supersession, a
+--    login throttle deliberately built so it cannot be used to enumerate accounts, and roles
+--    re-derived server-side on every request -- 145 tests, several mutation-tested. Moving it
+--    trades audited-and-working for new-and-unverified. Good reasons to do it anyway: SSO, a
+--    customer's identity requirements, or isolation the current model cannot express.
+--    "Email is not configured" is not one -- that is two environment variables.
