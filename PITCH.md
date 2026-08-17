@@ -35,9 +35,15 @@ toasts fire:
 - "We generate a **real Code 128 label**."
 - "The runner photographs condition before it leaves the dock. That's our liability shield."
 - "It's **batched to a carrier manifest** and a dock lane."
-- "**UPS issues a tracking number via API.**"
+- "It's handed to the carrier and **a tracking number is assigned.**"
 - "Out for delivery, then **delivered, with a proof-of-delivery photo.**"
-Land on the **chain-of-custody timeline**: "Every step, time-stamped and tamper-evident."
+Land on the **chain-of-custody timeline**: "Every step, time-stamped, with the photo
+attached."
+
+Two lines to keep honest, because a prospect may ask and the answer is checkable:
+tracking numbers are **generated locally** until UPS/FedEx credentials are set (until then
+`/api/carriers` reports `simulated: true`), and the timeline is append-only but **not
+tamper-evident** — there is no hash chain, so do not claim one.
 
 **4. Close the loop (30s), the part that sells it.**
 Find the order the customer placed in step 2 in the ops queue. Advance it. Then show

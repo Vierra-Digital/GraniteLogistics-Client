@@ -23,8 +23,11 @@
     Intake: "Code 128 tracking label generated and printed.",
     PickedUp: "Runner captured condition photo and binned item.",
     Staged: "Batched to carrier manifest and assigned to dock lane.",
-    InTransit: "Carrier label created via API; tracking number issued.",
-    OutforDelivery: "Carrier scan: on vehicle for delivery.",
+    // No carrier API claims here. Without UPS/FedEx credentials the tracking number is
+    // generated locally (simulatedTracking) and there are no carrier scans, so a note
+    // saying otherwise is a false statement on the customer's own timeline.
+    InTransit: "Handed to the carrier; tracking number assigned.",
+    OutforDelivery: "On the vehicle for delivery.",
     Delivered: "Delivery confirmed with final condition photo."
   };
 

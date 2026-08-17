@@ -36,7 +36,7 @@ being offline. To exercise the real API, deploy to Netlify or run `netlify dev`.
 npm test
 ```
 
-142 tests, no network and no browser required, in two layers:
+146 tests, no network and no browser required, in two layers:
 
 - **Unit** (`test/functions.test.mjs`) covers the pure logic: workspace merging, id
   allocation, session tokens, tenant and api-key resolution, role assignment, the public
@@ -274,7 +274,7 @@ ever worked when the app was served by this file — on Netlify it 404'd.
 - Order intake by manual form, CSV import, and webhook.
 - Condition photos from the device camera, downscaled and timestamped.
 - Live barcode scanning via `BarcodeDetector` where supported, with a dropdown fallback.
-- Label printing (4 inch label via the browser) and PDF labels via the Node server.
+- Label printing: a 4 inch Code 128 label through the browser's own print dialog.
 - ZIP pre-sort, palletized load units, manifests with SCAC and ASN-style payloads.
 - SLA tracking (on-time / at-risk / late) and delivery exceptions.
 - Returns through Requested, In Transit, Received.
@@ -382,5 +382,9 @@ and the notification wiring are already done and tested.
 - `test/` regression tests for the function logic
 - `barcode.js` pure-JS Code 128 (Set B) to SVG
 - `manifest.webmanifest`, `sw.js` installable, offline-capable PWA
-- `server/` optional self-hosted Node server and Puppeteer label rendering
-- `supabase/schema.sql` schema for the Supabase sync provider
+- `server/` optional self-hosted Node server, for running everything locally
+- `supabase/schema.sql` schema for the Supabase sync provider as it ships today (one jsonb
+  workspace per tenant). `schema-relational.sql` is the proposed row-per-parcel replacement
+  and `MIGRATION-CHECKLIST.md` the manual steps; neither has been applied anywhere yet
+- `scripts/migrate-to-supabase.mjs` turns a workspace export into SQL, a CSV of the accounts
+  that need creating, and the condition photos as files (`npm run migrate:supabase`)
