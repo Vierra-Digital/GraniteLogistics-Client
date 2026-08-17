@@ -2056,17 +2056,11 @@
       '<div class="muted small">' + p.customer.address + ', ' + p.customer.city + ', ' + p.customer.state + ' ' + p.customer.zip + '</div>' +
       '<div style="margin:12px 0">' + Code128.toSVG(p.barcode, { height: 80, moduleWidth: 2 }) + '</div>' +
       '<div class="lbl-key">' + p.barcode + '</div></div>' +
-      '<div style="margin-top:16px;text-align:center;display:flex;gap:8px;justify-content:center">' +
-      '<button class="btn primary" id="print-label"><span aria-hidden="true">🖨</span> Print</button>' +
-      '<button class="btn" id="pdf-label"><span aria-hidden="true">📄</span> PDF (server)</button></div>'
+      '<div style="margin-top:16px;text-align:center">' +
+      '<button class="btn primary" id="print-label"><span aria-hidden="true">🖨</span> Print</button></div>'
     );
     var pb = $("#print-label");
     if (pb) pb.addEventListener("click", function () { printLabel(p); });
-    var pdfb = $("#pdf-label");
-    if (pdfb) pdfb.addEventListener("click", function () {
-      var c = cloudCfg(), base = c.url || location.origin;
-      window.open(base + "/api/label/" + encodeURIComponent(p.id) + "?key=" + encodeURIComponent(c.key), "_blank");
-    });
   }
   // Real printing: render a clean label into #print-root and invoke the browser print dialog.
   function printLabel(p) {
@@ -2139,13 +2133,11 @@
         '<div class="ri-sub">' + plural(manifestPkgs(m).length, "package") + ' · ' + m.lane + ' · ' + fmtTime(m.ts) + '</div></div>' +
         '<div class="head-actions"><button class="btn sm" data-mprint="' + m.id + '"><span aria-hidden="true">🖨</span> Print</button>' +
         '<button class="btn sm" data-mcsv="' + m.id + '"><span aria-hidden="true">↓</span> CSV</button>' +
-        '<button class="btn sm" data-mlabels="' + m.id + '"><span aria-hidden="true">🏷</span> Labels PDF</button>' +
         '<button class="btn sm" data-mxmit="' + m.id + '"><span aria-hidden="true">⇈</span> Transmit</button></div></div>';
     }).join("");
     $$("#manifest-list [data-mprint]").forEach(function (b) { b.addEventListener("click", function () { printManifest(b.dataset.mprint); }); });
     $$("#manifest-list [data-mcsv]").forEach(function (b) { b.addEventListener("click", function () { exportManifest(b.dataset.mcsv); }); });
     $$("#manifest-list [data-mxmit]").forEach(function (b) { b.addEventListener("click", function () { transmitManifest(b.dataset.mxmit); }); });
-    $$("#manifest-list [data-mlabels]").forEach(function (b) { b.addEventListener("click", function () { var c = cloudCfg(), base = c.url || location.origin; window.open(base + "/api/manifest/" + encodeURIComponent(b.dataset.mlabels) + "/labels?key=" + encodeURIComponent(c.key), "_blank"); }); });
   }
   function printManifest(id) {
     var m = state.manifests.find(function (x) { return x.id === id; }); if (!m) return;
@@ -2760,7 +2752,6 @@
       $("#view-sub").textContent = "Your pickups and staging at a glance.";
       var awaiting = c.Won + c.Intake;
       var loose = state.packages.filter(function (p) { return p.status === "PickedUp" && !p.loadUnit; }).length;
-      var openUnits = state.loadUnits.filter(function (u) { return u.parcels.map(getPkg).filter(Boolean).some(function (p) { return p.status === "PickedUp"; }); }).length;
       var exc = state.packages.filter(function (p) { return p.exception; }).length;
       el.innerHTML =
         homeTiles([["Pickups Awaiting", awaiting, awaiting > 0], ["To Pre-Sort", loose, false], ["Open Exceptions", exc, exc > 0]]) +

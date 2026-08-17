@@ -239,17 +239,19 @@ move. A mail failure never fails the push, which has already been stored.
 ## Self-hosted Node server (optional)
 
 `server/server.js` is a zero-dependency server that hosts both the app and the API,
-useful for label rendering:
+for running the whole thing locally without Netlify:
 
 ```bash
 node server/server.js   # http://localhost:8080
 ```
 
-It adds `GET /api/label/:id` and `GET /api/manifest/:id/labels`, which render real
-4x6 PDF labels via Puppeteer. `npm install` pulls Puppeteer; if the bundled Chromium
-download is blocked it auto-detects system Chrome or Edge, or set `GL_CHROME`. Labels
-render server-side, so the package must already exist on the server. `POST /api/orders`
-also accepts an optional `x-signature` HMAC of the body using `GL_WEBHOOK_SECRET`.
+It authorizes by API key rather than by session (`x-api-key`, or `?key=`), so it is a
+development host, not a second production backend. `POST /api/orders` accepts an
+optional `x-signature` HMAC of the body using `GL_WEBHOOK_SECRET`.
+
+Labels print from the browser (Runner → a package → **Print**), which is the only label
+path: a server-rendered PDF endpoint used to exist here and was removed, because it only
+ever worked when the app was served by this file — on Netlify it 404'd.
 
 ## Pages
 

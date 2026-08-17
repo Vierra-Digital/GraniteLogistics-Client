@@ -25,15 +25,19 @@ const KNOWN_VARS = [
   "GL_AUTH_SECRET", "GL_ADMIN_EMAILS", "GL_ROLES", "GL_TENANTS",
   "GL_BREVO_KEY", "GL_MAIL_FROM", "GL_VAPID_PUBLIC", "GL_VAPID_PRIVATE",
   "GL_UPS_CLIENT_ID", "GL_UPS_CLIENT_SECRET", "GL_FEDEX_CLIENT_ID", "GL_FEDEX_CLIENT_SECRET",
-  "GL_WEBHOOK_SECRET", "GL_CHROME",
 ];
+
+// Read only outside the deployment -- GL_WEBHOOK_SECRET by server/server.js, GL_CHROME by the
+// verification scripts. Recognised, so setting one is not reported as a typo, but never
+// reported as missing: no function here reads them, so "unset" is the correct state.
+const LOCAL_ONLY_VARS = ["GL_WEBHOOK_SECRET", "GL_CHROME"];
 
 // Names only, never values. A name is not a secret, and without this a misspelled or
 // wrongly-scoped variable looks exactly like an unset one.
 function envDiagnostic() {
-  const present = KNOWN_VARS.filter((k) => !!process.env[k]);
+  const present = KNOWN_VARS.concat(LOCAL_ONLY_VARS).filter((k) => !!process.env[k]);
   const unrecognised = Object.keys(process.env)
-    .filter((k) => /^GL_/.test(k) && KNOWN_VARS.indexOf(k) < 0)
+    .filter((k) => /^GL_/.test(k) && KNOWN_VARS.indexOf(k) < 0 && LOCAL_ONLY_VARS.indexOf(k) < 0)
     .sort();
   return {
     present,

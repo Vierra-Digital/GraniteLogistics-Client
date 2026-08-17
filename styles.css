@@ -182,7 +182,7 @@ html[data-theme="dark"] .alert-row{background:#241620;border-color:#5b2330}
 html[data-theme="dark"] .exc-banner{background:#241620;border-color:#5b2330}
 /* .btn hard-codes background:#fff, so no token can reach it: in dark mode the label sat at
    --slate-700 (#b7c2d0) on white, a 1.75:1 contrast ratio against the 4.5:1 requirement.
-   Every Print / CSV / Labels PDF / Transmit button on Batch & Manifests was affected.
+   Every Print / CSV / Transmit button on Batch & Manifests was affected.
    .primary/.ok/.ghost set their own colours and .danger gets its own rule below, so they
    are excluded -- this selector outranks .btn.primary on specificity and would win. */
 html[data-theme="dark"] .btn:not(.primary):not(.ok):not(.danger):not(.ghost){
