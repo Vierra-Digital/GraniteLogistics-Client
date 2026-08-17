@@ -1108,21 +1108,23 @@
   // Server-scoped orders: when signed in with a real (non-local) session, a customer's
   // orders live under their account in Netlify Blobs and follow them across devices.
   function hasServerAuth() { var t = (typeof authToken === "function") ? authToken() : null; return !!t && t !== "local"; }
-  function myOrdersGet() {
-    return fetch("/api/my-orders", { headers: { "Authorization": "Bearer " + authToken() } }).then(function (r) { return r.json(); });
-  }
-  // Resolves with the parsed body plus _status. The caller needs the status to tell a
-  // definite rejection (rate limited, validation) apart from an unreachable server: the
-  // first must be shown to the customer, only the second should be queued for retry.
-  function myOrdersPost(payload) {
-    return fetch("/api/my-orders", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + authToken() }, body: JSON.stringify(payload) })
+  // Every authorized call to /api/* has the same three requirements: a bearer token, JSON
+  // in and out, and the HTTP status attached to the body. The status matters because the
+  // caller has to tell a definite rejection (rate limited, validation, revoked access) from
+  // an unreachable server -- the first is shown to the person, only the second is retried.
+  // A body that is not JSON resolves as {} rather than rejecting, so a proxy's HTML error
+  // page reaches the same handling as a JSON one.
+  function api(path, init) {
+    init = init || {};
+    var headers = { "Authorization": "Bearer " + authToken() };
+    if (init.body) headers["Content-Type"] = "application/json";
+    return fetch(path, Object.assign({}, init, { headers: Object.assign(headers, init.headers) }))
       .then(function (r) {
-        return r.json().catch(function () { return {}; }).then(function (j) {
-          j._status = r.status;
-          return j;
-        });
+        return r.json().catch(function () { return {}; }).then(function (j) { j._status = r.status; return j; });
       });
   }
+  function myOrdersGet() { return api("/api/my-orders"); }
+  function myOrdersPost(payload) { return api("/api/my-orders", { method: "POST", body: JSON.stringify(payload) }); }
   // Replace this customer's orders in local state with the authoritative server list,
   // but keep any orders still waiting to sync (placed while offline) so a server pull
   // never silently erases them before they've had a chance to reach the server.
@@ -1237,6 +1239,20 @@
       });
     }
   }
+  // One card shape for one of a customer's orders, shared by the Home preview and the full
+  // list on Orders. They are the same object in the same product, so a change to how an
+  // order reads should not be possible to make in one place and forget in the other.
+  function custOrderCard(p) {
+    return '<button class="cust-order" data-id="' + p.id + '">' +
+      '<div class="co-main"><b>' + p.item.description + '</b>' +
+      '<span class="co-meta">' + p.id + ' · ' + custWhen(p) + '</span></div>' +
+      custStatusPill(p) + '</button>';
+  }
+  function wireCustOrderCards(container) {
+    $$(container + " [data-id]").forEach(function (b) {
+      b.addEventListener("click", function () { openCustomerOrder(b.dataset.id); });
+    });
+  }
   // Placeholder rows shaped like the real ones, so the layout doesn't jump when the
   // orders arrive. aria-hidden and aria-busy keep a screen reader from announcing them.
   function renderCustHomeSkeleton() {
@@ -1272,15 +1288,8 @@
         '<span>Place your first order and it\'ll show up here so you can follow it the whole way.</span></div>';
       return;
     }
-    box.innerHTML = mine.slice().sort(custOrderSort).slice(0, 3).map(function (p) {
-      var eta = custWhen(p);
-      var pill = custStatusPill(p);
-      return '<button class="cust-order" data-id="' + p.id + '">' +
-        '<div class="co-main"><b>' + p.item.description + '</b>' +
-        '<span class="co-meta">' + p.id + ' · ' + eta + '</span></div>' +
-        pill + '</button>';
-    }).join("");
-    $$("#chome-recent [data-id]").forEach(function (b) { b.addEventListener("click", function () { openCustomerOrder(b.dataset.id); }); });
+    box.innerHTML = mine.slice().sort(custOrderSort).slice(0, 3).map(custOrderCard).join("");
+    wireCustOrderCards("#chome-recent");
   }
   // ---- Team & roles (Admin only) ----
   //
@@ -1298,14 +1307,7 @@
     el.textContent = msg || "";
     el.className = "muted small" + (kind ? " adm-" + kind : "");
   }
-  function admFetch(init) {
-    return fetch("/api/admin", Object.assign({
-      headers: Object.assign({ "Authorization": "Bearer " + authToken() },
-        init && init.body ? { "Content-Type": "application/json" } : {})
-    }, init || {})).then(function (r) {
-      return r.json().catch(function () { return {}; }).then(function (j) { j._status = r.status; return j; });
-    });
-  }
+  function admFetch(init) { return api("/api/admin", init); }
   function renderAdmin() {
     if (!canManageRoles()) { go(homeView()); return; }
     admStatus("Loading accounts…");
@@ -1505,14 +1507,7 @@
     for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
     return out;
   }
-  function pushApi(init) {
-    return fetch("/api/push", Object.assign({
-      headers: Object.assign({ "Authorization": "Bearer " + authToken() },
-        init && init.body ? { "Content-Type": "application/json" } : {})
-    }, init || {})).then(function (r) {
-      return r.json().catch(function () { return {}; }).then(function (j) { j._status = r.status; return j; });
-    });
-  }
+  function pushApi(init) { return api("/api/push", init); }
   function renderPushCard() {
     var card = $("#acct-push-card"), on = $("#acct-push-on"), off = $("#acct-push-off"), note = $("#acct-push-note");
     if (!card) return;
@@ -1589,10 +1584,7 @@
     var btn = $("#acct-verify-resend");
     if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
     var done = function () { if (btn) { btn.disabled = false; btn.textContent = "Send the link again"; } };
-    fetch("/api/auth", { method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + authToken() },
-      body: JSON.stringify({ action: "verify-request" }) })
-      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { j._status = r.status; return j; }); })
+    api("/api/auth", { method: "POST", body: JSON.stringify({ action: "verify-request" }) })
       .then(function (j) {
         done();
         if (j.alreadyVerified) {
@@ -1627,8 +1619,7 @@
     var btn = $("#acct-export");
     if (btn) { btn.disabled = true; btn.textContent = "Preparing…"; }
     var done = function () { if (btn) { btn.disabled = false; btn.innerHTML = '<span aria-hidden="true">⇩</span> Download my data'; } };
-    fetch("/api/account", { headers: { "Authorization": "Bearer " + authToken() } })
-      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { j._status = r.status; return j; }); })
+    api("/api/account")
       .then(function (j) {
         done();
         if (!j.ok) { toast(j.error || "Couldn't prepare your data.", "warn", 7000); return; }
@@ -1655,8 +1646,7 @@
       if (!ok) return;
       var btn = $("#acct-close");
       if (btn) { btn.disabled = true; btn.textContent = "Closing…"; }
-      fetch("/api/account", { method: "DELETE", headers: { "Authorization": "Bearer " + authToken() } })
-        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { j._status = r.status; return j; }); })
+      api("/api/account", { method: "DELETE" })
         .then(function (j) {
           if (!j.ok) {
             if (btn) { btn.disabled = false; btn.textContent = "Close my account"; }
@@ -1716,15 +1706,8 @@
       var ts = $("#try-sample"); if (ts) ts.addEventListener("click", fillSampleOrder);
       return;
     }
-    box.innerHTML = mine.slice().sort(custOrderSort).map(function (p) {
-      var eta = custWhen(p);
-      var pill = custStatusPill(p);
-      return '<button class="cust-order" data-id="' + p.id + '">' +
-        '<div class="co-main"><b>' + p.item.description + '</b>' +
-        '<span class="co-meta">' + p.id + ' · ' + eta + '</span></div>' +
-        pill + '</button>';
-    }).join("");
-    $$("#cust-orders [data-id]").forEach(function (b) { b.addEventListener("click", function () { openCustomerOrder(b.dataset.id); }); });
+    box.innerHTML = mine.slice().sort(custOrderSort).map(custOrderCard).join("");
+    wireCustOrderCards("#cust-orders");
   }
   // Guided multi-step order flow (Item → Delivery → Review)
   var ORDER_STEP = 1;
