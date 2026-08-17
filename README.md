@@ -382,6 +382,9 @@ and the notification wiring are already done and tested.
 - `test/` regression tests for the function logic
 - `barcode.js` pure-JS Code 128 (Set B) to SVG
 - `manifest.webmanifest`, `sw.js` installable, offline-capable PWA
+- `assets/` icons and the logo. `logo-source.jpeg` is the unmodified original `logo.png` was
+  cut from: it is referenced by nothing and kept deliberately, because a background-removal
+  pass on the logo once clipped a letter and the original is how that was proved and repaired
 - `server/` optional self-hosted Node server, for running everything locally
 - `supabase/schema.sql` schema for the Supabase sync provider as it ships today (one jsonb
   workspace per tenant). `schema-relational.sql` is the proposed row-per-parcel replacement
