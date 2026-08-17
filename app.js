@@ -289,6 +289,17 @@
     pill.classList.toggle("warn", kind === "warn");
     pill.innerHTML = '<span class="dot' + (kind === "warn" ? "" : " ok") + '" aria-hidden="true"></span> ' + text;
   }
+  // A session created by the local fallback: the auth API could not be reached, so this
+  // account exists only in this browser. Nothing about it is on the server -- no other
+  // device can sign in to it, ops cannot see its orders, and no email can reach it.
+  function isLocalAccount() { return authToken() === "local"; }
+  // Storage trouble outranks account state, because losing work is worse than not syncing.
+  function refreshEnvPill() {
+    if (storageBroken) return setPill("warn", "Not saving on this device");
+    if (storageNearWarned) return;
+    if (isLocalAccount()) return setPill("warn", "Local account · not on the server");
+    setPill("ok", "Synced to this device");
+  }
   function storageFailed() {
     if (storageBroken) return;
     storageBroken = true;
@@ -299,7 +310,7 @@
     if (!storageBroken) return;
     storageBroken = false;
     storageNearWarned = false;
-    setPill("ok", "Synced to this device");
+    refreshEnvPill();
     toast("Saving on this device again.", "ok");
   }
   // Derive manifest records by grouping packages that share a batchId.
@@ -839,6 +850,9 @@
     // applies to this session.
     resetSyncBlock();
     if (u) { state.settings.role = u.role || state.settings.role; state.settings.roleChosen = true; save(); }
+    // Every entry into the app, not just the sign-in that created it: someone returning to
+    // a local-account session on a later visit has to be told too.
+    refreshEnvPill();
     hideLogin();
     updateRoleUI(); applyRole(); go(homeView()); renderBottomNav(); renderNotifs(); bootSync();
   }
@@ -3271,7 +3285,12 @@
       enterApp();
       if (mode === "register") showWelcomeTour();
       else toast("Signed in", "ok");
-      if (res.offline) toast("Backend unreachable. Using a local account on this device.", "ok");
+      // A warning, not a tick. This account is not on the server: it works on this device
+      // and nowhere else, and the pill keeps saying so after the toast has gone.
+      if (res.offline) {
+        refreshEnvPill();
+        toast("Couldn't reach the server, so this is a local account on this device only. Your orders won't reach operations and no other device can sign in to it. Try again when you're back online.", "warn", 14000);
+      }
     });
   });
   function confirmSignOut() {
@@ -3535,6 +3554,10 @@
     if (!applyHash()) go(homeView());
     applyRole();
     renderNotifs();
+    // A restored session needs the same honesty as a fresh one. enterApp() only runs from
+    // the login form, so without this a local-only account announced itself once and then
+    // looked exactly like a real one on every later visit.
+    refreshEnvPill();
     bootSync();
     verifySession();
   } else {
