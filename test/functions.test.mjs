@@ -6,6 +6,9 @@
 // No network, no Blobs runtime, no browser. Run with: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { mergePushedPackages, nextId, tenantOf, resolveKey, makeOrder, EMPTY, publicTrackingView, orderRateLimit, orderCreatedAt, ORDER_LIMITS } from "../netlify/functions/_lib.mjs";
 import { envRoleFor, OPS_ROLES, WRITE_ROLES } from "../netlify/functions/_auth.mjs";
@@ -730,4 +733,52 @@ test("the reset email includes the link and no stray em dashes", () => {
   assert.ok(m.html.includes("Jane"));   // greets by first name
   assert.ok(!m.html.includes("Doe"));   // not the full name
   assert.ok(!/—/.test(m.html + m.text + m.subject));
+});
+
+// ---- Supabase migration transform ----
+//
+// Emits SQL, so quoting is the thing that matters: everything it writes came out of a
+// user-entered JSON export. Also checks photos really leave the record as files, which is
+// the point of the exercise.
+test("the migration transform quotes its input and extracts photos as files", async () => {
+  const { transform } = await import("../scripts/migrate-to-supabase.mjs");
+  const out = mkdtempSync(join(tmpdir(), "gl-mig-"));
+  // a 34-byte valid WebP
+  const webp = "data:image/webp;base64,UklGRiIAAABXRUJQVlA4TBUAAAAvAAAAEAcQERGIiP4HAA==";
+
+  const res = transform({
+    packages: [{
+      id: "GL-1041", status: "Delivered", source: "Customer Order",
+      // an apostrophe in every string field a person can type into
+      item: { description: "O'Brien's 55\" TV", value: 1290 },
+      customer: { name: "D'Angelo O'Hara", address: "1 O'Connell St", city: "Dayton" },
+      customerEmail: "Mixed.Case@Example.com",
+      photos: { pickup: webp, delivery: webp },
+      history: [{ stage: "Won", ts: 1700000000000, note: "it's here" }, { stage: "Delivered", ts: 1700000100000 }],
+    }],
+    manifests: [{ id: "BATCH-701", carrier: "UPS", lane: "Lane 2", ts: 1700000000000 }],
+    loadUnits: [],
+  }, out, "default");
+
+  // Every apostrophe doubled, and none left single anywhere in the emitted SQL.
+  assert.match(res.sql, /O''Brien''s/);
+  assert.match(res.sql, /D''Angelo O''Hara/);
+  assert.match(res.sql, /it''s here/);
+  const unbalanced = (res.sql.match(/'/g) || []).length % 2;
+  assert.equal(unbalanced, 0, "quotes should balance, so no literal is left open");
+
+  // Photos are out of the record and on disk as real images, with the row pointing at a path.
+  assert.equal(res.counts.photos, 2);
+  assert.match(res.sql, /'default\/GL-1041\/pickup\.webp'/);
+  const file = join(out, "photos", "default", "GL-1041", "delivery.webp");
+  const bytes = readFileSync(file);
+  assert.equal(bytes.subarray(0, 4).toString(), "RIFF");
+  assert.equal(bytes.subarray(8, 12).toString(), "WEBP");
+
+  // History becomes rows, and the email is normalised for the account list.
+  assert.equal(res.counts.events, 2);
+  assert.equal(res.accounts.length, 1);
+  assert.equal(res.accounts[0].email, "mixed.case@example.com");
+
+  rmSync(out, { recursive: true, force: true });
 });

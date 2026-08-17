@@ -27,3 +27,4 @@ shots/
 # OS / editor cruft
 .DS_Store
 Thumbs.db
+supabase/migration-out/

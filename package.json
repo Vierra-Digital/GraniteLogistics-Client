@@ -12,7 +12,8 @@
     "contrast": "node scripts/contrast.mjs",
     "layout": "node scripts/layout.mjs",
     "a11y": "node scripts/a11y.mjs",
-    "check": "node scripts/check.mjs"
+    "check": "node scripts/check.mjs",
+    "migrate:supabase": "node scripts/migrate-to-supabase.mjs"
   },
   "dependencies": {
     "@netlify/blobs": "^8.1.0",
