@@ -36,7 +36,7 @@ being offline. To exercise the real API, deploy to Netlify or run `netlify dev`.
 npm test
 ```
 
-146 tests, no network and no browser required, in two layers:
+158 tests, no network and no browser required, in three layers:
 
 - **Unit** (`test/functions.test.mjs`) covers the pure logic: workspace merging, id
   allocation, session tokens, tenant and api-key resolution, role assignment, the public
@@ -53,6 +53,13 @@ npm test
   (a non-admin gets 404, you cannot change your own role or remove the last Admin, env-set
   roles are read-only, every change is audited), the concurrent-write repairs, and that
   neither the public `/api/health` report nor the admin account list discloses a secret.
+
+- **Supabase** (`test/supabase.test.mjs`) drives the PostgREST data layer against a fake
+  PostgREST whose column set is **parsed out of `supabase/schema-relational.sql`**, so the
+  mapping and the schema cannot drift apart. That check is what found five columns the schema
+  was missing. It also models PostgREST resolving a conflict against the primary key when
+  `on_conflict` is absent, which is what makes the idempotence test meaningful rather than
+  decorative.
 
 The integration layer needs `--experimental-test-module-mocks`, which the npm script
 already passes.
@@ -93,8 +100,9 @@ Two things worth knowing before trusting a green run:
 ## Deploy (Netlify)
 
 Connect the repo. `netlify.toml` needs no build command; the functions in
-`netlify/functions/` are picked up automatically and storage is Netlify Blobs, so
-there is no database to provision.
+`netlify/functions/` are picked up automatically. Storage is Netlify Blobs by default, so
+there is no database to provision; adding the two `SUPABASE_*` variables below switches
+workspaces to Postgres rows without touching any other configuration.
 
 ### Environment variables
 
@@ -110,6 +118,8 @@ there is no database to provision.
 | `GL_UPS_CLIENT_ID` / `GL_UPS_CLIENT_SECRET` | For real UPS tracking | Both required together; one without the other counts as unconfigured. See **Carriers** below — the request layer is not implemented yet. |
 | `GL_FEDEX_CLIENT_ID` / `GL_FEDEX_CLIENT_SECRET` | For real FedEx tracking | As above. |
 | `GL_TENANTS` | Optional | JSON map of api key to tenant, e.g. `{"my-key":"my-tenant"}`. Setting it **replaces** the built-in demo keys rather than adding to them, which switches the public keys off. |
+| `SUPABASE_URL` | To store workspaces in Supabase | Project URL, e.g. `https://abc.supabase.co`. Public. Has no effect unless the service role key is set too. |
+| `SUPABASE_SERVICE_ROLE_KEY` | To store workspaces in Supabase | **A secret, and the most dangerous one here** — it bypasses RLS entirely. Server-side only; never expose it to the browser. With both set, workspaces move from Netlify Blobs to Postgres rows and condition photos to a private Storage bucket. |
 
 Changing `GL_AUTH_SECRET` invalidates every existing session, which is the correct
 behaviour when rotating it.
@@ -222,19 +232,24 @@ move. A mail failure never fails the push, which has already been stored.
    older snapshot can still overwrite an order that was already confirmed; that is what the
    preserve rule in point 1 covers on `/api/state`.
 
-## Cloud sync providers
+## Cloud sync
 
-**Settings → Cloud Sync** offers two providers for the ops workspace:
+**Settings → Cloud Sync** has one path: this site's `/api/state`. Leave Server URL blank for
+same origin. Auto-sync is on by default for ops roles. The client sends both its session
+token and the api key, because Netlify authorizes by role while the bundled Node server
+authorizes by key. On Netlify you must be **signed in as an ops user**; the key alone is not
+enough.
 
-- **Granite API** (default): the Netlify Functions above, or the bundled Node server.
-  Leave Server URL blank for same origin. Auto-sync is on by default for ops roles. The
-  client sends both its session token and the api key, because Netlify authorizes by role
-  while the bundled Node server authorizes by key. On Netlify you must be **signed in as
-  an ops user** for sync to work; the key alone is no longer enough.
-- **Supabase**: browser-to-Postgres, for a fully static deploy. Run
-  `supabase/schema.sql`, then paste the Project URL and anon key. The anon key is
-  public, so use a non-guessable workspace name for a pilot and add Auth plus RLS
-  (commented in the schema) for production.
+A browser-direct Supabase provider used to sit alongside it, writing one jsonb blob per
+tenant with the anon key. It is gone. Which store a workspace lives in is now a deployment
+setting rather than a client one:
+
+| Both `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` set | Otherwise |
+| --- | --- |
+| Supabase: a row per parcel, condition photos in a private Storage bucket read through signed URLs that expire | Netlify Blobs: one JSON record per workspace |
+
+`GET /api/health` reports which one is live, under `storage`. The service role key stays
+server-side and must never reach the browser.
 
 ## Self-hosted Node server (optional)
 
@@ -386,8 +401,10 @@ and the notification wiring are already done and tested.
   cut from: it is referenced by nothing and kept deliberately, because a background-removal
   pass on the logo once clipped a letter and the original is how that was proved and repaired
 - `server/` optional self-hosted Node server, for running everything locally
-- `supabase/schema.sql` schema for the Supabase sync provider as it ships today (one jsonb
-  workspace per tenant). `schema-relational.sql` is the proposed row-per-parcel replacement
-  and `MIGRATION-CHECKLIST.md` the manual steps; neither has been applied anywhere yet
+- `supabase/schema-relational.sql` the row-per-parcel schema the functions target, with RLS,
+  plus `MIGRATION-CHECKLIST.md` for the steps that need a person. Not yet applied to a real
+  Postgres: no psql, Docker or CLI here, so the first run belongs in the dashboard SQL editor
+- `netlify/functions/_supabase.mjs` the PostgREST data layer, reached only through
+  readState/writeState
 - `scripts/migrate-to-supabase.mjs` turns a workspace export into SQL, a CSV of the accounts
   that need creating, and the condition photos as files (`npm run migrate:supabase`)

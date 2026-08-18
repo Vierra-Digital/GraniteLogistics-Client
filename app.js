@@ -1954,7 +1954,6 @@
   // API-first demo: push current state, POST an order to the webhook, pull it back.
   function simulateWebhook() {
     var c = cloudCfg(), base = c.url || "";
-    if (c.provider === "supabase") { toast("Webhook ingest needs the Node/Edge backend. On Supabase, orders sync via Cloud Sync.", "ok"); return; }
     var st = $("#webhook-status");
     var item = pick(ITEMS), city = pick(CITIES);
     var order = { name: pick(FIRST) + " " + pick(LAST), item: item[0], value: item[1], address: (100 + rng(8900)) + " " + pick(STREETS), city: city[0], state: city[1], zip: city[2], source: "Shopify (webhook)" };
@@ -2244,22 +2243,22 @@
     set("carrier", s.defaultCarrier); set("lane", s.defaultLane);
     var cl = s.cloud || {};
     var setv = function (id, v) { var el = $(id); if (el) el.value = v; };
-    var cp = $("#cloud-provider"); if (cp) cp.value = cl.provider || "granite";
     setv("#cloud-url", cl.url || ""); setv("#cloud-key", cl.key || "granite-dev-key");
-    setv("#cloud-sburl", cl.sbUrl || ""); setv("#cloud-sbanon", cl.sbAnon || ""); setv("#cloud-tenant", cl.tenant || "default");
+    setv("#cloud-tenant", cl.tenant || "default");
     var ca = $("#cloud-auto"); if (ca) ca.checked = !!cl.autoSync;
-    syncProviderUI();
   }
 
-  // ---- Cloud sync (provider: Granite API server OR Supabase REST) ----
+  // ---- Cloud sync ----
+  // One path: this site's /api/state, which authorizes by the signed-in role. A browser-direct
+  // Supabase provider used to sit alongside it, writing one jsonb blob per tenant through the
+  // anon key. It is gone: the functions talk to Supabase now, with RLS and a service key that
+  // stays server-side, and the old path's policies granted anon read and write over every
+  // workspace row -- the precise weakness the relational schema was written to remove.
   function cloudCfg() {
     var c = state.settings.cloud || {};
     return {
-      provider: c.provider || "granite",
       url: (c.url || "").trim().replace(/\/$/, ""),
       key: (c.key || "granite-dev-key").trim(),
-      sbUrl: (c.sbUrl || "").trim().replace(/\/$/, ""),
-      sbAnon: (c.sbAnon || "").trim(),
       tenant: (c.tenant || "default").trim() || "default",
       autoSync: !!c.autoSync
     };
@@ -2267,12 +2266,11 @@
   function saveCloudInputs() {
     var v = function (id, d) { var el = $(id); return (el ? (el.value || "") : "").trim() || d; };
     state.settings.cloud = {
-      provider: (($("#cloud-provider") || {}).value) || "granite",
       url: v("#cloud-url", ""), key: v("#cloud-key", "granite-dev-key"),
-      sbUrl: v("#cloud-sburl", ""), sbAnon: v("#cloud-sbanon", ""), tenant: v("#cloud-tenant", "default"),
+      tenant: v("#cloud-tenant", "default"),
       autoSync: !!(($("#cloud-auto") || {}).checked)
     };
-    resetSyncBlock(); // new url/key/provider deserves a fresh attempt
+    resetSyncBlock(); // a new url or key deserves a fresh attempt
     save();
   }
   // `deleted` carries ids this client removed on purpose. The server preserves any
@@ -2335,13 +2333,6 @@
   // Returns a Promise resolving to {count}; rejects on error.
   function pushState() {
     var c = cloudCfg();
-    if (c.provider === "supabase") {
-      return fetch(c.sbUrl + "/rest/v1/workspaces", {
-        method: "POST",
-        headers: { apikey: c.sbAnon, Authorization: "Bearer " + c.sbAnon, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" },
-        body: JSON.stringify({ tenant: c.tenant, data: fullState(), updated_at: new Date().toISOString() })
-      }).then(function (r) { if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); }); return { count: state.packages.length }; });
-    }
     return fetch(c.url + "/api/state", { method: "PUT", headers: cloudHeaders(c, true), body: JSON.stringify(fullState()) })
       .then(function (r) {
         if (!r.ok) return workspaceError(r);
@@ -2351,11 +2342,6 @@
   // Returns a Promise resolving to a state object (or null if none).
   function pullState() {
     var c = cloudCfg();
-    if (c.provider === "supabase") {
-      return fetch(c.sbUrl + "/rest/v1/workspaces?select=data&tenant=eq." + encodeURIComponent(c.tenant), { headers: { apikey: c.sbAnon, Authorization: "Bearer " + c.sbAnon } })
-        .then(function (r) { if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); }); return r.json(); })
-        .then(function (rows) { return (rows && rows[0]) ? rows[0].data : null; });
-    }
     return fetch(c.url + "/api/state", { headers: cloudHeaders(c, false) })
       .then(function (r) { return r.ok ? r.json() : workspaceError(r); });
   }
@@ -2433,13 +2419,6 @@
     }).catch(function (e) { manualSyncFailed(e, "Pull"); })
       .finally(function () { cloudBusy(false); });
   }
-  function syncProviderUI() {
-    var p = (($("#cloud-provider") || {}).value) || "granite";
-    var g = $("#grp-granite"), s = $("#grp-supabase");
-    if (g) g.style.display = p === "supabase" ? "none" : "";
-    if (s) s.style.display = p === "supabase" ? "" : "none";
-  }
-
   // ---- Operational logistics: ZIP pre-sort, palletization, transmission ----
   function zoneOf(p) { return (p.customer.zip || "").replace(/[^0-9]/g, "").slice(0, 3) || "–"; }
   function recommendedLane(zone) {
@@ -3389,7 +3368,6 @@
   var cloudPushBtn = $("#cloud-push"); if (cloudPushBtn) cloudPushBtn.addEventListener("click", cloudPush);
   var cloudPullBtn = $("#cloud-pull"); if (cloudPullBtn) cloudPullBtn.addEventListener("click", cloudPull);
   var cloudAuto = $("#cloud-auto"); if (cloudAuto) cloudAuto.addEventListener("change", function () { saveCloudInputs(); toast(this.checked ? "Auto-sync on" : "Auto-sync off", "ok"); });
-  var cloudProvider = $("#cloud-provider"); if (cloudProvider) cloudProvider.addEventListener("change", function () { syncProviderUI(); saveCloudInputs(); });
 
   var backupBtn = $("#backup-json");
   if (backupBtn) backupBtn.addEventListener("click", function () {

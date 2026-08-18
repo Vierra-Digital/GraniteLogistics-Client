@@ -1,114 +1,58 @@
-# Supabase migration — the manual steps
+# Supabase migration — what is left, and what is done
 
-Everything here needs a person: a dashboard, a credential, or money. The code-side work is
-separate and is listed at the end so you can see what you are unblocking.
+Project `yjafrhkrcdldvfcqxcol` exists and its publishable key works. The code is written: the
+Netlify Functions read and write Postgres rows through `netlify/functions/_supabase.mjs`, and
+condition photos go to a private Storage bucket behind signed URLs. `GET /api/health` reports
+which store is live under `storage`.
 
-The four open decisions from the first draft are now settled and folded in, so nothing below
-is a question. They were: region, tier, whether the Netlify Functions stay as the API layer,
-and whether the photo bucket is public. Recorded where each one lands.
+**Two things gate the switch, and only one of them is a real task.**
 
-Order matters. Steps 1–3 are prerequisites, not housekeeping — skipping step 1 in particular
-will strand every account, including possibly your own.
+1. The schema has to be applied. There is no psql, Docker or Supabase CLI on the machine this
+   was built on, so it has never touched a real Postgres and the first run has to be watched
+   by a person. That is step 2 below.
+2. Email has to be configured before **auth** moves. Auth has not moved and is not part of
+   this; workspaces can switch today without touching a single password.
 
-**No backup step, at your instruction.** That is a real change to the shape of this migration,
-not a step deleted: with no export held aside, the live Netlify Blobs data is your only way
-back, so it must survive untouched through cutover. That is why the old backend is deleted
-last (step 18) and not before, and why step 10 takes a fresh export as *migration input*
-rather than reusing an archived one.
-
----
-
-## Phase 0 — before touching Supabase at all
-
-### 1. Configure email, and deploy it. **Do this first.**
-
-Netlify → Site configuration → Environment variables (Production):
-
-```
-GL_BREVO_KEY=<your Brevo API key>
-GL_MAIL_FROM=Granite Logistics <ken@usegl.com>
-```
-
-Then **redeploy** — Netlify bakes environment variables at build time, which is why
-`GL_ADMIN_EMAILS` appeared unset until a redeploy earlier.
-
-Why first: accounts here are hashed with **scrypt** (`hashPw` in
-`netlify/functions/_auth.mjs`). Supabase Auth stores its own bcrypt hashes in
-`auth.users.encrypted_password` and cannot import a foreign hash, so **every account will
-have to set a new password**. With email unconfigured there is no self-service reset — the
-only route is Team & Roles → Reset password, one account at a time, performed by an admin who
-can still sign in. Configure email and the same migration becomes "everyone gets a reset
-link".
-
-Verify:
-
-```bash
-curl -s https://usegl.com/api/health
-```
-
-`passwordReset` should read `ok`.
-
-### 2. Rotate `GL_AUTH_SECRET`.
-
-Unrelated to Supabase, but do it now rather than during a cutover. It is the single HMAC key
-behind every session, and it was exposed in conversation. Anyone holding it can mint a valid
-token for any address; for an address in `GL_ADMIN_EMAILS` that is full ops access.
-
-Set a new value, redeploy. Passwords are unaffected (per-user salts, independent of this
-key). Everyone signs in again. In-flight reset and verification links die.
-
-### 3. Push the 10 unpushed commits.
-
-They include the driver-scan fix, the local-account warning, and the admin password reset —
-which is your only recovery path until step 1 lands.
+You said there is no data in the old system you care about. If that still holds, skip Phase 3
+entirely — there is nothing to migrate, and a fresh empty workspace is one less thing to get
+wrong.
 
 ---
 
-## Phase 1 — create the project
+## Phase 1 — rotate what leaked
 
-### 4. Create the Supabase project.
+### 1. Rotate the secret API key, and the database password.
 
-- **Region: `us-east-1` (N. Virginia).** Nearest to Dayton of the US options, and the region
-  cannot be changed afterwards.
-- **Tier: paid, if this carries real shipments.** Free-tier projects are paused after a period
-  of inactivity — fine for a demo, not fine for a system a driver opens at 6am to a dead
-  database. This is the one item here that costs money, so it is yours to veto; if you veto
-  it, treat the result as a demo environment and do not cut production over to it.
-- **Database password**: generate a strong one and store it in a password manager. You will
-  need it for direct Postgres connections.
+Both were pasted into a chat transcript. Settings → API Keys for the first, Settings →
+Database → Reset database password for the second.
 
-### 5. Collect three credentials.
-
-From Project Settings → API (the dashboard moves things around; look for "API keys"):
-
-| Credential | Who needs it | Sensitivity |
-| --- | --- | --- |
-| Project URL | client + server | public |
-| `anon` key | client | designed to ship in a browser bundle |
-| `service_role` key | server only | **full access, bypasses RLS** |
-
-The `service_role` key must never reach the browser. If you paste it in a chat — with me or
-anyone — treat it as burned and rotate it afterwards. I only need the Project URL and the
-`anon` key; the `service_role` key goes straight into Netlify at step 15 and I never see it.
-
-**Architecture, decided: the Netlify Functions stay as the API layer.** Supabase becomes what
-they talk to instead of Blobs. `/api/orders` is your API-first pitch and its contract is
-published on your own landing page, so keeping it makes this a swap behind the boundary rather
-than a re-implementation and re-documentation of your public API — and it keeps the
-`service_role` key in one server-side place you already control. Edge Functions stay
-available later for anything genuinely new; nothing here forecloses them.
+The new secret key goes into Netlify at step 5 and nowhere else. The database password is only
+needed for direct psql connections and is not used by any of this code.
 
 ---
 
-## Phase 2 — database and storage
+## Phase 2 — apply the schema
 
-### 6. Apply the schema.
+### 2. Run `schema-relational.sql` in the SQL Editor. **Read it as it goes.**
 
-Run `supabase/schema-relational.sql` in the SQL Editor. **Read it first, and watch the first
-run** — it has never been executed against a real Postgres, so treat the first application as
-a review, not a formality.
+SQL Editor → New query → paste the whole file → Run.
 
-### 7. Seed `bootstrap_admins`.
+It was corrected before you run it. Checking it against what the app actually stores turned up
+five things that would each have looked like working software and then silently lost data:
+
+| Was missing | What would have happened |
+| --- | --- |
+| `packages.load_unit`, `sort_zone`, `presort_lane` | pre-sorting a parcel survives until the next pull, then vanishes |
+| `manifests.transmitted` | handing a manifest to a carrier does not stick |
+| `load_units` had `zip_prefix`/`city`/`state` | columns for data the app never writes, and none for the zone, lane and weight it does |
+| no `activity_events` table | the Activity Log comes back empty and the client's entries are dropped |
+| no `workspace_settings` table | company name, default carrier and lane are not stored |
+| no unique constraint on `package_events` | every sync appends another copy of every custody entry |
+
+If a statement errors, paste me the message and the statement. A failure part-way leaves the
+earlier tables created, so tell me rather than re-running blind.
+
+### 3. Seed `bootstrap_admins`.
 
 ```sql
 insert into public.bootstrap_admins (email, note) values
@@ -116,134 +60,87 @@ insert into public.bootstrap_admins (email, note) values
   ('kenfilbert@hotmail.com', 'ops');
 ```
 
-This replaces `GL_ADMIN_EMAILS`. **Note the change in how you recover from a lockout:** today
-it is "edit a Netlify variable and redeploy"; afterwards it is "run SQL in the Supabase
-dashboard". Same guarantee, different break-glass. Make sure you will still have dashboard
-access when you need it.
+Confirm both addresses first. This table is service-role-only and replaces `GL_ADMIN_EMAILS`,
+so a lockout is recovered by running SQL here rather than by editing a Netlify variable.
 
-### 8. Create the storage bucket.
+### 4. Create the bucket: `condition-photos`, **Public off**.
 
-Name `condition-photos`, **private** — not public. Not a preference; the alternative is a
-disclosure.
-
-Your public tracking page deliberately exposes status, dates and destination city only — no
-name, address, phone, or contents. A public bucket would turn a tracking number into a
-permanent link to someone's delivery photos, undoing exactly that. Access is via short-lived
-signed URLs minted server-side.
+Not a preference. A public bucket turns a tracking number into a permanent link to someone's
+delivery photos, which is what the public tracking page is built to prevent. The code mints
+signed URLs that expire in ten minutes.
 
 ---
 
-## Phase 3 — move the data
+## Phase 3 — only if you want the old data
 
-### 9. Take a fresh export — as migration input.
+Skip if the current contents do not matter.
 
-**Settings → Data Management → Export full backup (JSON)**, or the body of
-`GET /api/state`.
-
-You said you do not need a backup, and this is not one: it is the file the transform reads.
-Take it as late as you can before the cutover so the least amount of live activity is
-stranded. It costs nothing to keep it afterwards, and if you do, you have a rollback you
-would otherwise not have.
-
-### 10. Generate the migration output.
+### 5. Export, transform, upload, run.
 
 ```bash
 npm run migrate:supabase path/to/export.json
 ```
 
-Writes `supabase/migration-out/`: `01-packages.sql`, `02-accounts.csv`, `photos/`, and a
-`MIGRATION.md` with the counts. Touches no network and no live system.
-
-### 11. Upload the photos.
-
-Upload `migration-out/photos/` into the `condition-photos` bucket **preserving the directory
-paths** — the SQL rows point at `tenant/GL-####/pickup.webp`. If the paths shift, every photo
-reference breaks silently.
-
-### 12. Run `01-packages.sql`.
-
-### 13. Create the accounts.
-
-Invite or create every address in `02-accounts.csv`. Each one sets a new password (step 1 is
-what makes this bearable). Assign ops roles via `public.role_grants`, or rely on
-`bootstrap_admins` for the admins.
-
-### 14. Verify RLS **as each role**, before trusting it.
-
-This is the step people skip and regret. A policy that wrongly returns zero rows looks
-exactly like an empty table, and a policy that is too permissive looks exactly like working
-software.
-
-Sign in as a customer, a Viewer, a Runner and an Admin, and confirm for each:
-
-- a customer sees **only** their own parcels, and cannot write any
-- a Viewer reads the tenant and cannot write
-- a Runner/Admin reads and writes the tenant
-- nobody reads another tenant
-
-With no backup held aside, this is the gate. Do not go past it on the assumption that the
-policies are fine because the app looks fine.
+Settings → Data Management → Export full backup (JSON) produces the input. The output is
+`01-packages.sql`, `02-accounts.csv`, and `photos/`. Upload `photos/` into the bucket
+**preserving directory paths** — the rows point at `tenant/GL-####/pickup.webp` — then run the
+SQL. The transform now also carries the activity log and the settings, and its SQL is checked
+against the schema by the test suite.
 
 ---
 
-## Phase 4 — cutover
+## Phase 4 — switch
 
-### 15. Add the credentials to Netlify.
+### 6. Add the credentials to Netlify, and redeploy.
 
 ```
-SUPABASE_URL=https://<project>.supabase.co
-SUPABASE_ANON_KEY=<anon key>
-SUPABASE_SERVICE_ROLE_KEY=<service_role key>
+SUPABASE_URL=https://yjafrhkrcdldvfcqxcol.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<the rotated secret key>
 ```
 
-Redeploy.
+Both together are the switch. Either one alone changes nothing, deliberately: a half-configured
+deployment keeps reading the store its data is actually in rather than an empty project.
 
-### 16. Configure Supabase Auth.
+Netlify bakes environment variables at build time, so **redeploy** or nothing changes.
 
-- **Site URL**: `https://usegl.com`
-- **Redirect URLs**: include `https://usegl.com/app.html`
-- **SMTP**: point it at Brevo with the same credentials from step 1. Supabase's built-in mail
-  is rate-limited and intended for development.
+### 7. Confirm the switch from outside.
 
-### 17. Cut over, then watch.
+```bash
+curl -s https://usegl.com/api/health
+```
 
-**Leave the Netlify Blobs data completely untouched for at least a week.** With no export held
-aside, it is the only copy of anything the migration got wrong. Do not clear a store, do not
-delete a key, do not "tidy up".
+`storage` should read `supabase`, and `readiness.checks.workspaceStorage.detail` should mention
+a row per parcel. If it still says Netlify Blobs, the redeploy has not happened.
 
-### 18. Only then, delete the old backend.
+### 8. Then exercise it, in this order.
 
-This is the step you asked me to do earlier. It is safe **here** and not before, because until
-step 14 passes and step 17 has run quiet for a week, there is nothing to fall back to.
+1. Sign in as an ops user and pull. An empty workspace is the correct result on a fresh project.
+2. Place a customer order. It should appear in the ops queue.
+3. Photograph a pickup on Runner. Then confirm the photo is a signed URL, not a data URL —
+   this is the ceiling fix, and the point at which the old ~23-parcel limit is gone.
+4. Build a manifest, transmit it, reload. `transmitted` is one of the columns that was missing.
+5. Delete a parcel, then pull. It must stay deleted — that is `deleted_at` replacing tombstones.
 
----
+### 9. Leave Netlify Blobs alone for a week.
 
-## What Supabase does not fix
-
-Worth being clear so the migration is not asked to carry weight it cannot:
-
-- **Carrier tracking** still needs UPS/FedEx sandbox credentials. Everything above
-  `fetchScans` is already built and unaffected by any of this.
-- **Payments** still do not exist and need product decisions, not a database.
-- **The photo ceiling** is fixed by moving photos out of `localStorage` — which Netlify Blobs
-  could do today, without any migration. Supabase Storage is a fine place to land, but the
-  migration is not what fixes it.
+You are keeping no backup, so the Blobs data is the only copy of anything this gets wrong.
+Do not clear a store, do not delete a key. Setting the two variables back to empty is a
+complete rollback for as long as it survives.
 
 ---
 
-## What I do once you are through Phase 1
+## Not part of this, and why
 
-Needing only the Project URL and the `anon` key. Step 5's architecture decision is settled, so
-this is now a fixed plan rather than a branch:
+- **Auth stays on Blobs.** scrypt with per-user salts, HMAC sessions, `pwChangedAt`
+  supersession, a throttle built so it cannot enumerate accounts, and roles re-derived
+  server-side per request — the most audited part of the system. Moving it trades that for
+  new and unverified, and every account would need a new password, which is why email has to
+  be configured first. Nothing above requires it.
+- **Carrier tracking** still needs UPS/FedEx credentials. Unaffected by any of this.
+- **Payments** still need product decisions, not a database.
 
-1. A Supabase data layer behind the existing `provider === "supabase"` seam, read and written
-   by the Netlify Functions — the public `/api/*` contract does not change.
-2. Photos to Storage with signed, expiring URLs.
-3. Retire `appendOrderWithRepair` and the tombstone merge — a unique constraint and
-   `deleted_at` replace them.
-4. Auth last: Supabase Auth plus the throttle, the role chain, and session supersession, then
-   re-earning the 146 tests that currently cover them.
+## Still outstanding from before, unrelated to Supabase
 
-Give me a Supabase project or install Docker — with Docker I can run Supabase locally and
-verify the schema against a real Postgres, which is the one claim in this document I currently
-cannot make — and I can start on 1 and 2 immediately.
+- `GL_BREVO_KEY` + `GL_MAIL_FROM`, and a redeploy. Without them there is no password reset.
+- `GL_AUTH_SECRET` rotation. It was exposed in conversation.
+- Seven unpushed commits.
