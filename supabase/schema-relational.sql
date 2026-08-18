@@ -6,8 +6,14 @@
 -- merge exist in netlify/functions/_lib.mjs. Rows make that class of bug impossible instead
 -- of repaired after the fact.
 --
--- STATUS: not applied anywhere. Reviewed SQL, not a finished migration. See the staging
--- order at the bottom -- photos first, auth last.
+-- STATUS: applied to project yjafrhkrcdldvfcqxcol (us-east-2, Postgres 17.6) on 2026-08-18,
+-- and applied a second time to prove it is re-runnable. Verified against it afterwards: all
+-- fourteen tables, RLS on every one, the unique constraints that hold parcel identity, the
+-- NULLS NOT DISTINCT index behind an idempotent activity log, and the whole data layer round
+-- tripping a worst-case workspace including photos through Storage.
+--
+-- What is NOT done: bootstrap_admins is empty, deliberately. Seeding it grants full operations
+-- access, so it needs a person to confirm the addresses. See MIGRATION-CHECKLIST.md.
 --
 -- Mapping from the seven Blobs stores in use today:
 --   granite-users            -> auth.users + public.profiles
