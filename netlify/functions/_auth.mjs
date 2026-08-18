@@ -4,7 +4,7 @@
 import crypto from "node:crypto";
 import { getStore } from "@netlify/blobs";
 
-export const SECRET = process.env.GL_AUTH_SECRET || "granite-dev-secret-change-me";
+const SECRET = process.env.GL_AUTH_SECRET || "granite-dev-secret-change-me";
 
 // Accounts store, shared by /api/auth and anything that needs to check a caller's role.
 export function userStore() { return getStore({ name: "granite-users", consistency: "strong" }); }
@@ -77,7 +77,7 @@ export async function effectiveRoleFor(email, grants) {
 // operations team and would not be fine for a large customer base, so it is capped and
 // reports truncation rather than quietly issuing thousands of reads. If this ever needs to
 // scale, the fix is an index record maintained on registration, not a bigger cap.
-export const USER_LIST_LIMIT = 500;
+const USER_LIST_LIMIT = 500;
 
 export async function listUsers(limit = USER_LIST_LIMIT) {
   const { blobs } = await userStore().list();

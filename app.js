@@ -2244,7 +2244,6 @@
     var cl = s.cloud || {};
     var setv = function (id, v) { var el = $(id); if (el) el.value = v; };
     setv("#cloud-url", cl.url || ""); setv("#cloud-key", cl.key || "granite-dev-key");
-    setv("#cloud-tenant", cl.tenant || "default");
     var ca = $("#cloud-auto"); if (ca) ca.checked = !!cl.autoSync;
   }
 
@@ -2254,12 +2253,15 @@
   // anon key. It is gone: the functions talk to Supabase now, with RLS and a service key that
   // stays server-side, and the old path's policies granted anon read and write over every
   // workspace row -- the precise weakness the relational schema was written to remove.
+  // No workspace/tenant here on purpose. There used to be a field for it, left over from the
+  // browser-direct provider, and it did nothing: the server resolves the tenant from the api
+  // key (resolveKey in _lib.mjs) and ignores anything the client claims. A box an operator can
+  // type a workspace name into, that silently changes nothing, is worse than no box.
   function cloudCfg() {
     var c = state.settings.cloud || {};
     return {
       url: (c.url || "").trim().replace(/\/$/, ""),
       key: (c.key || "granite-dev-key").trim(),
-      tenant: (c.tenant || "default").trim() || "default",
       autoSync: !!c.autoSync
     };
   }
@@ -2267,7 +2269,6 @@
     var v = function (id, d) { var el = $(id); return (el ? (el.value || "") : "").trim() || d; };
     state.settings.cloud = {
       url: v("#cloud-url", ""), key: v("#cloud-key", "granite-dev-key"),
-      tenant: v("#cloud-tenant", "default"),
       autoSync: !!(($("#cloud-auto") || {}).checked)
     };
     resetSyncBlock(); // a new url or key deserves a fresh attempt

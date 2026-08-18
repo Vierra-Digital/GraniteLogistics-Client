@@ -22,7 +22,7 @@ export function tenants() {
 // These are published in this repo and shipped in the client bundle, so they are public
 // knowledge. They stay usable for /api/orders, which is write-only ingest, but they must
 // never unlock a read of the whole workspace. See resolveKey's `source`.
-export const DEMO_KEYS = { "granite-dev-key": "default", "acme-key": "acme", "globex-key": "globex" };
+const DEMO_KEYS = { "granite-dev-key": "default", "acme-key": "acme", "globex-key": "globex" };
 
 // Resolve an api key to a tenant, and say where the key came from.
 //   source "config" = operator-configured via GL_TENANTS, i.e. actually secret
@@ -189,7 +189,7 @@ export function orderRateLimit(orders, now, limits = ORDER_LIMITS) {
 // being given a false success.
 // node:crypto rather than the global, which was still flagged experimental on the Node
 // versions these functions may run on.
-export function orderUid() { return crypto.randomUUID(); }
+function orderUid() { return crypto.randomUUID(); }
 
 export { renumber as renumberOrder } from "./_supabase.mjs";
 
