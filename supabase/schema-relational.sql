@@ -52,7 +52,14 @@ create table if not exists public.bootstrap_admins (
   created_at  timestamptz not null default now()
 );
 
-create type public.gl_role as enum ('Customer', 'Viewer', 'Driver', 'Runner', 'Admin');
+-- Postgres has no CREATE TYPE IF NOT EXISTS. Guarded so this whole file can be re-run after
+-- a statement fails part-way, which is the realistic way a first application goes.
+do $$ begin
+  if not exists (select 1 from pg_type t join pg_namespace n on n.oid = t.typnamespace
+                 where t.typname = 'gl_role' and n.nspname = 'public') then
+    create type public.gl_role as enum ('Customer', 'Viewer', 'Driver', 'Runner', 'Admin');
+  end if;
+end $$;
 
 create table if not exists public.profiles (
   id            uuid primary key references auth.users (id) on delete cascade,
@@ -120,6 +127,12 @@ create table if not exists public.packages (
   uid             uuid primary key default gen_random_uuid(),
   tenant          text not null references public.tenants (slug),
   id              text not null,
+  -- The uid minted by an order path (customer order, webhook ingest), null for a parcel an
+  -- operator created in the app. NOT the row identity -- uid above is that. This one exists
+  -- because mergePushedPackages uses its presence to mean "the server made this, so an ops
+  -- client pushing a stale snapshot must not delete it", and a derived value would make every
+  -- parcel look server-created and stop a local Reset from ever clearing the workspace.
+  order_uid       uuid,
   status          text not null,
   source          text,
   order_ref       text,
@@ -198,7 +211,7 @@ create table if not exists public.activity_events (
   who         text,
   note        text,
   at          timestamptz not null default now(),
-  unique (tenant, package_id, kind, at)
+  unique nulls not distinct (tenant, package_id, kind, at)
 );
 create index if not exists activity_tenant_idx on public.activity_events (tenant, at desc);
 
@@ -268,9 +281,11 @@ alter table public.bootstrap_admins  enable row level security;   -- no policies
 alter table public.auth_throttle     enable row level security;   -- no policies: service role only
 alter table public.notified          enable row level security;   -- no policies: service role only
 
+drop policy if exists "own profile" on public.profiles;
 create policy "own profile" on public.profiles
   for select using (id = auth.uid() or public.my_role() = 'Admin');
 
+drop policy if exists "packages readable by owner or ops" on public.packages;
 create policy "packages readable by owner or ops" on public.packages
   for select using (
     deleted_at is null and tenant = public.my_tenant() and (
@@ -281,10 +296,12 @@ create policy "packages readable by owner or ops" on public.packages
 
 -- Writes are ops-only. A customer creates an order through an edge function running as the
 -- service role, the same shape as /api/my-orders today, so the client never writes directly.
+drop policy if exists "packages writable by ops" on public.packages;
 create policy "packages writable by ops" on public.packages
   for all using (tenant = public.my_tenant() and public.my_role() in ('Runner','Driver','Admin'))
   with check (tenant = public.my_tenant() and public.my_role() in ('Runner','Driver','Admin'));
 
+drop policy if exists "events follow their package" on public.package_events;
 create policy "events follow their package" on public.package_events
   for select using (exists (
     select 1 from public.packages p where p.uid = package_uid
@@ -293,12 +310,19 @@ create policy "events follow their package" on public.package_events
            or lower(p.customer_email) = lower(coalesce(auth.jwt() ->> 'email','')))
   ));
 
+drop policy if exists "activity ops read" on public.activity_events;
 create policy "activity ops read"   on public.activity_events for select using (tenant = public.my_tenant() and public.my_role() <> 'Customer');
+drop policy if exists "settings tenant read" on public.workspace_settings;
 create policy "settings tenant read" on public.workspace_settings for select using (tenant = public.my_tenant());
+drop policy if exists "manifests ops read" on public.manifests;
 create policy "manifests ops read"  on public.manifests  for select using (tenant = public.my_tenant() and public.my_role() <> 'Customer');
+drop policy if exists "loadunits ops read" on public.load_units;
 create policy "loadunits ops read"  on public.load_units for select using (tenant = public.my_tenant() and public.my_role() <> 'Customer');
+drop policy if exists "grants admin only" on public.role_grants;
 create policy "grants admin only"   on public.role_grants for all using (public.my_role() = 'Admin') with check (public.my_role() = 'Admin');
+drop policy if exists "audit admin read" on public.role_audit;
 create policy "audit admin read"    on public.role_audit  for select using (public.my_role() = 'Admin');
+drop policy if exists "own push rows" on public.push_subscriptions;
 create policy "own push rows"       on public.push_subscriptions
   for all using (lower(email) = lower(coalesce(auth.jwt() ->> 'email','')))
   with check (lower(email) = lower(coalesce(auth.jwt() ->> 'email','')));

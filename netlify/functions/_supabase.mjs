@@ -118,13 +118,41 @@ export async function signPhotoPaths(paths) {
 }
 
 // ---- row <-> package ------------------------------------------------------------------
+// A parcel's row identity, derived from the identity the client is stable on rather than
+// generated.
+//
+// This has to be deterministic. Only the server order paths mint a uid, so anything an
+// operator creates in the app -- manual intake, the demo seed -- arrives without one, and a
+// random uid per call would insert a second row on the second push and then violate
+// unique (tenant, id): a 409 on every sync after the first. Same argument for the migration
+// SQL, which seeds rows this code later has to recognise as the same parcels.
+//
+// UUIDv5-shaped (sha1, version and variant bits set) so Postgres accepts it as a uuid and it
+// is visibly derived rather than mistaken for a secret.
+export function stableUid(tenant, id) {
+  const h = crypto.createHash("sha1").update("granite:" + tenant + "\u0000" + id).digest();
+  const b = Buffer.from(h.subarray(0, 16));
+  b[6] = (b[6] & 0x0f) | 0x50;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const x = b.toString("hex");
+  return [x.slice(0, 8), x.slice(8, 12), x.slice(12, 16), x.slice(16, 20), x.slice(20)].join("-");
+}
+
+// An id lives in two places on a package, so renumbering has to move both.
+export function renumber(order, id) {
+  order.id = id;
+  order.barcode = id.replace(/-/g, "");
+  return order;
+}
+
 // pendingSync and syncRejected are deliberately absent: they describe whether THIS device has
 // managed to reach the server, which is meaningless once stored on it.
 function rowFromPackage(tenant, p, photo) {
   return {
-    uid: p.uid || crypto.randomUUID(),
+    uid: stableUid(tenant, p.id),
     tenant,
     id: p.id,
+    order_uid: p.uid || null,
     status: p.status || "Won",
     source: p.source || null,
     order_ref: p.orderRef || null,
@@ -155,7 +183,6 @@ function packageFromRow(r, events, signed) {
   if (r.photo_pickup && signed[r.photo_pickup]) photos.pickup = signed[r.photo_pickup];
   if (r.photo_delivery && signed[r.photo_delivery]) photos.delivery = signed[r.photo_delivery];
   const pkg = {
-    uid: r.uid,
     id: r.id,
     status: r.status,
     source: r.source || undefined,
@@ -177,6 +204,8 @@ function packageFromRow(r, events, signed) {
     exception: r.exception || null,
     createdAt: tsIn(r.created_at),
   };
+  // Only a server-minted order uid travels back to the client; the row identity stays here.
+  if (r.order_uid) pkg.uid = r.order_uid;
   if (r.customer_email) pkg.customerEmail = r.customer_email;
   if (r.load_unit) pkg.loadUnit = r.load_unit;
   if (r.sort_zone) pkg.sortZone = r.sort_zone;
@@ -246,41 +275,44 @@ export async function sbReadState(tenant) {
 }
 
 // ---- write ----------------------------------------------------------------------------
+// Every write here is the same shape: upsert a list against a named conflict target, doing
+// nothing when the list is empty. `merge` overwrites the stored row (the client is the
+// authority on a parcel's current state); `ignore` keeps the first write and drops repeats,
+// which is what makes an append-only table survive the same push arriving twice.
+function upsert(table, conflict, resolution, rows) {
+  if (!rows.length) return Promise.resolve();
+  return sb("/rest/v1/" + table + "?on_conflict=" + conflict, {
+    method: "POST", body: rows, prefer: "resolution=" + resolution + "-duplicates,return=minimal",
+  });
+}
+const ensureTenant = (tenant) => upsert("tenants", "slug", "ignore", [{ slug: tenant }]);
+
+// Photos are uploaded before the row is written, so a row can never point at bytes that
+// failed to arrive. Shared by the whole-workspace push and the single-order append.
+async function rowWithPhotos(tenant, p) {
+  const photos = p.photos || {};
+  const [pickup, delivery] = await Promise.all([
+    photos.pickup ? uploadPhoto(tenant, p.id, "pickup", photos.pickup) : null,
+    photos.delivery ? uploadPhoto(tenant, p.id, "delivery", photos.delivery) : null,
+  ]);
+  return rowFromPackage(tenant, p, { pickup, delivery });
+}
+
+const custodyRows = (uid, history, fallbackAt) =>
+  (Array.isArray(history) ? history : [])
+    .filter((h) => h && h.stage)
+    .map((h) => ({ package_uid: uid, stage: h.stage, note: h.note || null, at: tsOut(h.ts) || fallbackAt }));
+
 export async function sbWriteState(tenant, data) {
   await ensureTenant(tenant);
 
   const packages = Array.isArray(data.packages) ? data.packages.filter((p) => p && p.id) : [];
-
-  // Photos before rows: a row must never be written pointing at bytes that failed to upload.
   const rows = [];
-  for (const p of packages) {
-    const photos = p.photos || {};
-    const [pickup, delivery] = await Promise.all([
-      photos.pickup ? uploadPhoto(tenant, p.id, "pickup", photos.pickup) : null,
-      photos.delivery ? uploadPhoto(tenant, p.id, "delivery", photos.delivery) : null,
-    ]);
-    rows.push(rowFromPackage(tenant, p, { pickup, delivery }));
-  }
+  for (const p of packages) rows.push(await rowWithPhotos(tenant, p));
 
-  if (rows.length) {
-    await sb("/rest/v1/packages?on_conflict=uid", {
-      method: "POST", body: rows, prefer: "resolution=merge-duplicates,return=minimal",
-    });
-    const byUid = new Map(rows.map((r, i) => [r.uid, packages[i]]));
-    const events = [];
-    for (const r of rows) {
-      const src = byUid.get(r.uid);
-      for (const h of (src && Array.isArray(src.history) ? src.history : [])) {
-        if (!h || !h.stage) continue;
-        events.push({ package_uid: r.uid, stage: h.stage, note: h.note || null, at: tsOut(h.ts) || r.created_at });
-      }
-    }
-    if (events.length) {
-      await sb("/rest/v1/package_events?on_conflict=package_uid,stage,at", {
-        method: "POST", body: events, prefer: "resolution=ignore-duplicates,return=minimal",
-      });
-    }
-  }
+  await upsert("packages", "uid", "merge", rows);
+  await upsert("package_events", "package_uid,stage,at", "ignore",
+    rows.flatMap((r, i) => custodyRows(r.uid, packages[i].history, r.created_at)));
 
   // Anything stored for this tenant and absent from the push is a deletion, recorded as
   // deleted_at rather than removed so a later pull cannot resurrect it and an audit still has
@@ -294,52 +326,27 @@ export async function sbWriteState(tenant, data) {
     });
   }
 
-  const manifests = (Array.isArray(data.manifests) ? data.manifests : []).filter((m) => m && m.id)
-    .map((m) => ({
+  const now = () => new Date().toISOString();
+  await upsert("manifests", "tenant,id", "merge",
+    (Array.isArray(data.manifests) ? data.manifests : []).filter((m) => m && m.id).map((m) => ({
       tenant, id: m.id, carrier: m.carrier || null, lane: m.lane || null,
-      transmitted: !!m.transmitted, created_at: tsOut(m.ts) || new Date().toISOString(),
-    }));
-  if (manifests.length) {
-    await sb("/rest/v1/manifests?on_conflict=tenant,id", {
-      method: "POST", body: manifests, prefer: "resolution=merge-duplicates,return=minimal",
-    });
-  }
+      transmitted: !!m.transmitted, created_at: tsOut(m.ts) || now(),
+    })));
 
-  const units = (Array.isArray(data.loadUnits) ? data.loadUnits : []).filter((u) => u && u.id)
-    .map((u) => ({
+  await upsert("load_units", "tenant,id", "merge",
+    (Array.isArray(data.loadUnits) ? data.loadUnits : []).filter((u) => u && u.id).map((u) => ({
       tenant, id: u.id, zone: u.zone || null, lane: u.lane || null,
-      weight_lb: Number.isFinite(u.weightLb) ? u.weightLb : null,
-      created_at: tsOut(u.ts) || new Date().toISOString(),
-    }));
-  if (units.length) {
-    await sb("/rest/v1/load_units?on_conflict=tenant,id", {
-      method: "POST", body: units, prefer: "resolution=merge-duplicates,return=minimal",
-    });
-  }
+      weight_lb: Number.isFinite(u.weightLb) ? u.weightLb : null, created_at: tsOut(u.ts) || now(),
+    })));
 
-  const activity = (Array.isArray(data.events) ? data.events : []).filter((e) => e && e.ts)
-    .map((e) => ({
+  await upsert("activity_events", "tenant,package_id,kind,at", "ignore",
+    (Array.isArray(data.events) ? data.events : []).filter((e) => e && e.ts).map((e) => ({
       tenant, package_id: e.pkgId || null, kind: e.kind || null,
       who: e.who || null, note: e.note || null, at: tsOut(e.ts),
-    }));
-  if (activity.length) {
-    await sb("/rest/v1/activity_events?on_conflict=tenant,package_id,kind,at", {
-      method: "POST", body: activity, prefer: "resolution=ignore-duplicates,return=minimal",
-    });
-  }
+    })));
 
-  await sb("/rest/v1/workspace_settings?on_conflict=tenant", {
-    method: "POST",
-    body: { tenant, settings: settingsForStorage(data.settings), updated_at: new Date().toISOString() },
-    prefer: "resolution=merge-duplicates,return=minimal",
-  });
-}
-
-async function ensureTenant(tenant) {
-  await sb("/rest/v1/tenants", {
-    method: "POST", body: { slug: tenant },
-    prefer: "resolution=ignore-duplicates,return=minimal",
-  });
+  await upsert("workspace_settings", "tenant", "merge",
+    [{ tenant, settings: settingsForStorage(data.settings), updated_at: now() }]);
 }
 
 // ---- appending one order --------------------------------------------------------------
@@ -353,42 +360,32 @@ export async function sbAppendOrder(tenant, build, attempts = 5) {
   let repaired = 0;
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    // Only the ids are needed to number the next one, not the whole workspace.
+    // Only the ids are needed to number the next one. Both builders in this codebase
+    // (makeOrder, makeCustomerOrder) read nothing else off the state they are handed, and a
+    // test pins that so a future one cannot quietly start depending on more.
     const taken = await sb("/rest/v1/packages?tenant=eq." + q(tenant) + "&select=id") || [];
     if (!order) {
       order = build({ packages: taken });
+      // Distinct from the row identity: this marks the parcel as server-created, which is how
+      // mergePushedPackages knows not to let a stale ops push delete it.
       if (!order.uid) order.uid = crypto.randomUUID();
     } else {
       let max = 1040;
       for (const r of taken) { const m = /GL-(\d+)/.exec(r.id || ""); if (m) max = Math.max(max, +m[1]); }
-      order.id = "GL-" + (max + 1);
-      order.barcode = order.id.replace(/-/g, "");
+      renumber(order, "GL-" + (max + 1));
     }
 
-    const photos = order.photos || {};
-    const [pickup, delivery] = await Promise.all([
-      photos.pickup ? uploadPhoto(tenant, order.id, "pickup", photos.pickup) : null,
-      photos.delivery ? uploadPhoto(tenant, order.id, "delivery", photos.delivery) : null,
-    ]);
-
+    const row = await rowWithPhotos(tenant, order);
     try {
-      await sb("/rest/v1/packages", {
-        method: "POST", body: rowFromPackage(tenant, order, { pickup, delivery }), prefer: "return=minimal",
-      });
+      await sb("/rest/v1/packages", { method: "POST", body: row, prefer: "return=minimal" });
     } catch (e) {
       // 409 is the unique constraint doing its job: somebody took this id first.
       if (e.status === 409 && attempt < attempts) { repaired++; continue; }
       throw e;
     }
 
-    const events = (Array.isArray(order.history) ? order.history : [])
-      .filter((h) => h && h.stage)
-      .map((h) => ({ package_uid: order.uid, stage: h.stage, note: h.note || null, at: tsOut(h.ts) || new Date().toISOString() }));
-    if (events.length) {
-      await sb("/rest/v1/package_events?on_conflict=package_uid,stage,at", {
-        method: "POST", body: events, prefer: "resolution=ignore-duplicates,return=minimal",
-      });
-    }
+    await upsert("package_events", "package_uid,stage,at", "ignore",
+      custodyRows(row.uid, order.history, row.created_at));
     return { order, state: await sbReadState(tenant), attempts: attempt, repaired };
   }
   return { order, state: await sbReadState(tenant), attempts, repaired, unverified: true };

@@ -16,6 +16,9 @@
 // schema it targets (supabase/schema-relational.sql) has never been run against a real
 // Postgres, so the first application should be somebody watching it.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+// Imported rather than reimplemented: if the seeded uid and the derived one ever differ, the
+// first sync after migrating inserts a second row per parcel and hits unique (tenant, id).
+import { stableUid } from "../netlify/functions/_supabase.mjs";
 import { join } from "node:path";
 
 // Only read argv when run directly. Imported -- by a test, say -- process.argv[2] is the
@@ -89,11 +92,11 @@ export function transform(ws, outRoot, tenant = TENANT) {
     }
 
     sql.push(
-      "insert into public.packages (tenant, id, status, source, order_ref, barcode, carrier, lane, " +
+      "insert into public.packages (uid, tenant, id, status, source, order_ref, barcode, carrier, lane, " +
       "batch_id, tracking, item, customer, customer_email, photo_pickup, photo_delivery, " +
       "load_unit, sort_zone, presort_lane, promised_at, exception, return_state, created_at) values (" +
       [
-        lit(tenant), lit(p.id), lit(p.status), lit(p.source), lit(p.orderRef), lit(p.barcode),
+        lit(stableUid(tenant, p.id)), lit(tenant), lit(p.id), lit(p.status), lit(p.source), lit(p.orderRef), lit(p.barcode),
         lit(p.carrier), lit(p.lane), lit(p.batchId), lit(p.tracking),
         jsonLit(p.item), jsonLit(cust), lit(p.customerEmail),
         pickup ? lit(pickup.path) : "null",
@@ -110,9 +113,9 @@ export function transform(ws, outRoot, tenant = TENANT) {
       if (!h || !h.stage) continue;
       events++;
       sql.push(
-        "insert into public.package_events (package_uid, stage, note, at) select uid, " +
-        [lit(h.stage), lit(h.note), tsLit(h.ts)].join(", ") +
-        ` from public.packages where tenant = ${lit(tenant)} and id = ${lit(p.id)};`
+        "insert into public.package_events (package_uid, stage, note, at) values (" +
+        [lit(stableUid(tenant, p.id)), lit(h.stage), lit(h.note), tsLit(h.ts)].join(", ") +
+        ") on conflict do nothing;"
       );
     }
   }

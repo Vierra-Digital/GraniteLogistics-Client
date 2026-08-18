@@ -2,7 +2,7 @@
 // Storage = Netlify Blobs (built-in, free, no external DB or env vars).
 import { getStore } from "@netlify/blobs";
 import crypto from "node:crypto";
-import { supabaseConfigured, sbReadState, sbWriteState, sbAppendOrder } from "./_supabase.mjs";
+import { supabaseConfigured, sbReadState, sbWriteState, sbAppendOrder, renumber } from "./_supabase.mjs";
 
 export const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -176,12 +176,7 @@ export function orderRateLimit(orders, now, limits = ORDER_LIMITS) {
 // versions these functions may run on.
 export function orderUid() { return crypto.randomUUID(); }
 
-// Ids appear in two places on a package, so renumbering has to move both.
-export function renumberOrder(order, id) {
-  order.id = id;
-  order.barcode = id.replace(/-/g, "");
-  return order;
-}
+export { renumber as renumberOrder } from "./_supabase.mjs";
 
 // `build(state)` must return a fresh order numbered from the state it is given.
 // Returns { order, state, attempts, repaired, unverified }.
@@ -206,7 +201,7 @@ export async function appendOrderWithRepair(tenant, build, attempts = 4) {
     const others = state.packages.filter((p) => p && p.uid !== order.uid);
     // If another order has taken our id in the meantime, take the next free one.
     if (others.some((p) => p && p.id === order.id)) {
-      renumberOrder(order, nextId({ packages: others }));
+      renumber(order, nextId({ packages: others }));
       repaired++;
     }
 
