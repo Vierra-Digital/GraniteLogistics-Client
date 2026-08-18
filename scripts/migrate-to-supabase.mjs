@@ -220,7 +220,7 @@ if (inPath) {
     "cannot import a foreign hash. Every account in `02-accounts.csv` will need to set a new",
     "password.",
     "",
-    "That matters for sequencing: with `GL_BREVO_KEY` unset there is no self-service reset, so",
+    "That matters for sequencing: this app has no email at all, so there is no self-service reset --",
     "the only route is Team & Roles -> Reset password, one account at a time, performed by an",
     "admin who can still sign in. **Configure email before converting auth**, or the",
     "conversion strands every account including possibly your own.",

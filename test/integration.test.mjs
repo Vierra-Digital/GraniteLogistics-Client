@@ -45,6 +45,8 @@ function getStore({ name }) {
 }
 
 let authFn, ordersFn, stateFn, trackFn, healthFn, ingestFn, adminFn, pushFn, carrierFn, acctFn, sign;
+// Everything the mocked web-push was asked to deliver, newest last. capturePush() clears it.
+const PUSH_SENT = [];
 // Tokens for the operator-granted ops accounts. /api/state authorizes by role now, not by
 // the public demo key, so these tests have to sign in the way a real ops user does.
 let adminToken, viewerToken;
@@ -58,6 +60,17 @@ before(async () => {
   process.env.GL_ROLES = JSON.stringify({ [VIEWER_EMAIL]: "Viewer" });
 
   mock.module("@netlify/blobs", { exports: { getStore } });
+  // web-push talks to a real push service. Mocked so the notification tests can assert what
+  // would have been delivered, and to which endpoint.
+  mock.module("web-push", { exports: {
+    default: {
+      setVapidDetails() {},
+      async sendNotification(sub, payload) {
+        PUSH_SENT.push({ endpoint: sub && sub.endpoint, payload: JSON.parse(payload) });
+        return { statusCode: 201 };
+      },
+    },
+  } });
   authFn = (await import("../netlify/functions/auth.mjs")).default;
   ordersFn = (await import("../netlify/functions/my-orders.mjs")).default;
   stateFn = (await import("../netlify/functions/state.mjs")).default;
@@ -77,6 +90,8 @@ before(async () => {
 // ---- request helpers ----
 const OPS_KEY = "granite-dev-key"; // a public demo key: valid for ingest, not for /api/state
 const post = (body) => new Request("https://x/api/auth", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+// A session check: GET /api/auth carrying a bearer token.
+const get = (token) => new Request("https://x/api/auth", { headers: { authorization: "Bearer " + token } });
 const asUser = (token, init = {}) => new Request("https://x/api/my-orders" + (init.qs || ""), {
   method: init.method || "GET",
   headers: Object.assign({ authorization: "Bearer " + token }, init.body ? { "content-type": "application/json" } : {}),
@@ -277,48 +292,31 @@ test("login rejects a wrong password and accepts the right one", async () => {
 });
 
 test("a session validates, and a password change invalidates the old one", async () => {
-  const token = await register("session@example.com");
-  const okRes = await authFn(new Request("https://x/api/auth", { headers: { authorization: "Bearer " + token } }));
-  assert.equal(okRes.status, 200);
+  const email = "session@example.com";
+  const token = await register(email);
+  assert.equal((await authFn(get(token))).status, 200);
 
-  // Redeem a reset token (as the emailed link would) to set a new password.
-  const resetToken = sign({ email: "session@example.com", kind: "reset", exp: Date.now() + 60000 });
-  const changed = await body(await authFn(post({ action: "reset-confirm", token: resetToken, pw: "brand-new-pw" })));
-  assert.equal(changed.ok, true, "reset-confirm failed: " + JSON.stringify(changed));
+  // Changed by an Admin: with no email there is no self-service reset, and this is the path
+  // that has to invalidate sessions minted before it.
+  const changed = await body(await adminFn(asUser(adminToken, { method: "POST", body: {
+    action: "set-password", email, pw: "brand-new-pw",
+  } })));
+  assert.ok(changed.ok, "admin reset failed: " + JSON.stringify(changed));
 
-  // The pre-change session is now dead; the freshly issued one works.
-  const staleRes = await authFn(new Request("https://x/api/auth", { headers: { authorization: "Bearer " + token } }));
-  assert.equal(staleRes.status, 401);
-  const freshRes = await authFn(new Request("https://x/api/auth", { headers: { authorization: "Bearer " + changed.token } }));
-  assert.equal(freshRes.status, 200);
-
-  // And the new password is the one that works.
-  assert.equal((await authFn(post({ action: "login", email: "session@example.com", pw: "pass1234" }))).status, 401);
-  assert.equal((await authFn(post({ action: "login", email: "session@example.com", pw: "brand-new-pw" }))).status, 200);
+  const after = await authFn(get(token));
+  assert.equal(after.status, 401, "a session minted before the change still works");
+  assert.match((await body(after)).error, /password changed/i);
+  assert.equal((await authFn(post({ action: "login", email, pw: "pass1234" }))).status, 401);
+  assert.equal((await authFn(post({ action: "login", email, pw: "brand-new-pw" }))).status, 200);
 });
 
-test("a reset token cannot be used as a session, and a session cannot reset a password", async () => {
+test("a token carrying a kind is never accepted as a session", async () => {
+  // No flow mints one any more -- reset and verify links are gone -- but the guard in the GET
+  // handler is what made those tokens single-purpose, and it costs nothing to keep proven.
   const token = await register("kinds@example.com");
-  const resetToken = sign({ email: "kinds@example.com", kind: "reset", exp: Date.now() + 60000 });
-
-  // reset token presented as a session
-  assert.equal((await authFn(new Request("https://x/api/auth", { headers: { authorization: "Bearer " + resetToken } }))).status, 401);
-  // session token presented as a reset
-  assert.equal((await authFn(post({ action: "reset-confirm", token, pw: "hijacked" }))).status, 400);
-});
-
-test("expired reset links are refused", async () => {
-  await register("expired@example.com");
-  const stale = sign({ email: "expired@example.com", kind: "reset", exp: Date.now() - 1000 });
-  assert.equal((await authFn(post({ action: "reset-confirm", token: stale, pw: "whatever" }))).status, 400);
-});
-
-test("reset requests report clearly when email is not configured", async () => {
-  await register("noemail@example.com");
-  const res = await authFn(post({ action: "reset-request", email: "noemail@example.com" }));
-  assert.equal(res.status, 503);
-  const j = await body(res);
-  assert.match(j.error, /isn't set up/i);
+  const tagged = sign({ email: "kinds@example.com", kind: "reset", exp: Date.now() + 60000 });
+  assert.equal((await authFn(get(tagged))).status, 401, "a kind-tagged token passed as a session");
+  assert.equal((await authFn(get(token))).status, 200, "a real session stopped working");
 });
 
 test("legacy per-customer orders are migrated into the shared workspace", async () => {
@@ -613,48 +611,6 @@ test("a configured but unimplemented carrier fails loudly, per package", async (
   }
 });
 
-// ---- email verification ----
-//
-// Verification confirms we can reach someone about a shipment. It is deliberately not a
-// gate on using the service, so the tests check that the account works throughout.
-
-test("signup sends a confirmation link and the account works unverified", async () => {
-  const mail = captureMail();
-  try {
-    const email = "verify-me@example.com";
-    const reg = await body(await authFn(post({ action: "register", email, pw: "pass1234", name: "Vera Fyer" })));
-    assert.equal(reg.ok, true);
-    assert.equal(reg.user.emailVerified, false);
-    assert.equal(reg.verification.available, true);
-    assert.equal(reg.verification.sent, true);
-    assert.equal(mail.sent.length, 1);
-    assert.match(mail.sent[0].subject, /confirm your email/i);
-    assert.match(mail.sent[0].htmlContent, /app\.html\?verify=/);
-
-    // Unverified must not block anything: they can place an order straight away.
-    const placed = await body(await ordersFn(asUser(reg.token, { method: "POST", body: { item: "Unverified order" } })));
-    assert.equal(placed.ok, true, "an unverified account was blocked from ordering");
-  } finally { mail.restore(); }
-});
-
-test("a confirmation link verifies the address, and is safe to click twice", async () => {
-  const email = "clicktwice@example.com";
-  await register(email);
-  const token = sign({ email, kind: "verify", exp: Date.now() + 60000 });
-
-  const first = await body(await authFn(post({ action: "verify-confirm", token })));
-  assert.equal(first.ok, true);
-  assert.equal(first.user.emailVerified, true);
-
-  // People click the link again, or a mail client prefetches it. That is not an error.
-  const second = await body(await authFn(post({ action: "verify-confirm", token })));
-  assert.equal(second.ok, true);
-  assert.equal(second.user.emailVerified, true);
-
-  // And it sticks across a fresh sign-in.
-  const login = await body(await authFn(post({ action: "login", email, pw: "pass1234" })));
-  assert.equal(login.user.emailVerified, true);
-});
 
 test("a verification token is not a session, and a session is not a verification token", async () => {
   const email = "crosstoken@example.com";
@@ -669,50 +625,6 @@ test("a verification token is not a session, and a session is not a verification
   // A reset token must not verify an address either.
   const resetTok = sign({ email, kind: "reset", exp: Date.now() + 60000 });
   assert.equal((await authFn(post({ action: "verify-confirm", token: resetTok }))).status, 400);
-});
-
-test("resending a confirmation needs a session and is throttled", async () => {
-  const mail = captureMail();
-  try {
-    const email = "resend@example.com";
-    const token = await register(email);
-    mail.sent.length = 0; // ignore the signup email
-
-    // No session: cannot be used to mail strangers.
-    assert.equal((await authFn(post({ action: "verify-request" }))).status, 401);
-
-    const req = () => authFn(new Request("https://x/api/auth", {
-      method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" },
-      body: JSON.stringify({ action: "verify-request" }),
-    }));
-    for (let i = 0; i < 3; i++) assert.equal((await req()).status, 200);
-    const limited = await req();
-    assert.equal(limited.status, 429, "resend was not throttled");
-    assert.equal(mail.sent.length, 3, "sent more confirmations than the limit allows");
-
-    // Once verified, resending is a no-op rather than more mail.
-    await authFn(post({ action: "verify-confirm", token: sign({ email, kind: "verify", exp: Date.now() + 60000 }) }));
-    // Throttle is still engaged, so clear it the way a real flow would: a fresh window.
-    const { clearThrottle } = await import("../netlify/functions/_throttle.mjs");
-    await clearThrottle("verify", email);
-    const after = await body(await req());
-    assert.equal(after.alreadyVerified, true);
-    assert.equal(mail.sent.length, 3, "mailed an already-verified address");
-  } finally { mail.restore(); }
-});
-
-test("with no mail provider, signup does not pretend a confirmation was sent", async () => {
-  const email = "nomail@example.com";
-  const reg = await body(await authFn(post({ action: "register", email, pw: "pass1234" })));
-  assert.equal(reg.verification.available, false);
-  assert.equal(reg.verification.sent, false);
-  // And asking for one says so plainly rather than failing silently.
-  const res = await authFn(new Request("https://x/api/auth", {
-    method: "POST", headers: { authorization: "Bearer " + reg.token, "content-type": "application/json" },
-    body: JSON.stringify({ action: "verify-request" }),
-  }));
-  assert.equal(res.status, 503);
-  assert.match((await body(res)).error, /isn't set up/i);
 });
 
 // ---- credential throttling ----
@@ -758,39 +670,6 @@ test("throttling is per address, so one attacker cannot lock everyone out", asyn
   for (let i = 0; i < 7; i++) await authFn(post({ action: "login", email: "attacked@example.com", pw: "guess" + i }));
   const ok = await body(await authFn(post({ action: "login", email: victim, pw: "victim-pass" })));
   assert.equal(ok.ok, true, "an attack on one address locked a different one");
-});
-
-test("completing a password reset clears a lock", async () => {
-  const email = "lockedout@example.com";
-  await register(email, "old-pass");
-  for (let i = 0; i < 7; i++) await authFn(post({ action: "login", email, pw: "wrong" }));
-  assert.equal((await authFn(post({ action: "login", email, pw: "old-pass" }))).status, 429);
-
-  // Somebody locked out by an attacker must be able to recover through their inbox rather
-  // than waiting the lock out.
-  const resetToken = sign({ email, kind: "reset", exp: Date.now() + 60000 });
-  const done = await body(await authFn(post({ action: "reset-confirm", token: resetToken, pw: "new-pass" })));
-  assert.equal(done.ok, true);
-  const after = await body(await authFn(post({ action: "login", email, pw: "new-pass" })));
-  assert.equal(after.ok, true, "the lock survived a completed password reset");
-});
-
-test("reset requests are throttled harder, since each one mails somebody", async () => {
-  const email = "resetspam@example.com";
-  // Registered before mail capture starts: signup now sends a verification email of its
-  // own, and counting it here would make the assertion about resets untrue.
-  await register(email);
-  const mail = captureMail();
-  try {
-    // Three go through, the fourth is refused.
-    for (let i = 0; i < 3; i++) {
-      assert.equal((await authFn(post({ action: "reset-request", email }))).status, 200);
-    }
-    const res = await authFn(post({ action: "reset-request", email }));
-    assert.equal(res.status, 429);
-    assert.match((await body(res)).error, /already sent a reset link/i);
-    assert.equal(mail.sent.length, 3, "sent more mail than the limit allows");
-  } finally { mail.restore(); }
 });
 
 // ---- web push subscriptions ----
@@ -939,37 +818,39 @@ test("the push payload carries no recipient details", async () => {
 // Driven through the real PUT handler, because the whole point is that the transition is
 // detected from what ops pushed versus what was stored.
 
-// Mail has to be genuinely configured and captured for these to mean anything: with no
-// provider set, `sent` is 0 for every push and a broken dedupe would look identical to a
-// working one.
-function captureMail() {
-  const saved = { key: process.env.GL_BREVO_KEY, from: process.env.GL_MAIL_FROM, fetch: globalThis.fetch };
-  const sent = [];
-  process.env.GL_BREVO_KEY = "xkeysib-test";
-  process.env.GL_MAIL_FROM = "Granite <no-reply@usegl.com>";
-  globalThis.fetch = async (url, init) => {
-    if (String(url).includes("api.brevo.com")) {
-      sent.push(JSON.parse(init.body));
-      return new Response("{}", { status: 201 });
-    }
-    return saved.fetch(url, init);
-  };
+// Push has to be genuinely configured and captured for these to mean anything: with no keys
+// set nothing is delivered for any push, and a broken dedupe would look identical to a working
+// one. The dedupe itself -- the announced record, written before sending -- is channel
+// agnostic. It was written against email; it is exercised here through the channel that is left.
+function capturePush() {
+  const saved = { pub: process.env.GL_VAPID_PUBLIC, priv: process.env.GL_VAPID_PRIVATE };
+  process.env.GL_VAPID_PUBLIC = "BFakePublicKeyForTests";
+  process.env.GL_VAPID_PRIVATE = "fake-private-key-for-tests";
+  PUSH_SENT.length = 0;
   return {
-    sent,
+    sent: PUSH_SENT,
     restore() {
-      globalThis.fetch = saved.fetch;
-      if (saved.key === undefined) delete process.env.GL_BREVO_KEY; else process.env.GL_BREVO_KEY = saved.key;
-      if (saved.from === undefined) delete process.env.GL_MAIL_FROM; else process.env.GL_MAIL_FROM = saved.from;
+      if (saved.pub === undefined) delete process.env.GL_VAPID_PUBLIC; else process.env.GL_VAPID_PUBLIC = saved.pub;
+      if (saved.priv === undefined) delete process.env.GL_VAPID_PRIVATE; else process.env.GL_VAPID_PRIVATE = saved.priv;
     },
   };
 }
 
-test("advancing a customer order emails once, not on every push", async () => {
+// A device has to be subscribed, or sendPush has nowhere to deliver.
+async function subscribeDevice(token, endpoint) {
+  const j = await body(await pushFn(asUser(token, { method: "POST", body: {
+    subscription: { endpoint, keys: { p256dh: "fake-p256dh", auth: "fake-auth" } },
+  } })));
+  if (!j.ok) throw new Error("could not subscribe a test device: " + JSON.stringify(j));
+}
+
+test("advancing a customer order notifies once, not on every push", async () => {
   const email = "notify@example.com";
   const token = await register(email);
   const placed = await body(await ordersFn(asUser(token, { method: "POST", body: { item: "Notified TV" } })));
   const id = placed.order.id;
-  const mail = captureMail();
+  const push = capturePush();
+  await subscribeDevice(token, "https://push.example.com/notify-1");
 
   const advance = async (status) => {
     const view = await body(await stateFn(asOps()));
@@ -983,39 +864,40 @@ test("advancing a customer order emails once, not on every push", async () => {
 
   try {
     let r = await advance("OutforDelivery");
-    assert.equal(r.notified.sent, 1, "expected one send: " + JSON.stringify(r.notified));
-    assert.equal(mail.sent.length, 1);
-    assert.equal(mail.sent[0].to[0].email, email);
-    assert.match(mail.sent[0].subject, /out for delivery/i);
+    assert.equal(r.notified.pushed, 1, "expected one delivery: " + JSON.stringify(r.notified));
+    assert.equal(push.sent.length, 1);
+    assert.match(push.sent[0].payload.title, /out for delivery/i);
+    assert.equal(push.sent[0].payload.tag, id, "notifications for one parcel must collapse");
 
-    // Ops keeps pushing the same state every 1.5s. No further mail may go out.
+    // Ops keeps pushing the same state every 1.5s. Nothing further may go out.
     for (let i = 0; i < 3; i++) {
       r = await repush();
-      assert.equal(r.notified.sent, 0, "a repeat push sent another email");
+      assert.equal(r.notified.pushed, 0, "a repeat push notified again");
     }
-    assert.equal(mail.sent.length, 1, "the 1.5s push loop mailed the customer repeatedly");
+    assert.equal(push.sent.length, 1, "the 1.5s push loop notified the customer repeatedly");
 
-    // A genuinely new stage does send.
+    // A genuinely new stage does notify.
     r = await advance("Delivered");
-    assert.equal(r.notified.sent, 1, "the delivered stage was not announced");
-    assert.equal(mail.sent.length, 2);
-    assert.match(mail.sent[1].subject, /delivered/i);
+    assert.equal(r.notified.pushed, 1, "the delivered stage was not announced");
+    assert.equal(push.sent.length, 2);
+    assert.match(push.sent[1].payload.title, /delivered/i);
 
-    // And re-pushing Delivered does not.
     await repush();
-    assert.equal(mail.sent.length, 2);
-  } finally { mail.restore(); }
+    assert.equal(push.sent.length, 2);
+  } finally { push.restore(); }
 });
 
 test("a parcel that flaps backwards and forwards is not announced twice", async () => {
-  // The case the dedupe record exists for. Ops clients push whole, possibly stale state,
-  // so a client that pulled before the change can push the parcel back to an earlier
-  // status; when it advances again the transition looks new. Without the server-side
-  // record of what was already announced, the customer gets the same email twice.
-  const token = await register("flap@example.com");
+  // The case the dedupe record exists for. Ops clients push whole, possibly stale state, so a
+  // client that pulled before the change can push the parcel back to an earlier status; when it
+  // advances again the transition looks new. Without the server-side record of what was already
+  // announced, the customer is told the same thing twice.
+  const email = "flap@example.com";
+  const token = await register(email);
   const placed = await body(await ordersFn(asUser(token, { method: "POST", body: { item: "Flapper" } })));
   const id = placed.order.id;
-  const mail = captureMail();
+  const push = capturePush();
+  await subscribeDevice(token, "https://push.example.com/flap-1");
   const setStatus = async (status) => {
     const view = await body(await stateFn(asOps()));
     view.packages.find((p) => p.id === id).status = status;
@@ -1023,74 +905,37 @@ test("a parcel that flaps backwards and forwards is not announced twice", async 
   };
   try {
     await setStatus("InTransit");
-    assert.equal(mail.sent.length, 1, "first advance should notify");
+    assert.equal(push.sent.length, 1, "first advance should notify");
 
-    // A stale client pushes it back, then it advances again.
+    // A stale client pushes it back to a stage the customer is never told about, then it
+    // advances again.
     await setStatus("Won");
     await setStatus("InTransit");
-    assert.equal(mail.sent.length, 1, "the customer was emailed twice for one real transition");
+    assert.equal(push.sent.length, 1, "notified twice for one real transition");
 
     // A later, genuinely different stage still gets through.
     await setStatus("Delivered");
-    assert.equal(mail.sent.length, 2);
-  } finally { mail.restore(); }
+    assert.equal(push.sent.length, 2);
+  } finally { push.restore(); }
 });
 
-test("internal stages and ops-only packages send no mail at all", async () => {
-  const token = await register("quiet-mail@example.com");
-  const placed = await body(await ordersFn(asUser(token, { method: "POST", body: { item: "Quiet TV" } })));
-  const mail = captureMail();
+test("internal stages and ops-only packages notify nobody", async () => {
+  const email = "quiet@example.com";
+  const token = await register(email);
+  const placed = await body(await ordersFn(asUser(token, { method: "POST", body: { item: "Quiet parcel" } })));
+  const id = placed.order.id;
+  const push = capturePush();
+  await subscribeDevice(token, "https://push.example.com/quiet-1");
+
   try {
     const view = await body(await stateFn(asOps()));
-    view.packages.find((p) => p.id === placed.order.id).status = "Staged";
-    view.packages.push({ id: "GL-9002", status: "Delivered", item: { description: "Ops only" }, customer: { name: "N" }, history: [], photos: {} });
+    view.packages.find((p) => p.id === id).status = "Staged";   // internal, not a customer stage
+    view.packages.push({ id: "GL-7777", status: "OutforDelivery", item: { description: "Ops only" },
+      customer: { city: "Dayton" }, photos: {}, history: [{ stage: "Won", ts: Date.now() }] });
     const r = await body(await stateFn(asOps({ method: "PUT", body: view })));
-    assert.equal(r.notified.sent, 0);
-    assert.equal(mail.sent.length, 0, "mailed about an internal stage or an ops-only package");
-  } finally { mail.restore(); }
-});
-
-test("internal stages and ops-only packages raise nothing", async () => {
-  const token = await register("quiet@example.com");
-  const placed = await body(await ordersFn(asUser(token, { method: "POST", body: { item: "Quiet TV" } })));
-
-  const view = await body(await stateFn(asOps()));
-  // An internal step on the customer's parcel, plus an ops-only package going all the way
-  // to Delivered. Neither has anyone to tell.
-  view.packages.find((p) => p.id === placed.order.id).status = "Intake";
-  view.packages.push({ id: "GL-9001", status: "Delivered", item: { description: "Ops only" }, customer: { name: "N" }, history: [], photos: {} });
-  const r = await body(await stateFn(asOps({ method: "PUT", body: view })));
-  assert.equal(r.notified.sent, 0);
-  assert.equal(r.notified.deferred, 0);
-  assert.ok(!r.notified.reason, "unexpected reason: " + r.notified.reason);
-});
-
-test("a failing mail provider does not fail the workspace push", async () => {
-  const saved = { key: process.env.GL_BREVO_KEY, from: process.env.GL_MAIL_FROM, fetch: globalThis.fetch };
-  const token = await register("mailfail@example.com");
-  const placed = await body(await ordersFn(asUser(token, { method: "POST", body: { item: "Unsendable" } })));
-
-  process.env.GL_BREVO_KEY = "xkeysib-test";
-  process.env.GL_MAIL_FROM = "Granite <no-reply@usegl.com>";
-  globalThis.fetch = async () => { throw new TypeError("provider down"); };
-  try {
-    const view = await body(await stateFn(asOps()));
-    view.packages.find((p) => p.id === placed.order.id).status = "InTransit";
-    const res = await stateFn(asOps({ method: "PUT", body: view }));
-    // The push itself must succeed: the workspace was already stored before mailing.
-    assert.equal(res.status, 200);
-    const r = await body(res);
-    assert.equal(r.ok, true);
-    assert.equal(r.notified.sent, 0);
-  } finally {
-    globalThis.fetch = saved.fetch;
-    if (saved.key === undefined) delete process.env.GL_BREVO_KEY; else process.env.GL_BREVO_KEY = saved.key;
-    if (saved.from === undefined) delete process.env.GL_MAIL_FROM; else process.env.GL_MAIL_FROM = saved.from;
-  }
-
-  // And the status change still landed.
-  const mine = await body(await ordersFn(asUser(token)));
-  assert.equal(mine.orders.find((o) => o.id === placed.order.id).status, "InTransit");
+    assert.equal(r.notified.pushed, 0);
+    assert.equal(push.sent.length, 0, "notified about an internal stage or an ops-only parcel");
+  } finally { push.restore(); }
 });
 
 // ---- role administration ----
@@ -1399,9 +1244,9 @@ test("the user list never exposes password material", async () => {
 // configured without ever disclosing a value or which accounts hold privileges.
 
 test("health reports what is missing, and leaks no secret values", async () => {
-  const saved = { admins: process.env.GL_ADMIN_EMAILS, roles: process.env.GL_ROLES, secret: process.env.GL_AUTH_SECRET, key: process.env.GL_BREVO_KEY, from: process.env.GL_MAIL_FROM, tenants: process.env.GL_TENANTS };
+  const saved = { admins: process.env.GL_ADMIN_EMAILS, roles: process.env.GL_ROLES, secret: process.env.GL_AUTH_SECRET, tenants: process.env.GL_TENANTS };
   saved.vapidPub = process.env.GL_VAPID_PUBLIC; saved.vapidPriv = process.env.GL_VAPID_PRIVATE;
-  const restore = () => Object.entries({ GL_ADMIN_EMAILS: saved.admins, GL_ROLES: saved.roles, GL_AUTH_SECRET: saved.secret, GL_BREVO_KEY: saved.key, GL_MAIL_FROM: saved.from, GL_TENANTS: saved.tenants, GL_VAPID_PUBLIC: saved.vapidPub, GL_VAPID_PRIVATE: saved.vapidPriv })
+  const restore = () => Object.entries({ GL_ADMIN_EMAILS: saved.admins, GL_ROLES: saved.roles, GL_AUTH_SECRET: saved.secret, GL_TENANTS: saved.tenants, GL_VAPID_PUBLIC: saved.vapidPub, GL_VAPID_PRIVATE: saved.vapidPriv })
     .forEach(([k, v]) => { if (v === undefined) delete process.env[k]; else process.env[k] = v; });
 
   const savedGrants = blobs.get(k("granite-roles", "grants"));
@@ -1409,8 +1254,7 @@ test("health reports what is missing, and leaks no secret values", async () => {
     // Nothing configured at all: both blocking checks must fail. In-app grants count
     // toward ops access, so they have to be cleared too, not just the env vars.
     delete process.env.GL_ADMIN_EMAILS; delete process.env.GL_ROLES;
-    delete process.env.GL_AUTH_SECRET; delete process.env.GL_BREVO_KEY;
-    delete process.env.GL_MAIL_FROM; delete process.env.GL_TENANTS;
+    delete process.env.GL_AUTH_SECRET; delete process.env.GL_TENANTS;
     delete process.env.GL_VAPID_PUBLIC; delete process.env.GL_VAPID_PRIVATE;
     blobs.delete(k("granite-roles", "grants"));
 
@@ -1439,8 +1283,6 @@ test("health reports what is missing, and leaks no secret values", async () => {
     process.env.GL_AUTH_SECRET = "s3cr3t-value-must-not-appear";
     process.env.GL_ADMIN_EMAILS = "boss@example.com,second@example.com";
     process.env.GL_ROLES = JSON.stringify({ "dana@example.com": "Runner", "nobody@example.com": "NotARole" });
-    process.env.GL_BREVO_KEY = "xkeysib-must-not-appear";
-    process.env.GL_MAIL_FROM = "Granite <no-reply@example.com>";
     process.env.GL_TENANTS = JSON.stringify({ "tenant-key-must-not-appear": "acme" });
     j = await body(await healthFn(new Request("https://x/api/health")));
     assert.equal(j.readiness.ready, true);
@@ -1448,8 +1290,15 @@ test("health reports what is missing, and leaks no secret values", async () => {
     // 2 admins + 1 valid named ops role; the bogus role must not be counted.
     assert.match(j.readiness.checks.opsAccess.detail, /^3 account\(s\)/);
 
-    // Configuring a channel satisfies statusUpdates.
-    assert.equal(j.readiness.checks.statusUpdates.ok, true, "email is configured at this point");
+    // Push is the only delivery channel left, so it alone decides statusUpdates.
+    assert.equal(j.readiness.checks.statusUpdates.ok, false, "no push keys are set at this point");
+    assert.equal(j.readiness.checks.passwordReset, undefined, "there is no password reset to report");
+    process.env.GL_VAPID_PUBLIC = "BFakePublic-must-not-appear";
+    process.env.GL_VAPID_PRIVATE = "fake-private-must-not-appear";
+    const withPush = await body(await healthFn(new Request("https://x/api/health")));
+    assert.equal(withPush.readiness.checks.statusUpdates.ok, true, "push should satisfy statusUpdates");
+    delete process.env.GL_VAPID_PUBLIC;
+    delete process.env.GL_VAPID_PRIVATE;
 
     // The env diagnostic must name variables, never reveal their contents.
     assert.ok(j.env.present.includes("GL_AUTH_SECRET"));
@@ -1655,4 +1504,43 @@ test("health names the workspace store it is actually using", async () => {
     assert.ok(!JSON.stringify(j).includes("service-key"), "health leaked a credential value");
     assert.ok(j.env.present.includes("SUPABASE_SERVICE_ROLE_KEY"));
   } finally { restore(); }
+});
+
+
+test("an admin password reset clears a login lock", async () => {
+  // Covered before through the emailed reset, which cleared the counter on the theory that
+  // proving control of an inbox is proof enough. With no email an Admin doing it by hand is the
+  // only route back, so it has to clear the lock or the account stays stuck until it expires.
+  const email = "admin-unlocks-me@example.com";
+  await register(email, "original-pw");
+  for (let i = 0; i < 12; i++) await authFn(post({ action: "login", email, pw: "wrong-guess" }));
+  assert.equal((await authFn(post({ action: "login", email, pw: "original-pw" }))).status, 429,
+    "the account should be locked by now");
+
+  const reset = await body(await adminFn(asUser(adminToken, { method: "POST", body: {
+    action: "set-password", email, pw: "issued-by-admin",
+  } })));
+  assert.ok(reset.ok, "admin reset failed: " + JSON.stringify(reset));
+  const finalTry = await authFn(post({ action: "login", email, pw: "issued-by-admin" }));
+  if (finalTry.status !== 200) console.log("DEBUG lock:", finalTry.status, JSON.stringify(await finalTry.clone().json()));
+  assert.equal(finalTry.status, 200,
+    "still locked out after an admin reset");
+});
+
+test("the removed email actions are gone, not quietly doing something", async () => {
+  // Deleting a feature should leave a closed door, not a branch that falls through to
+  // whatever happens to match next. Each of these used to be a real action; a 400 "Unknown
+  // action" is the only acceptable answer now.
+  const email = "no-email-actions@example.com";
+  const token = await register(email);
+  for (const action of ["reset-request", "reset-confirm", "verify-request", "verify-confirm"]) {
+    const res = await authFn(post({ action, email, pw: "pass1234", token: "anything" }));
+    const j = await body(res);
+    assert.equal(res.status, 400, action + " returned " + res.status + " instead of 400");
+    assert.match(j.error, /unknown action/i, action + " answered: " + JSON.stringify(j));
+  }
+  // And the account is untouched by any of it.
+  assert.equal((await authFn(get(token))).status, 200, "the session should be unaffected");
+  assert.equal((await authFn(post({ action: "login", email, pw: "pass1234" }))).status, 200,
+    "the password should be unchanged");
 });

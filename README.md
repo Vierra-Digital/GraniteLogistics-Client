@@ -36,11 +36,11 @@ being offline. To exercise the real API, deploy to Netlify or run `netlify dev`.
 npm test
 ```
 
-158 tests, no network and no browser required, in three layers:
+156 tests, no network and no browser required, in three layers:
 
 - **Unit** (`test/functions.test.mjs`) covers the pure logic: workspace merging, id
   allocation, session tokens, tenant and api-key resolution, role assignment, the public
-  tracking sanitizer, order rate limiting, and the outbound email payload.
+  tracking sanitizer, and order rate limiting.
 - **Integration** (`test/integration.test.mjs`) drives the **real function handlers**
   with `@netlify/blobs` swapped for an in-memory store, so it verifies the pieces
   actually fit together. Most importantly it proves the end-to-end loop: a customer
@@ -109,8 +109,6 @@ workspaces to Postgres rows without touching any other configuration.
 | Variable | Required | Purpose |
 |---|---|---|
 | `GL_AUTH_SECRET` | **Yes, for production** | HMAC secret for session tokens. Without it a public fallback constant is used, which means anyone reading this repo could forge a session. Use a 32-byte random hex string. |
-| `GL_BREVO_KEY` | For password reset | [Brevo](https://www.brevo.com) API key (starts `xkeysib-`), from **SMTP & API > API keys**. Without it the reset endpoint returns a clear "not set up" error instead of failing silently. Sent over Brevo's transactional HTTP endpoint rather than SMTP, so no SMTP client is bundled and no socket is held open inside a function invocation. |
-| `GL_MAIL_FROM` | For password reset | Verified sender, e.g. `Granite Logistics <no-reply@usegl.com>`. |
 | `GL_ADMIN_EMAILS` | To use the ops platform | Comma-separated emails granted the `Admin` role, e.g. `you@co.com,ops@co.com`. Without this, every account is a Customer and nobody can reach the ops workspace. |
 | `GL_ROLES` | Optional | JSON map of email to a non-Admin ops role, e.g. `{"dana@co.com":"Runner"}`. Valid roles are `Admin`, `Runner`, `Driver`, `Viewer`. |
 | `GL_VAPID_PUBLIC` | For push notifications | Public half of the VAPID keypair, handed to browsers at subscribe time. Not a secret. Generate with `npm run vapid`. |
@@ -171,7 +169,7 @@ an issued-at so that a password change invalidates every session minted before i
 
 **Credential endpoints are throttled per email address.** Six failed sign-ins inside 15
 minutes locks that address for 15 minutes; a correct password clears the count immediately,
-and completing a password reset clears a lock, so somebody locked out by an attacker can
+and an admin password reset clears a lock, so somebody locked out by an attacker can
 always recover through their inbox. Unknown addresses are counted exactly like real ones —
 counting only real accounts would turn the throttle into an account-enumeration oracle.
 Reset requests are held tighter (three per 15 minutes) because there the request itself is
@@ -204,15 +202,15 @@ Customers never push the whole workspace; they only ever go through `/api/my-ord
 
 `PUT /api/state` is the server-side event. Ops clients do not mutate storage directly; they
 push the whole workspace through that handler, which therefore holds both the stored state
-and the incoming one and can see exactly what moved. `_notify.mjs` diffs them and emails the
+and the incoming one and can see exactly what moved. `_notify.mjs` diffs them and notifies the
 owner of any customer order that reached a stage worth announcing.
 
-Both channels, email and push, share one record of what has been announced, so a customer
+Delivery uses one record of what has been announced, so a customer
 with push enabled gets one of each per real transition and never two of either.
 
 Three things keep that safe inside a handler ops calls every ~1.5 seconds: the work is gated
 on a transition actually being found; only four of the seven stages are announced, because a
-parcel that emails on all of them is a parcel people mute; and what has already been
+parcel that pings on all of them is a parcel people mute; and what has already been
 announced is recorded in a store no client writes. That last record is not decoration —
 ops pushes stale whole state, so a parcel can be pushed backwards and re-advance, which
 looks like a brand new transition. Without it the customer is emailed twice for one real
@@ -276,9 +274,8 @@ ever worked when the app was served by this file — on Netlify it 404'd.
 
 ## What works for real
 
-- Real accounts with hashed passwords, cross-device sessions, and password reset.
-- Email confirmation at signup. Deliberately not a gate: the account works immediately, and
-  the nudge only appears when the address is unconfirmed *and* the deployment can send mail.
+- Real accounts with hashed passwords and cross-device sessions. There is no self-service
+  password reset: the app sends no email, so an Admin issues a new password in Team & Roles.
 - Server-side authorization: the ops workspace is gated on the signed-in account's role,
   re-derived per request, so revoking access takes effect immediately.
 - **Team & Roles**: an Admin grants and revokes operations access in-app, with an audit
@@ -296,8 +293,8 @@ ever worked when the app was served by this file — on Netlify it 404'd.
 - Reports computed live from chain-of-custody timestamps.
 - Role-based navigation, in-app notifications, dark mode, command palette (Ctrl/Cmd-K),
   JSON backup and restore, and a searchable audit log.
-- Customer status updates on pickup, in transit, out for delivery and delivered, by email
-  and by browser push (opt-in per device, from the customer's Account tab).
+- Customer status updates on pickup, in transit, out for delivery and delivered, by browser
+  push (opt-in per device, from the customer's Account tab).
 - Self-service data rights: a customer can download everything held about them and close
   their account from **Account > Your data**, without emailing anyone.
 - A readiness report at `/api/health` naming any configuration still missing.
@@ -305,8 +302,10 @@ ever worked when the app was served by this file — on Netlify it 404'd.
 
 ## Recovering an account without email
 
-Password reset needs `GL_BREVO_KEY` and `GL_MAIL_FROM`. Until those are set, a forgotten
-password has no self-service route: `/api/auth` `reset-request` answers `503` and says so.
+There is no self-service password reset, because the app sends no email. A forgotten
+password is issued by an Admin in **Team & Roles -> Reset password**, who passes it on and
+expects the account to change it. If the last Admin is locked out, the way back is the
+environment: add the address to `GL_ADMIN_EMAILS` and redeploy.
 
 So **Team & Roles** carries a per-account **Reset password** action. It is Admin-only, and
 the endpoint returns `404` to anyone else exactly like the rest of `/api/admin` -- it does
@@ -353,7 +352,7 @@ ceiling properly; neither is done.
 There are no payments. Carrier tracking numbers and scans are still generated locally: see
 **Carriers** below for exactly what is and is not in place.
 
-Everything else is real, including customer status updates by **email and browser push**.
+Everything else is real, including customer status updates by **browser push**.
 
 ## Carriers
 

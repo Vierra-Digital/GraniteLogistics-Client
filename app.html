@@ -44,21 +44,9 @@
       <div id="login-err" class="login-err"></div>
       <button class="btn primary login-submit" type="submit" id="login-submit">Sign in</button>
     </form>
-    <div class="login-forgot" id="login-forgot"><button type="button" class="linkbtn" id="forgot-btn">Forgot your password?</button></div>
     <div class="login-alt" id="login-alt"></div>
     </div>
 
-    <!-- Set a new password (shown when the app is opened from a reset link) -->
-    <div class="login-body" id="reset-body" style="display:none">
-      <h1>Set a new password</h1>
-      <p class="login-sub">Choose a new password for your account.</p>
-      <form id="reset-form" autocomplete="on">
-        <div class="ff"><label>New password</label><input id="reset-pw" type="password" autocomplete="new-password" required placeholder="••••••••" /></div>
-        <div id="reset-err" class="login-err"></div>
-        <button class="btn primary login-submit" type="submit" id="reset-submit">Save new password</button>
-      </form>
-      <div class="login-alt"><button type="button" class="linkbtn" id="reset-cancel">Back to sign in</button></div>
-    </div>
   </div>
 </div>
 
@@ -234,14 +222,6 @@
         </div>
         <!-- Shown only when the address is unconfirmed AND this deployment can send mail.
              Never a gate: the account works either way. -->
-        <div class="card acct-verify" id="acct-verify-card" hidden>
-          <div class="card-head"><h2>Confirm your email</h2></div>
-          <p class="muted small" id="acct-verify-note">
-            We sent a link to your address. Confirming it lets us tell you when your parcel is
-            picked up, out for delivery and delivered.
-          </p>
-          <button class="btn block" id="acct-verify-resend" type="button">Send the link again</button>
-        </div>
         <div class="card">
           <div class="card-head"><h2>Help</h2></div>
           <button class="btn block" id="acct-tour" type="button"><span aria-hidden="true">▶</span> Show me how it works</button>

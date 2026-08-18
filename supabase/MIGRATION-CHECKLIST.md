@@ -85,19 +85,17 @@ curl -s https://usegl.com/api/health
 
 `storage` should read `supabase`.
 
-### 4. Configure email, and redeploy.
-
-`GL_BREVO_KEY` + `GL_MAIL_FROM`. Unrelated to the data migration, but it is the prerequisite
-for ever moving **auth**, because scrypt hashes cannot import into Supabase Auth and every
-account would need a new password.
-
-### 5. Push the commits.
+### 4. Push the commits.
 
 ## Not migrated, deliberately
 
 - **Auth stays on Netlify Blobs.** scrypt with per-user salts, HMAC sessions, `pwChangedAt`
   supersession, a throttle built so it cannot enumerate accounts, roles re-derived per
   request. Nothing above required moving it, and moving it trades audited for unverified.
+- **Email is gone entirely**, so the old "configure Brevo before touching auth" prerequisite
+  is moot. It mattered because scrypt hashes cannot import into Supabase Auth and every
+  account would have needed a new password; if auth ever does move, that reckoning returns,
+  and with no mail the only route is an Admin issuing each password by hand.
 - **Carrier tracking** still needs UPS/FedEx credentials.
 - **Payments** still need product decisions.
 

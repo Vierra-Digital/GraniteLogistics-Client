@@ -14,7 +14,6 @@
 //      writes. Storing it on the package would not survive: ops pushes its own copy of
 //      each package, so the flag would be overwritten on the very next push.
 import { getStore } from "@netlify/blobs";
-import { sendEmail, statusEmail, emailConfigured } from "./_email.mjs";
 import { sendPush, pushPayload, pushConfigured } from "./_push.mjs";
 
 // Stages worth an email. Deliberately not every step: "Intake" and "Staged" are internal
@@ -97,17 +96,17 @@ export function unannounced(changes, announced) {
 export async function notifyStatusChanges(tenant, before, after) {
   try {
     const changes = detectStatusChanges(before, after);
-    if (!changes.length) return { sent: 0, pushed: 0, skipped: 0, deferred: 0 };
+    if (!changes.length) return { pushed: 0, skipped: 0, deferred: 0 };
 
     const announced = await readAnnounced(tenant);
     const todo = unannounced(changes, announced);
-    if (!todo.length) return { sent: 0, pushed: 0, skipped: changes.length, deferred: 0 };
+    if (!todo.length) return { pushed: 0, skipped: changes.length, deferred: 0 };
 
     const batch = todo.slice(0, MAX_PER_PUSH);
     const deferred = todo.length - batch.length;
 
-    // Record before sending. A duplicate email is a worse failure than a missing one, and
-    // recording afterwards would re-send everything if the function timed out mid-batch.
+    // Record before sending. A duplicate notification is a worse failure than a missing one,
+    // and recording afterwards would re-send everything if the function timed out mid-batch.
     batch.forEach((c) => {
       announced[c.id] = (announced[c.id] || []).concat([c.to]);
     });
@@ -115,29 +114,19 @@ export async function notifyStatusChanges(tenant, before, after) {
     // this is the only place the record is touched.
     await writeAnnounced(tenant, pruneAnnounced(announced));
 
-    if (!emailConfigured() && !pushConfigured()) {
-      // No channel available yet. The stages are still recorded, so switching mail or push
-      // on later does not produce a flood of backdated updates.
-      return { sent: 0, pushed: 0, skipped: 0, deferred, reason: "no-channel-configured" };
+    if (!pushConfigured()) {
+      // Nowhere to send. The stages are still recorded above, so configuring push later does
+      // not produce a flood of backdated updates.
+      return { pushed: 0, skipped: 0, deferred, reason: "no-channel-configured" };
     }
 
-    // Both channels share the announced record above, so a customer with push enabled and
-    // an email address gets one of each per real transition, never two of either.
-    let sent = 0, pushed = 0;
+    let pushed = 0;
     for (const c of batch) {
-      const label = NOTIFY_STAGES[c.to];
-      if (emailConfigured()) {
-        const msg = statusEmail(c.pkg, label);
-        const r = await sendEmail({ to: c.email, subject: msg.subject, html: msg.html, text: msg.text });
-        if (r && r.ok) sent++;
-      }
-      if (pushConfigured()) {
-        const r = await sendPush(c.email, pushPayload(c.pkg, label));
-        pushed += (r && r.sent) || 0;
-      }
+      const r = await sendPush(c.email, pushPayload(c.pkg, NOTIFY_STAGES[c.to]));
+      pushed += (r && r.sent) || 0;
     }
-    return { sent, pushed, skipped: changes.length - todo.length, deferred };
+    return { pushed, skipped: changes.length - todo.length, deferred };
   } catch (e) {
-    return { sent: 0, pushed: 0, skipped: 0, deferred: 0, reason: "failed", detail: String((e && e.message) || e) };
+    return { pushed: 0, skipped: 0, deferred: 0, reason: "failed", detail: String((e && e.message) || e) };
   }
 }

@@ -594,7 +594,6 @@ html[data-theme="dark"] .close-x{background:#1b2838;color:var(--ink)}
 .login-card .ff{margin-bottom:13px}
 .login-err{color:#b91c1c;font-size:.85rem;min-height:1.1em;margin-bottom:8px}
 .login-submit{width:100%;justify-content:center;padding:12px;font-size:.95rem}
-.login-forgot{margin-top:12px;text-align:center}
 .login-alt{margin-top:16px;text-align:center;font-size:.86rem;color:var(--slate-500)}
 .linkbtn{background:0;border:0;color:var(--blue-d);font-weight:700;cursor:pointer;font-size:.86rem;font-family:inherit}
 .linkbtn:hover{text-decoration:underline}
@@ -857,7 +856,6 @@ body[data-role="Customer"] .view-wrap{padding-bottom:calc(74px + env(safe-area-i
 
 /* An unconfirmed address is a nudge, not an error: amber accent rather than red, and it
    disappears the moment the link is clicked. */
-.acct-verify{border-left:3px solid var(--amber)}
 
 /* Tells you the sidebar nav has more below. Added because at a normal laptop height the
    Administration group — Settings and Team & Roles — sat below the fold with nothing to

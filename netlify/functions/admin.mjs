@@ -112,14 +112,8 @@ export default async (req) => {
 
       // ---- Reset a password on behalf of an account ----
       //
-      // The recovery path when email is not configured, which is every deployment until
-      // GL_BREVO_KEY and GL_MAIL_FROM are set: without this, a forgotten password means
-      // deleting the user record out of Blobs by hand.
-      //
-      // Reaching this requires an already-signed-in Admin, so it can only ever help
-      // somebody else -- an admin who has forgotten their own password cannot sign in to
-      // use it. That case still needs the environment route: add the address to
-      // GL_ADMIN_EMAILS, remove the stored account, and register it again.
+      // The only way back for a forgotten password. There is no self-service reset -- the
+      // email feature was removed -- so an operator who is locked out needs an Admin here.
       if (d.action === "set-password") {
         const pw = String(d.pw || "");
         if (!target) return fail("An email address is required.", 400);

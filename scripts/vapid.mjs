@@ -49,5 +49,5 @@ Next:
   3. Delete ${OUT}.
   4. Check it took effect:  curl -s https://usegl.com/api/health
 
-GL_MAIL_FROM is reused as the VAPID contact address, so set that too if it is not already.
+The VAPID contact address is the deployment URL, so there is nothing else to set.
 `);

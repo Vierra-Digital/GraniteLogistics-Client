@@ -19,7 +19,6 @@ export const LOCK_MS = 15 * 60 * 1000;         // how long a lock lasts once tri
 // person who simply mistyped. Sending mail to someone else's inbox is held tighter,
 // because there the request itself is the harm.
 export const LOGIN_LIMITS = { max: MAX_ATTEMPTS, windowMs: WINDOW_MS, lockMs: LOCK_MS };
-export const RESET_LIMITS = { max: 3, windowMs: 15 * 60 * 1000, lockMs: 15 * 60 * 1000 };
 
 function store() { return getStore({ name: "granite-throttle", consistency: "strong" }); }
 const keyFor = (scope, id) => scope + ":" + String(id || "").trim().toLowerCase();

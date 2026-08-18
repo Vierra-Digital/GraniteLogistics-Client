@@ -93,7 +93,7 @@ export default async (req) => {
 
     // A carrier scan is a status change like any other, so it reaches the customer through
     // the same path an ops push does.
-    const notified = moved ? await notifyStatusChanges(soloTenant(), before, state.packages) : { sent: 0, pushed: 0 };
+    const notified = moved ? await notifyStatusChanges(soloTenant(), before, state.packages) : { pushed: 0 };
 
     return json({ ok: failures.length === 0, checked: targets.length, refreshed, moved, notified, failures });
   } catch (e) {

@@ -32,8 +32,8 @@ const STATIC = [
 const SCENARIOS = [
   ...OPS_VIEWS.map((v) => ({ label: "ops/" + v + "/light", seed: opsSeed(), view: v, mobile: false })),
   ...OPS_VIEWS.map((v) => ({ label: "ops/" + v + "/dark", seed: dark(opsSeed()), view: v, mobile: false })),
-  ...CUST_VIEWS.map((v) => ({ label: "cust/" + v + "/light", seed: customerSeed(false), view: v, mobile: true })),
-  ...CUST_VIEWS.map((v) => ({ label: "cust/" + v + "/dark", seed: dark(customerSeed(false)), view: v, mobile: true })),
+  ...CUST_VIEWS.map((v) => ({ label: "cust/" + v + "/light", seed: customerSeed(), view: v, mobile: true })),
+  ...CUST_VIEWS.map((v) => ({ label: "cust/" + v + "/dark", seed: dark(customerSeed()), view: v, mobile: true })),
   ...STATIC.flatMap((s) => [
     { label: "public/" + s.name + "/desktop", staticUrl: s.url, mobile: false },
     { label: "public/" + s.name + "/phone", staticUrl: s.url, mobile: true },

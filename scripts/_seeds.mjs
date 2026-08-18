@@ -4,8 +4,8 @@
 // signed-in customer or an operator gets one without touching a real account.
 // A signed-in customer with a few orders in varied states, so lists are not empty and the
 // status pills are all exercised.
-export const customerSeed = (verified = true) => ({
-  auth: { token: "shot-token", user: { email: "jane@example.com", name: "Jane Doe", role: "Customer", emailVerified: verified } },
+export const customerSeed = () => ({
+  auth: { token: "shot-token", user: { email: "jane@example.com", name: "Jane Doe", role: "Customer" } },
   state: {
     settings: { role: "Customer", roleChosen: true },
     packages: [
@@ -18,7 +18,7 @@ export const customerSeed = (verified = true) => ({
 });
 
 export const opsSeed = () => ({
-  auth: { token: "shot-token", user: { email: "ops@example.com", name: "Ken Filbert", role: "Admin", emailVerified: true } },
+  auth: { token: "shot-token", user: { email: "ops@example.com", name: "Ken Filbert", role: "Admin" } },
   state: {
     settings: { role: "Admin", roleChosen: true, cloud: { url: "", key: "granite-dev-key", autoSync: false } },
     packages: [
@@ -36,12 +36,12 @@ export const opsSeed = () => ({
 // A freshly-registered customer and a freshly-provisioned workspace, so the empty states
 // get looked at too -- they are the first thing a real new user sees.
 export const emptyCustomerSeed = () => ({
-  auth: { token: "shot-token", user: { email: "new@example.com", name: "Sam Reed", role: "Customer", emailVerified: true } },
+  auth: { token: "shot-token", user: { email: "new@example.com", name: "Sam Reed", role: "Customer" } },
   state: { settings: { role: "Customer", roleChosen: true }, packages: [], manifests: [], loadUnits: [], events: [] },
 });
 
 export const emptyOpsSeed = () => ({
-  auth: { token: "shot-token", user: { email: "ops@example.com", name: "Ken Filbert", role: "Admin", emailVerified: true } },
+  auth: { token: "shot-token", user: { email: "ops@example.com", name: "Ken Filbert", role: "Admin" } },
   state: {
     settings: { role: "Admin", roleChosen: true, cloud: { url: "", key: "granite-dev-key", autoSync: false } },
     packages: [], manifests: [], loadUnits: [], events: [],
@@ -94,7 +94,7 @@ export const stressSeed = () => {
   });
   return {
     auth: { token: "shot-token", user: { email: "operations.coordinator@granite-logistics-partners.example.com",
-      name: "Wilhelmina Fitzgerald-Montgomery III", role: "Admin", emailVerified: true } },
+      name: "Wilhelmina Fitzgerald-Montgomery III", role: "Admin" } },
     state: {
       settings: { role: "Admin", roleChosen: true, cloud: { url: "", key: "granite-dev-key", autoSync: false } },
       packages: [
@@ -114,7 +114,7 @@ export const stressCustomerSeed = () => {
   const s = stressSeed();
   return {
     auth: { token: "shot-token", user: { email: "wilhelmina.fitzgerald-montgomery@example.com",
-      name: "Wilhelmina Fitzgerald-Montgomery III", role: "Customer", emailVerified: true } },
+      name: "Wilhelmina Fitzgerald-Montgomery III", role: "Customer" } },
     state: { ...s.state, settings: { role: "Customer", roleChosen: true },
       packages: s.state.packages.slice(0, 3).map((p) => ({ ...p, customerEmail: "wilhelmina.fitzgerald-montgomery@example.com" })) },
   };
@@ -135,7 +135,7 @@ export const roleSeed = (role) => {
 // this is the only way to reach the first-run experience -- the first thing a real user
 // meets, and the last screen here that had never been rendered.
 export const firstRunSeed = () => ({
-  auth: { token: "shot-token", user: { email: "new@example.com", name: "Sam Reed", role: "Customer", emailVerified: false } },
+  auth: { token: "shot-token", user: { email: "new@example.com", name: "Sam Reed", role: "Customer" } },
   state: { settings: { role: "Customer", roleChosen: false }, packages: [], manifests: [], loadUnits: [], events: [] },
   firstRun: true,
 });

@@ -1,16 +1,14 @@
 // Open health check, plus a deployment-readiness report.
 //
-// The readiness block exists because the failure modes here are silent. If
-// GL_ADMIN_EMAILS is unset, every account is a Customer and the whole ops platform
-// answers 403 with no other symptom; if the mail vars are unset, password reset fails
-// only at the moment a locked-out user needs it. This endpoint makes both visible before
-// a real user finds them.
+// The readiness block exists because the failure modes here are silent. If GL_ADMIN_EMAILS is
+// unset, every account is a Customer and the whole ops platform answers 403 with no other
+// symptom; if the VAPID keys are unset, a delivery status changes and nobody is told. This
+// endpoint makes both visible before a real user finds them.
 //
 // It reports booleans and counts only, never a value: this route is public, so it must
 // say whether a secret is configured without disclosing it or who holds it.
 import { json, tenants, storageProvider } from "./_lib.mjs";
 import { adminEmails, roleMap, readGrants, grantedRole, OPS_ROLES } from "./_auth.mjs";
-import { emailConfigured } from "./_email.mjs";
 import { pushConfigured } from "./_push.mjs";
 import { configuredCarriers } from "./_carriers.mjs";
 
@@ -23,7 +21,7 @@ const envRoleForCount = (email, admins, named) =>
 // single most likely reason a correctly-set variable appears missing.
 const KNOWN_VARS = [
   "GL_AUTH_SECRET", "GL_ADMIN_EMAILS", "GL_ROLES", "GL_TENANTS",
-  "GL_BREVO_KEY", "GL_MAIL_FROM", "GL_VAPID_PUBLIC", "GL_VAPID_PRIVATE",
+  "GL_VAPID_PUBLIC", "GL_VAPID_PRIVATE",
   "GL_UPS_CLIENT_ID", "GL_UPS_CLIENT_SECRET", "GL_FEDEX_CLIENT_ID", "GL_FEDEX_CLIENT_SECRET",
   // Storage. Both set switches workspaces from Netlify Blobs to Supabase; neither is required.
   "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY",
@@ -71,12 +69,11 @@ async function readiness() {
     authSecret: { ok: authSecret, detail: authSecret ? "set" : "GL_AUTH_SECRET is not set; sessions are signed with a public fallback" },
     // Without this nobody can reach the ops workspace at all.
     opsAccess: { ok: opsUsers > 0, detail: opsUsers > 0 ? opsUsers + " account(s) hold an ops role" : "no ops roles granted; set GL_ADMIN_EMAILS to bootstrap, then use Team & Roles" },
-    // Optional: reset links simply report "not set up" without it.
-    passwordReset: { ok: emailConfigured(), detail: emailConfigured() ? "configured" : "GL_BREVO_KEY / GL_MAIL_FROM not set; password reset returns a clear error instead of sending" },
     // Optional: customers simply do not see the opt-in without it.
     pushNotifications: { ok: pushConfigured(), detail: pushConfigured() ? "configured" : "GL_VAPID_PUBLIC / GL_VAPID_PRIVATE not set; run `npm run vapid` to generate a keypair" },
-    // Customer status updates need at least one channel to actually reach anyone.
-    statusUpdates: { ok: emailConfigured() || pushConfigured(), detail: (emailConfigured() || pushConfigured()) ? "at least one channel configured" : "no email or push configured; transitions are recorded but nothing is delivered" },
+    // Push is the only delivery channel: there is no email feature, so without VAPID keys a
+    // status change is recorded and nobody is told.
+    statusUpdates: { ok: pushConfigured(), detail: pushConfigured() ? "browser push configured" : "no push configured, and there is no email channel; transitions are recorded but nothing is delivered" },
     // Optional, but the difference between a demo and a shipment somebody is waiting on.
     carrierTracking: (() => {
       const live = configuredCarriers();

@@ -722,14 +722,12 @@
   }
   function registerUser(name, email, pw, role) {
     return postAuth("register", { name: name, email: email, pw: pw, role: role }).then(function (j) {
-      if (j && j.verification) mailAvailable = !!j.verification.available;
       if (j && j.ok) { authSave({ token: j.token, user: j.user }); return { ok: true }; }
       return { ok: false, error: (j && j.error) || "Could not create account." };
     }).catch(function () { return localRegister(name, email, pw, role); });
   }
   function loginUser(email, pw) {
     return postAuth("login", { email: email, pw: pw }).then(function (j) {
-      if (j && j.verification) mailAvailable = !!j.verification.available;
       if (j && j.ok) { authSave({ token: j.token, user: j.user }); return { ok: true }; }
       return { ok: false, error: (j && j.error) || "Incorrect email or password." };
     }).catch(function () { return localLogin(email, pw); });
@@ -745,7 +743,6 @@
     $("#login-alt").innerHTML = reg
       ? 'Already have an account? <button type="button" id="login-toggle" class="linkbtn">Sign in</button>'
       : 'New here? <button type="button" id="login-toggle" class="linkbtn">Create an account</button>';
-    var fg = $("#login-forgot"); if (fg) fg.style.display = reg ? "none" : "";
     var tg = $("#login-toggle");
     if (tg) tg.addEventListener("click", function () { loginMode = reg ? "signin" : "register"; $("#login-err").textContent = ""; renderLoginMode(); });
   }
@@ -755,42 +752,6 @@
     var ls = $("#login-screen"); if (ls) ls.classList.add("open");
   }
   function hideLogin() { var ls = $("#login-screen"); if (ls) ls.classList.remove("open"); }
-
-  // ---- Password reset ----
-  // Step 1: email a reset link. Step 2 (below) redeems the token from that link.
-  function requestPasswordReset() {
-    var emailEl = $("#login-email");
-    var email = (emailEl.value || "").trim();
-    var err = $("#login-err");
-    if (!email) { err.textContent = "Enter your email address first, then tap “Forgot your password?”"; emailEl.focus(); return; }
-    var btn = $("#forgot-btn"); if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
-    postAuth("reset-request", { email: email })
-      .then(function (j) {
-        if (btn) { btn.disabled = false; btn.textContent = "Forgot your password?"; }
-        if (j && j.ok) { err.textContent = ""; toast("If that email has an account, a reset link is on its way.", "ok"); }
-        else { err.textContent = (j && j.error) || "Could not start a password reset."; }
-      })
-      .catch(function () {
-        if (btn) { btn.disabled = false; btn.textContent = "Forgot your password?"; }
-        err.textContent = "Could not reach the server. Check your connection and try again.";
-      });
-  }
-  // Shows the "set a new password" form instead of the sign-in form.
-  var resetToken = null;
-  function showResetForm(token) {
-    resetToken = token;
-    var lb = $(".login-body"); if (lb) lb.style.display = "none";
-    var rb = $("#reset-body"); if (rb) rb.style.display = "";
-    var ls = $("#login-screen"); if (ls) ls.classList.add("open");
-  }
-  function hideResetForm() {
-    resetToken = null;
-    var rb = $("#reset-body"); if (rb) rb.style.display = "none";
-    var lb = $(".login-body"); if (lb) lb.style.display = "";
-    // Drop the token from the URL so a refresh doesn't reopen this form.
-    try { history.replaceState(null, "", location.pathname); } catch (e) { }
-    showLogin();
-  }
 
   // ---- Welcome tour: a short, skippable walkthrough shown once, right after
   // a brand-new account is created (never on sign-in, never again after dismissed). ----
@@ -1390,10 +1351,10 @@
     });
     renderAdminAudit();
   }
-  // Set a password on someone else's behalf. The recovery path when email is not
-  // configured -- otherwise a forgotten password has no route back at all. The value is
-  // never echoed afterwards: the admin has to pass it on themselves, and the account
-  // should change it once they are in.
+  // Set a password on someone else's behalf. This is THE recovery path: there is no
+  // self-service reset, because the app cannot send email. The value is never echoed
+  // afterwards -- the admin passes it on themselves, and the account should change it once
+  // they are in.
   function promptResetPassword(email) {
     modal('<button class="close-x" data-close>&times;</button><h2>Reset password</h2>' +
       '<p class="muted">' + attr(email) + '</p>' +
@@ -1497,7 +1458,6 @@
   // permanently, so the card stays hidden rather than failing on tap.
   var pushInfo = null; // {configured, publicKey} once /api/push has answered
   // Set from the register/login response. null means we have not been told yet.
-  var mailAvailable = null;
 
   function pushSupported() {
     return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
@@ -1583,35 +1543,12 @@
       .catch(function () { pushInfo = { configured: false, publicKey: null }; renderPushCard(); });
   }
 
-  function resendVerification() {
-    var btn = $("#acct-verify-resend");
-    if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
-    var done = function () { if (btn) { btn.disabled = false; btn.textContent = "Send the link again"; } };
-    api("/api/auth", { method: "POST", body: JSON.stringify({ action: "verify-request" }) })
-      .then(function (j) {
-        done();
-        if (j.alreadyVerified) {
-          // Confirmed in another tab or on another device; reflect it rather than resend.
-          var a = authData(); if (a.user) { a.user.emailVerified = true; authSave(a); }
-          renderAccountView();
-          toast("Your email is already confirmed.", "ok");
-          return;
-        }
-        if (!j.ok) { toast(j.error || "Couldn't send the link.", "warn", 8000); return; }
-        toast("Confirmation link sent. Check your inbox.", "ok");
-      })
-      .catch(function () { done(); toast("Couldn't reach the server.", "warn"); });
-  }
-
   // Customer's Account tab: profile + sign out, replacing the header account dropdown.
   function renderAccountView() {
     var u = (typeof currentUser === "function") ? currentUser() : null;
     var av = $("#acct-avatar"); if (av) av.textContent = ((u && (u.name || u.email)) || "U").charAt(0).toUpperCase();
     var nm = $("#acct-name"); if (nm) nm.textContent = u ? (u.name || u.email) : "Guest";
     var em = $("#acct-email"); if (em) em.textContent = u ? u.email : "";
-    // The nudge to confirm an address, shown only when it is both needed and possible.
-    var vc = $("#acct-verify-card");
-    if (vc) vc.hidden = !(hasServerAuth() && u && u.emailVerified === false && mailAvailable !== false);
     // Export and closure need the server. In local demo mode there is nothing to act on.
     var dc = $("#acct-data-card"); if (dc) dc.hidden = !hasServerAuth();
     loadPushInfo();
@@ -3212,8 +3149,6 @@
 
   var searchInput = $("#track-search");
   if (searchInput) searchInput.addEventListener("input", function () { trackQuery = this.value.trim().toLowerCase(); renderTracking(); });
-  var acctResend = $("#acct-verify-resend");
-  if (acctResend) acctResend.addEventListener("click", resendVerification);
   var acctExport = $("#acct-export");
   if (acctExport) acctExport.addEventListener("click", exportMyData);
   var acctClose = $("#acct-close");
@@ -3240,32 +3175,6 @@
   if (admRefresh) admRefresh.addEventListener("click", function () { renderAdmin(); });
 
   // Login + sign out
-  var forgotBtn = $("#forgot-btn"); if (forgotBtn) forgotBtn.addEventListener("click", requestPasswordReset);
-  var resetCancel = $("#reset-cancel"); if (resetCancel) resetCancel.addEventListener("click", hideResetForm);
-  var resetForm = $("#reset-form");
-  if (resetForm) resetForm.addEventListener("submit", function (e) {
-    e.preventDefault();
-    var pw = $("#reset-pw").value || "";
-    var err = $("#reset-err"); err.textContent = "";
-    if (pw.length < 4) { err.textContent = "Password must be at least 4 characters."; return; }
-    var btn = $("#reset-submit"); btn.disabled = true; btn.textContent = "Saving…";
-    postAuth("reset-confirm", { token: resetToken, pw: pw })
-      .then(function (j) {
-        btn.disabled = false; btn.textContent = "Save new password";
-        if (!(j && j.ok)) { err.textContent = (j && j.error) || "Could not set that password."; return; }
-        authSave({ token: j.token, user: j.user });
-        try { history.replaceState(null, "", location.pathname); } catch (e2) { }
-        var rb = $("#reset-body"); if (rb) rb.style.display = "none";
-        var lb = $(".login-body"); if (lb) lb.style.display = "";
-        enterApp();
-        toast("Password updated. You're signed in.", "ok");
-      })
-      .catch(function () {
-        btn.disabled = false; btn.textContent = "Save new password";
-        err.textContent = "Could not reach the server. Check your connection and try again.";
-      });
-  });
-
   var loginForm = $("#login-form");
   if (loginForm) loginForm.addEventListener("submit", function (e) {
     e.preventDefault();
@@ -3515,38 +3424,8 @@
   applyTheme();
   updateRoleUI();
   renderBottomNav();
-  // Arriving from a password-reset email takes priority over any cached session.
-  var bootReset = null, bootVerify = null;
-  try {
-    var qs = new URLSearchParams(location.search);
-    bootReset = qs.get("reset");
-    bootVerify = qs.get("verify");
-  } catch (e) { }
-
-  // Redeemed before anything renders, so the account screen never shows a stale nudge to
-  // confirm an address that was just confirmed.
-  if (bootVerify) {
-    fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "verify-confirm", token: bootVerify }) })
-      .then(function (r) { return r.json().catch(function () { return {}; }); })
-      .then(function (j) {
-        if (j && j.ok) {
-          var a = authData();
-          if (a.user) { a.user.emailVerified = true; authSave(a); }
-          toast("Thanks, your email is confirmed.", "ok", 6000);
-        } else {
-          toast((j && j.error) || "That confirmation link didn't work.", "warn", 9000);
-        }
-        renderAccountView();
-        // Drop the token from the URL so it is not left in history or a shared link.
-        try { history.replaceState(null, "", location.pathname); } catch (e) { }
-      })
-      .catch(function () { toast("Couldn't reach the server to confirm your email.", "warn"); });
-  }
   associateLabels(document);
-  if (bootReset) {
-    showResetForm(bootReset);
-  } else if (currentUser()) {
+  if (currentUser()) {
     state.settings.role = currentUser().role || state.settings.role;
     state.settings.roleChosen = true;
     if (!applyHash()) go(homeView());

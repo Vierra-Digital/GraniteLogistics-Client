@@ -27,7 +27,7 @@ const SHOTS = [
   { name: "04-track-desktop", url: "/track.html?n=GL-1041", viewport: DESK },
   { name: "05-customer-home-phone", full: true, url: "/app.html", viewport: PHONE, seed: customerSeed(), view: "custhome" },
   { name: "06-customer-order-phone", full: true, url: "/app.html", viewport: PHONE, seed: customerSeed(), view: "order" },
-  { name: "07-customer-account-phone", full: true, url: "/app.html", viewport: PHONE, seed: customerSeed(false), view: "account" },
+  { name: "07-customer-account-phone", full: true, url: "/app.html", viewport: PHONE, seed: customerSeed(), view: "account" },
   { name: "08-ops-overview-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "overview" },
   { name: "09-ops-tracking-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "tracking" },
   { name: "10-ops-roles-desktop", url: "/app.html", viewport: DESK, seed: opsSeed(), view: "admin" },

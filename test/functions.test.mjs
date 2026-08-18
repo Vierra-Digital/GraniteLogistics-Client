@@ -13,9 +13,8 @@ import { join } from "node:path";
 import { mergePushedPackages, nextId, tenantOf, resolveKey, makeOrder, EMPTY, publicTrackingView, orderRateLimit, orderCreatedAt, ORDER_LIMITS } from "../netlify/functions/_lib.mjs";
 import { envRoleFor, OPS_ROLES, WRITE_ROLES } from "../netlify/functions/_auth.mjs";
 import { sign, verifyToken, bearer, sessionSuperseded } from "../netlify/functions/_auth.mjs";
-import { emailConfigured, sendEmail, resetEmail, parseSender, statusEmail } from "../netlify/functions/_email.mjs";
 import { detectStatusChanges, unannounced, isNotifiable, NOTIFY_STAGES, pruneAnnounced, ANNOUNCED_LIMIT } from "../netlify/functions/_notify.mjs";
-import { evaluate, afterFailure, LOGIN_LIMITS, RESET_LIMITS } from "../netlify/functions/_throttle.mjs";
+import { evaluate, afterFailure, LOGIN_LIMITS } from "../netlify/functions/_throttle.mjs";
 import { carrierConfigured, configuredCarriers, mapCarrierStatus, isException, isForwardStep,
          normalizeScan, applyScans, fetchScans, simulatedTracking } from "../netlify/functions/_carriers.mjs";
 
@@ -119,7 +118,7 @@ test("tampered and malformed tokens are rejected", () => {
   assert.equal(verifyToken(null), null);
 });
 
-test("a reset token is distinguishable from a session token", () => {
+test("a kind-tagged token is distinguishable from a session token", () => {
   // /api/auth GET refuses any token carrying `kind`, so a reset link can't be
   // used as a session, and a session can't be redeemed as a reset.
   assert.equal(verifyToken(sign({ email: "a@b.com", kind: "reset", exp: Date.now() + 60000 })).kind, "reset");
@@ -418,14 +417,6 @@ test("the announced record stays bounded even with nothing delivered", () => {
   assert.ok(pruned["GL-" + (ANNOUNCED_LIMIT + 249)]);
 });
 
-test("the reset limit is tighter than the login limit", () => {
-  // Mailing a stranger is the harm itself, so it gets fewer attempts than guessing.
-  assert.ok(RESET_LIMITS.max < LOGIN_LIMITS.max);
-  let rec = null;
-  for (let i = 0; i < RESET_LIMITS.max; i++) rec = afterFailure(rec, T0, RESET_LIMITS);
-  assert.equal(evaluate(rec, T0, RESET_LIMITS).allowed, false);
-});
-
 // ---------------------------------------------------------------------------
 // Customer status notifications. The transition is detected by diffing what ops
 // pushed against what was stored, so getting this wrong means either silence or
@@ -446,7 +437,7 @@ test("detectStatusChanges stays silent when nothing moved", () => {
   assert.deepEqual(detectStatusChanges(null, null), []);
 });
 
-test("detectStatusChanges ignores stages a customer should not be mailed about", () => {
+test("detectStatusChanges ignores stages a customer should not be notified about", () => {
   // Internal choreography, and the confirmation they already saw on screen.
   assert.deepEqual(detectStatusChanges([cust("GL-1", "Won")], [cust("GL-1", "Intake")]), []);
   assert.deepEqual(detectStatusChanges([cust("GL-1", "PickedUp")], [cust("GL-1", "Staged")]), []);
@@ -474,26 +465,6 @@ test("unannounced drops stages already sent, per stage not per parcel", () => {
   assert.deepEqual(left.map((c) => c.id), ["GL-2"]);
   assert.deepEqual(unannounced(changes, {}).map((c) => c.id), ["GL-1", "GL-2"]);
   assert.deepEqual(unannounced([], announced), []);
-});
-
-test("the status email names the parcel and links to public tracking only", () => {
-  const m = statusEmail({ id: "GL-1041", item: { description: "LG OLED TV" }, customer: { name: "Jane Doe", address: "742 Birchwood Ln", phone: "555-0100" }, promisedTs: Date.UTC(2026, 7, 20) }, "out for delivery");
-  assert.match(m.subject, /GL-1041/);
-  assert.match(m.text, /out for delivery/);
-  assert.match(m.html, /track\.html\?n=GL-1041/);
-  assert.match(m.text, /Hi Jane,/);
-  // The address and phone must not travel in an email that will sit in an inbox.
-  ["742 Birchwood Ln", "555-0100"].forEach((secret) => {
-    assert.ok(!m.html.includes(secret), "status email leaked " + secret);
-    assert.ok(!m.text.includes(secret), "status email leaked " + secret);
-  });
-});
-
-test("the status email survives a sparse package", () => {
-  const m = statusEmail({ id: "GL-2" }, "delivered");
-  assert.match(m.subject, /GL-2/);
-  assert.match(m.text, /Hi there,/);
-  assert.ok(!/undefined|NaN|Invalid Date/.test(m.html + m.text), "placeholder leaked into the email");
 });
 
 // ---------------------------------------------------------------------------
@@ -549,27 +520,6 @@ test("the burst window is tighter than the hourly one", () => {
   const [burst, hourly] = ORDER_LIMITS;
   assert.ok(burst.ms < hourly.ms);
   assert.ok(burst.max < hourly.max);
-});
-
-// ---------------------------------------------------------------------------
-// Brevo needs the sender as {name, email}, so GL_MAIL_FROM has to be split.
-// Getting this wrong means every reset email is rejected at send time.
-// ---------------------------------------------------------------------------
-test("parseSender splits a display-name sender", () => {
-  assert.deepEqual(parseSender("Granite Logistics <no-reply@usegl.com>"),
-    { name: "Granite Logistics", email: "no-reply@usegl.com" });
-  // Quoted display name, and stray whitespace.
-  assert.deepEqual(parseSender('  "Granite Logistics"  <  no-reply@usegl.com  >  '),
-    { name: "Granite Logistics", email: "no-reply@usegl.com" });
-});
-
-test("parseSender accepts a bare address and degrades safely", () => {
-  assert.deepEqual(parseSender("no-reply@usegl.com"), { email: "no-reply@usegl.com" });
-  assert.deepEqual(parseSender("  no-reply@usegl.com  "), { email: "no-reply@usegl.com" });
-  // Angle brackets with no display name must not produce name:"".
-  assert.deepEqual(parseSender("<no-reply@usegl.com>"), { name: undefined, email: "no-reply@usegl.com" });
-  assert.deepEqual(parseSender(""), { email: "" });
-  assert.deepEqual(parseSender(undefined), { email: "" });
 });
 
 test("Viewer is an ops role but not a writing one", () => {
@@ -666,73 +616,6 @@ test("public tracking view tolerates sparse packages", () => {
   assert.equal(v.exception, null);
   assert.equal(v.destination, null);
   assert.deepEqual(v.history, []);
-});
-
-// ---------------------------------------------------------------------------
-// Email. Must degrade cleanly when no provider key is configured.
-// ---------------------------------------------------------------------------
-test("email reports not-configured without provider keys", async () => {
-  assert.equal(emailConfigured(), false);
-  const r = await sendEmail({ to: "a@b.com", subject: "x", html: "y" });
-  assert.equal(r.ok, false);
-  assert.equal(r.reason, "not-configured");
-});
-
-test("sendEmail posts the shape Brevo expects", async () => {
-  const saved = { key: process.env.GL_BREVO_KEY, from: process.env.GL_MAIL_FROM, fetch: globalThis.fetch };
-  process.env.GL_BREVO_KEY = "xkeysib-test";
-  process.env.GL_MAIL_FROM = "Granite Logistics <no-reply@usegl.com>";
-  let seen = null;
-  globalThis.fetch = async (url, init) => {
-    seen = { url, init, body: JSON.parse(init.body) };
-    return new Response("{}", { status: 201 });
-  };
-  try {
-    const r = await sendEmail({ to: "jane@example.com", subject: "Reset", html: "<b>hi</b>", text: "hi" });
-    assert.equal(r.ok, true);
-    assert.equal(seen.url, "https://api.brevo.com/v3/smtp/email");
-    // Brevo authenticates with an api-key header, not a Bearer token.
-    assert.equal(seen.init.headers["api-key"], "xkeysib-test");
-    assert.ok(!("Authorization" in seen.init.headers));
-    // Field names are Brevo's, not Resend's: sender/to[].email/htmlContent/textContent.
-    assert.deepEqual(seen.body.sender, { name: "Granite Logistics", email: "no-reply@usegl.com" });
-    assert.deepEqual(seen.body.to, [{ email: "jane@example.com" }]);
-    assert.equal(seen.body.htmlContent, "<b>hi</b>");
-    assert.equal(seen.body.textContent, "hi");
-    assert.equal(seen.body.subject, "Reset");
-  } finally {
-    globalThis.fetch = saved.fetch;
-    if (saved.key === undefined) delete process.env.GL_BREVO_KEY; else process.env.GL_BREVO_KEY = saved.key;
-    if (saved.from === undefined) delete process.env.GL_MAIL_FROM; else process.env.GL_MAIL_FROM = saved.from;
-  }
-});
-
-test("sendEmail reports a provider rejection instead of throwing", async () => {
-  const saved = { key: process.env.GL_BREVO_KEY, from: process.env.GL_MAIL_FROM, fetch: globalThis.fetch };
-  process.env.GL_BREVO_KEY = "xkeysib-test";
-  process.env.GL_MAIL_FROM = "no-reply@usegl.com";
-  globalThis.fetch = async () => new Response('{"message":"sender not verified"}', { status: 400 });
-  try {
-    const r = await sendEmail({ to: "a@b.com", subject: "x", html: "y" });
-    assert.equal(r.ok, false);
-    assert.equal(r.reason, "send-failed");
-    assert.equal(r.status, 400);
-    assert.match(r.detail, /sender not verified/);
-  } finally {
-    globalThis.fetch = saved.fetch;
-    if (saved.key === undefined) delete process.env.GL_BREVO_KEY; else process.env.GL_BREVO_KEY = saved.key;
-    if (saved.from === undefined) delete process.env.GL_MAIL_FROM; else process.env.GL_MAIL_FROM = saved.from;
-  }
-});
-
-test("the reset email includes the link and no stray em dashes", () => {
-  const m = resetEmail("Jane Doe", "https://usegl.com/app.html?reset=tok");
-  assert.ok(m.subject.length > 0);
-  assert.ok(m.html.includes("https://usegl.com/app.html?reset=tok"));
-  assert.ok(m.text.includes("https://usegl.com/app.html?reset=tok"));
-  assert.ok(m.html.includes("Jane"));   // greets by first name
-  assert.ok(!m.html.includes("Doe"));   // not the full name
-  assert.ok(!/—/.test(m.html + m.text + m.subject));
 });
 
 // ---- Supabase migration transform ----

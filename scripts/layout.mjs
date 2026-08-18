@@ -30,7 +30,7 @@ const CUST_WIDTHS = [320, 360, 390, 414, 768, 980];
 
 const SCENARIOS = [
   ...OPS_VIEWS.flatMap((v) => OPS_WIDTHS.map((w) => ({ view: v, w, h: 900, mobile: false, seed: opsSeed(), label: `ops/${v}@${w}` }))),
-  ...CUST_VIEWS.flatMap((v) => CUST_WIDTHS.map((w) => ({ view: v, w, h: 844, mobile: w < 768, seed: customerSeed(false), label: `cust/${v}@${w}` }))),
+  ...CUST_VIEWS.flatMap((v) => CUST_WIDTHS.map((w) => ({ view: v, w, h: 844, mobile: w < 768, seed: customerSeed(), label: `cust/${v}@${w}` }))),
   // One dark pass: a theme should not change geometry, and if it does that is worth knowing.
   ...OPS_VIEWS.map((v) => ({ view: v, w: 1280, h: 900, mobile: false, seed: dark(opsSeed()), label: `ops/${v}@1280/dark` })),
   // Worst-case content at the tightest width each audience ships at, plus one roomy width

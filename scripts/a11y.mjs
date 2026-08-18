@@ -32,7 +32,7 @@ const STATIC = ["/index.html", "/track.html?n=GL-1041", "/privacy.html", "/terms
 
 const SCENARIOS = [
   ...OPS_VIEWS.map((v) => ({ label: "ops/" + v, seed: opsSeed(), view: v, mobile: false })),
-  ...CUST_VIEWS.map((v) => ({ label: "cust/" + v, seed: customerSeed(false), view: v, mobile: true })),
+  ...CUST_VIEWS.map((v) => ({ label: "cust/" + v, seed: customerSeed(), view: v, mobile: true })),
   ...["home", "driver", "tracking"].map((v) => ({ label: "driver-phone/" + v, seed: roleSeed("Driver"), view: v, mobile: true })),
   ...["home", "runner", "presort", "tracking"].map((v) => ({ label: "runner-phone/" + v, seed: roleSeed("Runner"), view: v, mobile: true })),
   ...STATIC.map((u) => ({ label: "public" + u.split("?")[0], staticUrl: u, mobile: false })),

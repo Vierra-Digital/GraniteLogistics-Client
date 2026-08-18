@@ -9,14 +9,12 @@
 //
 //   GL_VAPID_PUBLIC    the public key, also handed to the browser at subscribe time
 //   GL_VAPID_PRIVATE   the private key. A secret; it signs the requests to the push service
-//   GL_MAIL_FROM       reused as the VAPID contact address (push services want a mailto)
 //
 // With no keys set this degrades to nothing at all: the client is told push is unavailable
 // and never asks for notification permission, which is better than prompting for a
 // capability the deployment cannot deliver.
 import { getStore } from "@netlify/blobs";
 import webpushDefault from "web-push";
-import { parseSender } from "./_email.mjs";
 
 // web-push is CommonJS; under ESM the module object arrives as the default export.
 const webpush = webpushDefault && webpushDefault.sendNotification ? webpushDefault : (webpushDefault.default || webpushDefault);
@@ -28,11 +26,11 @@ export function pushPublicKey() {
   return process.env.GL_VAPID_PUBLIC || null;
 }
 
-// Push services require a contact so they can reach the operator about a misbehaving
-// sender. GL_MAIL_FROM already holds one; fall back to the site itself.
+// Push services require a contact so they can reach the operator about a misbehaving sender.
+// GL_MAIL_FROM used to supply a mailto; with the email feature gone, the deployment itself is
+// the contact. A URL is acceptable to the spec, and unlike a mailto it cannot go stale.
 function vapidSubject() {
-  const from = parseSender(process.env.GL_MAIL_FROM).email;
-  return from ? "mailto:" + from : "https://usegl.com";
+  return process.env.URL || process.env.DEPLOY_PRIME_URL || "https://usegl.com";
 }
 
 function store() { return getStore({ name: "granite-push", consistency: "strong" }); }
