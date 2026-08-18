@@ -22,11 +22,11 @@
 // a way that request payloads are not.
 
 // This app's stage vocabulary. Anything a carrier says has to land on one of these.
-export const STAGES = ["Won", "Intake", "PickedUp", "Staged", "InTransit", "OutforDelivery", "Delivered"];
+const STAGES = ["Won", "Intake", "PickedUp", "Staged", "InTransit", "OutforDelivery", "Delivered"];
 
 // Per-carrier credentials. Names are ours; the values come from each carrier's developer
 // portal once an account exists.
-export const CARRIERS = {
+const CARRIERS = {
   UPS: { label: "UPS", env: ["GL_UPS_CLIENT_ID", "GL_UPS_CLIENT_SECRET"] },
   FedEx: { label: "FedEx", env: ["GL_FEDEX_CLIENT_ID", "GL_FEDEX_CLIENT_SECRET"] },
 };

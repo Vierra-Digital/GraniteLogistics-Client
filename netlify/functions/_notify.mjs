@@ -34,7 +34,7 @@ export function isNotifiable(stage) {
 // One request should not fan out into hundreds of sends. A legitimate ops session advances
 // a handful of parcels at a time; anything far beyond that is a bulk edit or a bug, and
 // the remainder is reported rather than silently dropped.
-export const MAX_PER_PUSH = 25;
+const MAX_PER_PUSH = 25;
 
 // Pure: which customer-owned packages changed to a stage worth announcing.
 // `before` and `after` are package arrays. Anything without a customerEmail is ops' own
@@ -74,11 +74,11 @@ export function pruneAnnounced(announced) {
 }
 
 // { "GL-1041": ["InTransit", "Delivered"] } per tenant. Server-owned.
-export async function readAnnounced(tenant) {
+async function readAnnounced(tenant) {
   const a = await store().get(tenant, { type: "json" });
   return (a && typeof a === "object") ? a : {};
 }
-export async function writeAnnounced(tenant, announced) {
+async function writeAnnounced(tenant, announced) {
   await store().setJSON(tenant, announced);
 }
 

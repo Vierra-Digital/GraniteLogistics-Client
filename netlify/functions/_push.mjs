@@ -49,7 +49,7 @@ async function writeSubscriptions(email, list) {
 
 // A subscription is only usable with all three parts, so anything less is rejected rather
 // than stored to fail later at send time.
-export function validSubscription(sub) {
+function validSubscription(sub) {
   return !!(sub && typeof sub.endpoint === "string" && /^https:\/\//.test(sub.endpoint)
     && sub.keys && typeof sub.keys.p256dh === "string" && typeof sub.keys.auth === "string");
 }

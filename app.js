@@ -388,19 +388,30 @@
     }
     rebuildManifests(); save();
   }
+  // Apply a parsed workspace to state. Two callers -- the boot restore from localStorage and the
+  // JSON backup restore -- and they had drifted. The backup path never set the tombstone array,
+  // so deletions recorded against the PREVIOUS data survived the restore, and it never called
+  // syncSeqFromPackages(), so if the file carried no seq (or a stale one) the next locally
+  // created parcel could take an id the restored data already used. That is the one failure this
+  // codebase works hardest to prevent everywhere else.
+  function applyWorkspace(data) {
+    state.packages = data.packages;
+    state.manifests = Array.isArray(data.manifests) ? data.manifests : [];
+    state.loadUnits = Array.isArray(data.loadUnits) ? data.loadUnits : [];
+    state.events = Array.isArray(data.events) ? data.events : [];
+    state.settings = Object.assign(defaultSettings(), data.settings || {});
+    if (data.settings && data.settings.company) {
+      state.settings.company = Object.assign(defaultSettings().company, data.settings.company);
+    }
+    if (typeof data.seq === "number") seq = data.seq;
+    state.tombstones = Array.isArray(data.tombstones) ? data.tombstones : [];
+    syncSeqFromPackages();
+  }
   function load() {
     try {
       var data = JSON.parse(localStorage.getItem(STORE_KEY) || "null");
       if (!data || !Array.isArray(data.packages) || !data.packages.length) return false;
-      state.packages = data.packages;
-      state.manifests = Array.isArray(data.manifests) ? data.manifests : [];
-      state.loadUnits = Array.isArray(data.loadUnits) ? data.loadUnits : [];
-      state.events = Array.isArray(data.events) ? data.events : [];
-      state.settings = Object.assign(defaultSettings(), data.settings || {});
-      if (data.settings && data.settings.company) state.settings.company = Object.assign(defaultSettings().company, data.settings.company);
-      if (typeof data.seq === "number") seq = data.seq;
-      state.tombstones = Array.isArray(data.tombstones) ? data.tombstones : [];
-      syncSeqFromPackages(); // guard against a stale seq vs. server-numbered orders
+      applyWorkspace(data);
       if (!state.manifests.length) rebuildManifests();
       return true;
     } catch (e) { return false; }
@@ -3334,13 +3345,7 @@
         confirmLabel: "Restore", danger: true
       }).then(function (ok) {
         if (!ok) return;
-        state.packages = data.packages;
-        state.manifests = Array.isArray(data.manifests) ? data.manifests : [];
-        state.loadUnits = Array.isArray(data.loadUnits) ? data.loadUnits : [];
-        state.events = Array.isArray(data.events) ? data.events : [];
-        state.settings = Object.assign(defaultSettings(), data.settings || {});
-        if (data.settings && data.settings.company) state.settings.company = Object.assign(defaultSettings().company, data.settings.company);
-        if (typeof data.seq === "number") seq = data.seq;
+        applyWorkspace(data);
         rebuildManifests(); save();
         syncRoleSelect(); applyRole(); toast(state.packages.length + " packages restored from backup", "ok"); go("overview");
       });

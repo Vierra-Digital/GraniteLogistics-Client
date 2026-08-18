@@ -11,9 +11,9 @@
 // clears the counter immediately.
 import { getStore } from "@netlify/blobs";
 
-export const MAX_ATTEMPTS = 6;                 // failures allowed inside the window
-export const WINDOW_MS = 15 * 60 * 1000;       // rolling window
-export const LOCK_MS = 15 * 60 * 1000;         // how long a lock lasts once tripped
+const MAX_ATTEMPTS = 6;                 // failures allowed inside the window
+const WINDOW_MS = 15 * 60 * 1000;       // rolling window
+const LOCK_MS = 15 * 60 * 1000;         // how long a lock lasts once tripped
 
 // Guessing a password is rate-limited to slow an attacker down without locking out a
 // person who simply mistyped. Sending mail to someone else's inbox is held tighter,

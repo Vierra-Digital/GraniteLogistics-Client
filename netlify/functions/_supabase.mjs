@@ -121,23 +121,44 @@ export async function deletePhotoObjects(paths) {
   return { ok: res.ok, removed: res.ok ? wanted.length : 0, attempted: wanted.length };
 }
 
-// Signed in one batch rather than one request per photo: a 40-parcel workspace would
-// otherwise cost 80 round trips on every read.
+// Signed in batches rather than one request per photo: a 40-parcel workspace would otherwise cost
+// 80 round trips on every read.
+//
+// Batched, not sent as one request. Storage rate limits, and a read asks for every photo in the
+// workspace -- often immediately after the push that uploaded them. Asking for 200 at once
+// answered 429, and returning {} on that made every photo in the workspace disappear from the
+// read, which is indistinguishable from nobody having taken any. A slice that still fails after
+// its retries costs only its own photos, and those now render as "Photo didn't load" rather than
+// as an absence.
+const SIGN_CHUNK = 100;
+const SIGN_RETRIES = 3;
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function signPhotoPaths(paths) {
   const wanted = [...new Set(paths.filter(Boolean))];
   if (!wanted.length) return {};
   const e = env();
-  const res = await fetch(e.url + "/storage/v1/object/sign/" + PHOTO_BUCKET, {
-    method: "POST",
-    headers: { apikey: e.key, Authorization: "Bearer " + e.key, "Content-Type": "application/json" },
-    body: JSON.stringify({ expiresIn: PHOTO_URL_TTL, paths: wanted }),
-  });
-  if (!res.ok) return {};
-  const list = await res.json().catch(() => []);
   const out = {};
-  for (const row of Array.isArray(list) ? list : []) {
-    const signed = row.signedURL || row.signedUrl;
-    if (row.path && signed) out[row.path] = e.url + "/storage/v1" + (String(signed).startsWith("/") ? signed : "/" + signed);
+  for (let i = 0; i < wanted.length; i += SIGN_CHUNK) {
+    const slice = wanted.slice(i, i + SIGN_CHUNK);
+    for (let attempt = 1; attempt <= SIGN_RETRIES; attempt++) {
+      const res = await fetch(e.url + "/storage/v1/object/sign/" + PHOTO_BUCKET, {
+        method: "POST",
+        headers: { apikey: e.key, Authorization: "Bearer " + e.key, "Content-Type": "application/json" },
+        body: JSON.stringify({ expiresIn: PHOTO_URL_TTL, paths: slice }),
+      });
+      if (res.ok) {
+        const list = await res.json().catch(() => []);
+        for (const row of Array.isArray(list) ? list : []) {
+          const signed = row.signedURL || row.signedUrl;
+          if (row.path && signed) out[row.path] = e.url + "/storage/v1" + (String(signed).startsWith("/") ? signed : "/" + signed);
+        }
+        break;
+      }
+      // Only a rate limit is worth waiting out. Anything else will not improve on a retry.
+      if (res.status !== 429 || attempt === SIGN_RETRIES) break;
+      await pause(120 * attempt);
+    }
   }
   return out;
 }
@@ -336,6 +357,17 @@ export async function sbReadState(tenant) {
 // a pooler shared with every other request the deployment is serving.
 const CHUNK = 500;
 const LANES = 4;
+// PARCELS uploaded at once, not requests: each one issues up to two (pickup and delivery), so the
+// ceiling on simultaneous Storage requests is twice this. Photos hit a different service than the
+// rows do, so they get their own budget.
+//
+// 48 measured against the real project. Only FRESH photos upload -- one already stored comes back
+// as a signed URL and short-circuits -- and the client cannot hold many un-synced, because a data
+// URL is ~110,000 characters against a 5.24M localStorage budget, so about 47 is the ceiling on
+// one push. 48 clears that in a single batch. Bounded rather than unbounded because 800 at once
+// (a figure only a synthetic fixture reaches) tips Storage into rate limiting the signing that
+// follows, and that failure used to lose every photo in the read.
+const UPLOAD_LANES = 48;
 async function upsert(table, conflict, resolution, rows) {
   const chunks = [];
   for (let i = 0; i < rows.length; i += CHUNK) chunks.push(rows.slice(i, i + CHUNK));
@@ -371,10 +403,14 @@ export async function sbWriteState(tenant, data) {
   // Identifies this push. Not a timestamp: see sync_token in the schema.
   const token = crypto.randomUUID();
   const packages = Array.isArray(data.packages) ? data.packages.filter((p) => p && p.id) : [];
-  // Photos in parallel rather than one parcel at a time. Uploading is the only part of a push
-  // that touches Storage, and a serial loop made a first sync of forty photographed parcels
-  // forty sequential round trips.
-  const rows = await Promise.all(packages.map((p) => rowWithPhotos(tenant, p, token)));
+  // Photos in parallel, but bounded. A serial loop made a first sync of forty photographed
+  // parcels forty sequential round trips; unbounded made 400 parcels fire 800 simultaneous
+  // uploads, which is what tipped Storage into rate limiting the signing that follows. Order is
+  // preserved because rows[i] is zipped with packages[i] for the custody rows below.
+  const rows = [];
+  for (let i = 0; i < packages.length; i += UPLOAD_LANES) {
+    rows.push(...await Promise.all(packages.slice(i, i + UPLOAD_LANES).map((p) => rowWithPhotos(tenant, p, token))));
+  }
 
   await upsert("packages", "uid", "merge", rows);
   await upsert("package_events", "package_uid,stage,at", "ignore",

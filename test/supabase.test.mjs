@@ -99,6 +99,10 @@ function makeSupabase() {
   let seq = 0;
   let failUploads = false;
   let failDeletes = false;
+  let rateLimitSigns = 0;      // answer this many sign requests with 429 before succeeding
+  let signRequests = 0;
+  const signBatchSizes = [];   // how many paths each sign request asked for
+  let uploadsInFlight = 0, maxUploadsInFlight = 0;
   let conflictOnce = null;           // an id to reject once, to exercise the 409 path
 
   // Primary keys, per the schema. PostgREST resolves a conflict against the target named by
@@ -164,7 +168,15 @@ function makeSupabase() {
 
     // ---- Storage ----
     if (u.pathname.startsWith("/storage/v1/object/sign/")) {
+      signRequests++;
+      // Storage rate limits, and a read asks for every photo in the workspace. Modelled because
+      // returning {} on a 429 used to drop every photo from the response.
+      if (rateLimitSigns > 0) {
+        rateLimitSigns--;
+        return new Response(JSON.stringify({ statusCode: "429", error: "too_many_connections" }), { status: 429 });
+      }
       const paths = (body && body.paths) || [];
+      signBatchSizes.push(paths.length);
       // A path with no object cannot be signed, which is how the real service answers and what
       // makes "a deleted photo cannot be signed again" a meaningful check.
       return ok(paths.map((p) => (bucket.has(p)
@@ -188,6 +200,12 @@ function makeSupabase() {
     }
     if (u.pathname.startsWith("/storage/v1/object/")) {
       if (failUploads) return new Response("nope", { status: 500 });
+      // Track concurrency: the bound on simultaneous uploads is what keeps Storage from rate
+      // limiting the signing that follows, and it is invisible unless something counts.
+      uploadsInFlight++;
+      if (uploadsInFlight > maxUploadsInFlight) maxUploadsInFlight = uploadsInFlight;
+      await new Promise((r) => setTimeout(r, 1));
+      uploadsInFlight--;
       bucket.set(u.pathname.replace("/storage/v1/object/condition-photos/", ""), opts.body);
       return ok({ Key: u.pathname });
     }
@@ -291,6 +309,10 @@ function makeSupabase() {
     rows, bucket, violations, fetchImpl,
     set failUploads(v) { failUploads = v; },
     set failDeletes(v) { failDeletes = v; },
+    set rateLimitSigns(v) { rateLimitSigns = v; },
+    get signRequests() { return signRequests; },
+    get signBatchSizes() { return signBatchSizes; },
+    get maxUploadsInFlight() { return maxUploadsInFlight; },
     set conflictOnce(v) { conflictOnce = v; },
   };
 }
@@ -992,4 +1014,73 @@ test("packages.updated_at is maintained by a trigger, not by hope", () => {
     "the trigger is not dropped first, so a re-run of the schema would fail");
   assert.match(SQL, /create trigger packages_touch_updated_at\s+before update on public\.packages/,
     "the trigger is not attached to packages before update");
+});
+
+test("a rate-limited signing request is retried, not taken as an absence of photos", async () => {
+  // Measured against the real project: asking to sign 200 paths answered 429 too_many_connections,
+  // and returning {} on that made every condition photo in the workspace vanish from the read --
+  // indistinguishable from a workspace where nobody photographed anything. For a liability record
+  // that is the worst possible way to fail.
+  await withSupabase(async (sb, fake) => {
+    const PNG = "data:image/png;base64," + Buffer.from("bytes").toString("base64");
+    await sb.sbWriteState("default", {
+      ...workspace(),
+      packages: [{ id: "GL-8100", status: "Delivered", item: {}, customer: {}, history: [],
+                   photos: { pickup: PNG, delivery: PNG } }],
+    });
+
+    fake.rateLimitSigns = 2;                 // the first two attempts are refused
+    const after = await sb.sbReadState("default");
+    const p = after.packages[0];
+    assert.match(p.photos.pickup || "", /\/object\/sign\//, "the photo was lost to a transient 429");
+    assert.match(p.photos.delivery || "", /\/object\/sign\//);
+    assert.ok(fake.signRequests >= 3, "it should have retried: " + fake.signRequests + " request(s)");
+  });
+});
+
+test("signing that keeps failing costs only the photos, never the parcel", async () => {
+  await withSupabase(async (sb, fake) => {
+    const PNG = "data:image/png;base64," + Buffer.from("bytes").toString("base64");
+    await sb.sbWriteState("default", {
+      ...workspace(),
+      packages: [{ id: "GL-8101", status: "Delivered", item: { description: "Still here" },
+                   customer: { city: "Dayton" }, history: [{ stage: "Won", ts: 1893400000000 }],
+                   photos: { pickup: PNG } }],
+    });
+    fake.rateLimitSigns = 99;                // never recovers
+    const after = await sb.sbReadState("default");
+    const p = after.packages[0];
+    assert.equal(p.id, "GL-8101", "the parcel itself must survive");
+    assert.equal(p.item.description, "Still here");
+    assert.equal(p.photos.pickup, undefined, "and the photo is simply absent");
+    // The UI renders that absence as "Photo didn't load" rather than as "no photo was taken".
+  });
+});
+
+test("signing is batched, and uploads are bounded", async () => {
+  // Both are volume properties, invisible at the sizes the other tests use, and both were found by
+  // measuring the real project: one un-chunked sign request for a whole workspace answered 429,
+  // and unbounded uploads are what provoked that. Asserted as invariants so the numbers cannot
+  // quietly go back to "all at once".
+  await withSupabase(async (sb, fake) => {
+    const PNG = "data:image/png;base64," + Buffer.from("bytes").toString("base64");
+    // 130 parcels with two photos each: 260 uploads and 260 paths to sign.
+    const packages = Array.from({ length: 130 }, (_, i) => ({
+      id: "GL-" + (9000 + i), status: "Delivered", item: {}, customer: {}, history: [],
+      photos: { pickup: PNG, delivery: PNG },
+    }));
+    await sb.sbWriteState("default", { ...workspace(), packages });
+
+    assert.ok(fake.maxUploadsInFlight > 1, "uploads should overlap at all: " + fake.maxUploadsInFlight);
+    // 48 parcels in flight, each issuing up to two uploads, so 96 requests is the ceiling. The
+    // number matters less than the fact that there IS one: unbounded is what provoked the 429s.
+    assert.ok(fake.maxUploadsInFlight <= 96,
+      "uploads ran unbounded (" + fake.maxUploadsInFlight + " at once); Storage rate limits and the signing that follows pays for it");
+
+    await sb.sbReadState("default");
+    assert.ok(fake.signBatchSizes.length > 1,
+      "the whole workspace was signed in one request (" + fake.signBatchSizes.join(",") + ")");
+    assert.ok(Math.max(...fake.signBatchSizes) <= 100,
+      "a sign batch exceeded 100 paths: " + fake.signBatchSizes.join(","));
+  });
 });
