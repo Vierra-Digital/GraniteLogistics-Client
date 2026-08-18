@@ -8,6 +8,17 @@
   # Functions don't use Puppeteer; don't fetch Chromium during install.
   PUPPETEER_SKIP_DOWNLOAD = "true"
 
+  # Netlify's secret scanner compares every environment value against the repo, and
+  # SUPABASE_URL is documented in supabase/MIGRATION-CHECKLIST.md, which failed the build.
+  # That URL is not a secret: it is the public REST endpoint, sent with every request and
+  # printed in the Supabase dashboard. Its security comes from RLS and the anon key, not from
+  # being unguessable.
+  #
+  # Exactly one key is omitted. SUPABASE_SERVICE_ROLE_KEY must never be added here: it
+  # bypasses RLS entirely, and the scanner finding it in a committed file is precisely the
+  # accident worth failing a build over.
+  SECRETS_SCAN_OMIT_KEYS = "SUPABASE_URL"
+
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
@@ -23,3 +34,89 @@
   for = "/manifest.webmanifest"
   [headers.values]
     Content-Type = "application/manifest+json"
+
+# ---------------------------------------------------------------------------
+# Keep the repo's internals off the public site.
+#
+# publish = "." serves the whole repository, so until now usegl.com also served README.md,
+# PITCH.md, the full relational schema with its RLS policies, the 81 KB integration test
+# suite, package.json and the local dev server. None of those hold a credential -- that was
+# checked -- but together they are a map: the schema says what the tables are and what the
+# policies allow, and the tests say exactly which cases are covered and which are not.
+# PITCH.md is worse in a different way, being the script for what to say to a prospect.
+#
+# Netlify has no suffix globbing in redirects, so the two root markdown files are named
+# individually rather than matched as *.md. force = true is required: a real file exists at
+# each of these paths, and without it the file wins.
+# ---------------------------------------------------------------------------
+[[redirects]]
+  from = "/README.md"
+  to = "/index.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/PITCH.md"
+  to = "/index.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/package.json"
+  to = "/index.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/package-lock.json"
+  to = "/index.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/supabase/*"
+  to = "/index.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/test/*"
+  to = "/index.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/scripts/*"
+  to = "/index.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/server/*"
+  to = "/index.html"
+  status = 404
+  force = true
+
+# The unmodified logo original, kept in the repo as the source of truth for assets/logo.png
+# but 329 KB and referenced by nothing.
+[[redirects]]
+  from = "/assets/logo-source.jpeg"
+  to = "/index.html"
+  status = 404
+  force = true
+
+# The function sources themselves. All eighteen were readable at /netlify/functions/*.mjs,
+# including _auth.mjs -- the token signing, role resolution and login throttle. No secret
+# VALUES are in them (those come from the environment) but publishing the security-critical
+# source of an auth system is not a decision anyone made on purpose.
+#
+# This is the raw source path, not the invocation path: functions declare their own routes via
+# `export const config = { path: "/api/..." }`, and the internal route is /.netlify/functions/*
+# with a leading dot. Both were checked against the live site before adding this -- /api/health
+# answers 200 while /.netlify/functions/health already answered 404 -- so nothing here can stop
+# a function from being called.
+[[redirects]]
+  from = "/netlify/*"
+  to = "/index.html"
+  status = 404
+  force = true

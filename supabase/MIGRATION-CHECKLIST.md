@@ -24,6 +24,13 @@ Project `yjafrhkrcdldvfcqxcol`, **us-east-2**, Postgres 17.6.
   including `bootstrap_admins` and `role_grants`, and cannot self-grant a role.
 - **Verification data removed.** The database is back to one row: the `default` tenant. The
   bucket is empty.
+- **Every API handler verified against the live project**, not just the data layer: the webhook
+  ingest, the ops read and push including the stale-snapshot merge, customer orders and their
+  isolation from each other, cancellation, public tracking leaking nothing, and rate limiting.
+- **Measured at 3000 parcels**: read 1.15s, write 2.5s. Reads paginate and custody history is
+  embedded, because a uid-per-parcel filter failed outright above a few hundred.
+- **The repo is no longer served.** `publish = "."` had been publishing README, PITCH, the
+  schema, the test suite and all eighteen function sources; netlify.toml now 404s them.
 
 ## Left to do
 
@@ -37,26 +44,34 @@ Project `yjafrhkrcdldvfcqxcol`, **us-east-2**, Postgres 17.6.
 
 The bucket and the schema survive rotation, so nothing above needs redoing.
 
-### 2. Seed `bootstrap_admins` — yours, because it grants full access.
+### 2. Register the admin account, and check `GL_ADMIN_EMAILS`.
 
-Left empty on purpose. Confirm the addresses first; the transcript has
-`business@alexshick.com` and `kenfilbert@hotmail.com`, but the account running this is
-`alex@ndimensions.xyz`, so I am not guessing.
+`bootstrap_admins` now holds `business@alexshick.com`, verified: `effective_role()` returns
+`Admin` for it, case-insensitively, and `Customer` for anything else.
 
-```sql
-insert into public.bootstrap_admins (email, note) values
-  ('you@example.com', 'founder');
-```
+That table governs the **Supabase** role model, which only takes effect once auth moves. Auth
+is still on Netlify Blobs, so admin access today comes from `GL_ADMIN_EMAILS`. Two things are
+therefore needed:
 
-This replaces `GL_ADMIN_EMAILS`, and it is service-role-only: a lockout is recovered by
-running SQL in the dashboard, not by editing a Netlify variable.
+1. An account for that address must exist — register it in the app, which is also where its
+   password gets set. Passwords are never set from here.
+2. `GL_ADMIN_EMAILS` must include it, then redeploy. The role is re-derived server-side on
+   every login, so it takes effect at the next sign-in.
+
+Note the change in break-glass once auth does move: a lockout is recovered by running SQL in
+the dashboard rather than by editing a Netlify variable.
 
 ### 3. Switch Netlify over.
 
 ```
-SUPABASE_URL=https://yjafrhkrcdldvfcqxcol.supabase.co
+SUPABASE_URL=https://<project-ref>.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=<the rotated secret key>
 ```
+
+The project ref is at the top of this file. Written as a placeholder on purpose: Netlify's
+secret scanner compares every environment value against the repo and fails the build on a
+match, and it does not know that a project URL is public. netlify.toml also omits
+SUPABASE_URL from that scan, so this is belt and braces -- either alone is enough.
 
 Both together are the switch; either alone changes nothing, so a half-configured deployment
 keeps reading the store its data is actually in. **Redeploy** — Netlify bakes variables at
