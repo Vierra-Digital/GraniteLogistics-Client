@@ -1129,3 +1129,15 @@ h1,h2,.order-hero h2{text-wrap:balance}
   .es-step-ico{width:32px;height:32px;font-size:.95rem}
 }
 @keyframes sheet{from{transform:translateY(40px);opacity:.5}to{transform:none;opacity:1}}
+
+/* A condition photo that would not load. Same footprint as the image it replaces, so a modal
+   does not reflow, and worded rather than blank: an empty box reads as "no photo was taken",
+   which for a liability record is the opposite of what happened. */
+.photo-missing{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+  width:120px;height:120px;border-radius:11px;border:1px dashed var(--line);
+  background:var(--surface-2);color:var(--slate-600);font-size:.72rem;text-align:center;padding:6px;box-sizing:border-box}
+.photo-missing span[aria-hidden]{font-size:1.15rem;line-height:1;opacity:.7}
+.photo-missing .pm-t{line-height:1.25}
+.photo-missing.thumb{width:44px;height:44px;font-size:0;gap:0;border-radius:9px;flex:0 0 auto}
+.photo-missing.thumb .pm-t{display:none}
+.modal .photos .photo-missing{width:120px;height:120px}

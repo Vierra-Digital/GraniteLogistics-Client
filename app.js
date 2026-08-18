@@ -100,6 +100,38 @@
   // came out 16% smaller than JPEG at the same quality setting on a worst-case noisy test
   // frame (108KB -> 91KB at 900px/q0.7), and is a little more efficient perceptually at
   // equal q, so this is smaller at no visual cost. Falls back where WebP cannot be encoded.
+  // Condition photos come back from the server as signed URLs that expire, and are unreachable
+  // offline. Rendered through here so every one of them carries alt text and a class the failure
+  // handler below can find.
+  var PHOTO_BOX = "width:120px;height:120px;border-radius:11px;border:1px solid var(--line)";
+  function photoTag(url, label, cls, style) {
+    return '<img class="cond-photo' + (cls ? " " + cls : "") + '"' +
+      (style ? ' style="' + style + '"' : "") +
+      ' alt="' + attr(label) + '" src="' + attr(url) + '">';
+  }
+
+  // An <img> error does not bubble, but it can be caught in the capture phase, which works for
+  // images inserted long after this runs. Replacing the element is deliberate: a blank box with
+  // a torn-page icon says nothing, and saying "no photo" would be a lie.
+  window.addEventListener("error", function (e) {
+    var el = e.target;
+    if (!el || el.tagName !== "IMG" || !el.classList || !el.classList.contains("cond-photo")) return;
+    if (el.dataset.glReplaced) return;
+    el.dataset.glReplaced = "1";
+    var note = document.createElement("div");
+    note.className = "photo-missing" + (el.classList.contains("thumb") ? " thumb" : "");
+    note.setAttribute("role", "img");
+    var offline = navigator.onLine === false;
+    var text = offline ? "Photo needs a connection" : "Photo didn't load";
+    note.setAttribute("aria-label", (el.getAttribute("alt") || "Condition photo") + ": " + text);
+    note.innerHTML = '<span aria-hidden="true">⛶</span><span class="pm-t">' + text + '</span>';
+    note.title = offline
+      ? "Condition photos are stored on the server and are not available offline."
+      : "The link to this photo has expired. Reopen this shipment to fetch a fresh one.";
+    if (el.getAttribute("style")) note.setAttribute("style", el.getAttribute("style"));
+    el.replaceWith(note);
+  }, true);
+
   function encodePhoto(canvas) {
     var webp = canvas.toDataURL("image/webp", 0.7);
     return webp.indexOf("data:image/webp") === 0 ? webp : canvas.toDataURL("image/jpeg", 0.7);
@@ -2005,7 +2037,7 @@
     var staged = state.packages.filter(function (p) { return p.status === "PickedUp"; });
     $("#stage-list").innerHTML = staged.length ? staged.map(function (p) {
       return '<div class="row-item selectable" data-id="' + p.id + '">' +
-        (p.photos.pickup ? '<img class="thumb" src="' + p.photos.pickup + '">' : '') +
+        (p.photos.pickup ? photoTag(p.photos.pickup, "Pickup condition photo for " + p.id, "thumb") : '') +
         '<div class="ri-main"><div class="ri-title">' + p.item.description + '</div>' +
         '<div class="ri-sub">' + p.id + " · " + p.customer.city + ", " + p.customer.state + " " + p.customer.zip + '</div></div></div>';
     }).join("") : '<p class="muted">No items staged for batching. Pick up items in the Runner Dashboard first.</p>';
@@ -2618,8 +2650,8 @@
     var photos = "";
     if (p.photos.pickup || p.photos.delivery) {
       photos = '<div class="card-head" style="margin-top:8px"><h2 style="font-size:.95rem">Condition Photos</h2></div><div class="photos" style="display:flex;gap:10px">' +
-        (p.photos.pickup ? '<img style="width:120px;height:120px;border-radius:11px;border:1px solid var(--line)" src="' + p.photos.pickup + '">' : "") +
-        (p.photos.delivery ? '<img style="width:120px;height:120px;border-radius:11px;border:1px solid var(--line)" src="' + p.photos.delivery + '">' : "") + '</div>';
+        (p.photos.pickup ? photoTag(p.photos.pickup, "Pickup condition photo for " + p.id, "", PHOTO_BOX) : "") +
+        (p.photos.delivery ? photoTag(p.photos.delivery, "Delivery condition photo for " + p.id, "", PHOTO_BOX) : "") + '</div>';
     }
     $("#coc-detail").innerHTML = meta + tl + photos;
   }
@@ -2769,8 +2801,8 @@
         '</div><div class="tl-time">' + (h ? fmtTime(h.ts) : "") + '</div></div>';
     }).join("") + '</div>';
     var photos = (p.photos.pickup || p.photos.delivery)
-      ? '<div class="photos">' + (p.photos.pickup ? '<img src="' + p.photos.pickup + '">' : "") +
-        (p.photos.delivery ? '<img src="' + p.photos.delivery + '">' : "") + '</div>'
+      ? '<div class="photos">' + (p.photos.pickup ? photoTag(p.photos.pickup, "Condition photo taken at pickup", "") : "") +
+        (p.photos.delivery ? photoTag(p.photos.delivery, "Photo taken at delivery", "") : "") + '</div>'
       : '<p class="muted small">No condition photos yet.</p>';
     modal(
       '<button class="close-x" data-close>×</button>' +

@@ -10,6 +10,7 @@
 // Checks, all of them things that are unambiguously wrong rather than matters of taste:
 //   no-accessible-name   a control a screen reader can only announce as "button"
 //   img-no-alt           an <img> with no alt attribute at all (alt="" is correct for decor)
+//   role-img-unnamed     role="img" with no accessible name, announced as "image" and no more
 //   heading-skip         h1 -> h3, which breaks heading navigation
 //   duplicate-id         two elements sharing an id; aria references then resolve to one
 //   dangling-aria        aria-labelledby/describedby/controls pointing at a missing id
@@ -30,7 +31,29 @@ const OPS_VIEWS = ["overview", "ingest", "runner", "presort", "batch", "driver",
 const CUST_VIEWS = ["custhome", "order", "account"];
 const STATIC = ["/index.html", "/track.html?n=GL-1041", "/privacy.html", "/terms.html"];
 
+// A delivered parcel carrying photos, and the same with the photo links broken -- which is what
+// an expired signed URL or an offline device produces. Both render markup no other scenario
+// reaches.
+const withPhotos = (broken) => {
+  const seed = opsSeed();
+  const p = seed.state.packages.find((x) => x.photos && (x.photos.pickup || x.photos.delivery)) || seed.state.packages[0];
+  p.status = "Delivered";
+  const dead = "https://example.invalid/storage/v1/object/sign/condition-photos/default/" + p.id + "/pickup.webp?token=expired";
+  // A 1x1 gif: it loads instantly and never fails, so the working case stays the working case.
+  const real = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+  p.photos = broken ? { pickup: dead, delivery: dead } : { pickup: real, delivery: real };
+  return seed;
+};
+const openShipmentModal = () => {
+  const row = document.querySelector("#overview-table tr[data-id]");
+  if (!row) return false;
+  row.click();
+  return true;
+};
+
 const SCENARIOS = [
+  { label: "ops/shipment-modal", seed: withPhotos(false), view: "overview", act: openShipmentModal },
+  { label: "ops/shipment-modal/photos-broken", seed: withPhotos(true), view: "overview", act: openShipmentModal },
   ...OPS_VIEWS.map((v) => ({ label: "ops/" + v, seed: opsSeed(), view: v, mobile: false })),
   ...CUST_VIEWS.map((v) => ({ label: "cust/" + v, seed: customerSeed(), view: v, mobile: true })),
   ...["home", "driver", "tracking"].map((v) => ({ label: "driver-phone/" + v, seed: roleSeed("Driver"), view: v, mobile: true })),
@@ -89,6 +112,18 @@ function audit() {
 
   document.querySelectorAll("img").forEach((el) => {
     if (!el.hasAttribute("alt")) add("img-no-alt", el, "src=" + (el.getAttribute("src") || "").slice(-40));
+  });
+
+  // An element standing in for an image -- role="img" -- needs a name for the same reason an
+  // <img> needs alt: without one a screen reader announces "image" and stops. The placeholder
+  // shown when a condition photo cannot load is one of these.
+  document.querySelectorAll("[role='img']").forEach((el) => {
+    if (!visible(el)) return;
+    // title deliberately does not count. It is not announced by every screen reader, never
+    // appears on a touch device, and is the one naming route a sighted mouse user can see while
+    // everybody else gets nothing -- so for an element standing in for an image it is not a name.
+    const named = (el.getAttribute("aria-label") || "").trim() || el.getAttribute("aria-labelledby");
+    if (!named) add("role-img-unnamed", el, "role=img with no aria-label or aria-labelledby");
   });
 
   // Heading order, over visible headings only.
@@ -173,6 +208,12 @@ function audit() {
     // ::before on a wrapper, say -- is exactly the occlusion worth catching, and that
     // guard would hide every instance of it.
     if (hit === el || el.contains(hit)) return;
+    // A modal covering the page is the modal working. Everything behind an open backdrop is
+    // meant to be inert -- the focus trap is checked separately, and flagging the whole header
+    // and sidebar on every modal scenario would drown the findings that matter. Only controls
+    // INSIDE the dialog are still worth hit-testing.
+    const backdrop = document.querySelector(".modal-backdrop.open, [role='dialog'][aria-modal='true']");
+    if (backdrop && !backdrop.contains(el)) return;
     add("obscured-control", el, "covered by " + sel(hit) + ' ("' + (el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 24) + '")');
   });
 
@@ -251,6 +292,14 @@ for (const sc of SCENARIOS) {
     }, sc.view);
     if (!opened) { console.error("  " + sc.label + ": no nav control, skipped"); skipped++; continue; }
     await new Promise((r) => setTimeout(r, 500));
+    // Some things only exist after an interaction -- a modal, a photo, a side panel. Without
+    // this the audit could only ever see a view as it opens, which is how four unlabelled
+    // condition photos stayed invisible to img-no-alt.
+    if (sc.act) {
+      const acted = await page.evaluate(sc.act);
+      if (acted === false) { console.error("  " + sc.label + ": act step found nothing, skipped"); skipped++; continue; }
+      await new Promise((r) => setTimeout(r, 450));
+    }
   }
 
   for (const f of await page.evaluate(audit)) {

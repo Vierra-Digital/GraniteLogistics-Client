@@ -60,6 +60,10 @@
   .tk-grid span{font-size:.96rem}
   .tk-grid .mono{font-family:"Consolas",monospace}
   .tk-photos{display:flex;gap:12px;margin-top:16px}
+  .photo-missing{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+    width:100%;aspect-ratio:4/3;border-radius:10px;border:1px dashed #cbd5e1;background:#f8fafc;
+    color:#64748b;font-size:.75rem;text-align:center;padding:8px;box-sizing:border-box}
+  .photo-missing span[aria-hidden]{font-size:1.2rem;line-height:1;opacity:.7}
   .tk-photos img{width:120px;height:120px;object-fit:cover;border-radius:8px;border:1px solid #e3e8ee}
   .tk-exc{margin-top:14px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:11px 14px;font-weight:600;font-size:.92rem}
   @media(max-width:560px){.tk-grid{grid-template-columns:1fr}.tk-step .tk-lbl{display:none}}
@@ -105,6 +109,25 @@
 
 <script>
 (function () {
+  // A condition photo is a signed URL that expires, and cannot load offline. Left alone it
+  // renders as a torn-page icon in an empty box, which reads as "no photo was taken". An image
+  // error does not bubble but can be caught in the capture phase, which also covers images
+  // inserted later. Duplicated from app.js on purpose: this page deliberately loads no shared
+  // script, so that it stays useful when the app itself is broken.
+  window.addEventListener("error", function (e) {
+    var el = e.target;
+    if (!el || el.tagName !== "IMG" || !el.classList || !el.classList.contains("cond-photo")) return;
+    if (el.dataset.glReplaced) return;
+    el.dataset.glReplaced = "1";
+    var note = document.createElement("div");
+    note.className = "photo-missing";
+    note.setAttribute("role", "img");
+    var text = navigator.onLine === false ? "Photo needs a connection" : "Photo didn't load";
+    note.setAttribute("aria-label", (el.getAttribute("alt") || "Condition photo") + ": " + text);
+    note.innerHTML = '<span aria-hidden="true">⛶</span><span class="pm-t">' + text + '</span>';
+    el.replaceWith(note);
+  }, true);
+
   var STORE = "granite-logistics-state-v1";
   var STEPS = ["Order Received", "Processing", "In Transit", "Out for Delivery", "Delivered"];
   var STATUS_STEP = { Won: 0, Intake: 1, PickedUp: 1, Staged: 1, InTransit: 2, OutforDelivery: 3, Delivered: 4 };
@@ -149,8 +172,9 @@
       return '<div class="tk-step ' + (i < step ? "done" : i === step ? "cur" : "") + '"><span class="tk-dot"></span><span class="tk-lbl">' + s + '</span></div>';
     }).join("");
     var photos = (p.photos && (p.photos.pickup || p.photos.delivery))
-      ? '<div class="tk-photos">' + (p.photos.pickup ? '<img src="' + p.photos.pickup + '" alt="condition photo">' : "") +
-        (p.photos.delivery ? '<img src="' + p.photos.delivery + '" alt="delivery photo">' : "") + "</div>"
+      ? '<div class="tk-photos">' +
+        (p.photos.pickup ? '<img class="cond-photo" src="' + p.photos.pickup + '" alt="Condition photo taken at pickup">' : "") +
+        (p.photos.delivery ? '<img class="cond-photo" src="' + p.photos.delivery + '" alt="Photo taken at delivery">' : "") + "</div>"
       : "";
     // The public API withholds contents and recipient details, so only render the rows
     // we actually have. The local fallback carries the full object and shows more.
