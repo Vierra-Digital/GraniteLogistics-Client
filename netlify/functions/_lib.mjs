@@ -2,6 +2,7 @@
 // Storage = Netlify Blobs (built-in, free, no external DB or env vars).
 import { getStore } from "@netlify/blobs";
 import crypto from "node:crypto";
+import { supabaseConfigured, sbReadState, sbWriteState, sbAppendOrder } from "./_supabase.mjs";
 
 export const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -43,14 +44,25 @@ export function tenantOf(req) { return resolveKey(req).tenant; }
 
 export const EMPTY = { packages: [], manifests: [], loadUnits: [], events: [], settings: {} };
 
-// One JSON blob per tenant in the "granite-workspaces" Blobs store.
-// Strong consistency so a push on one device is immediately readable on another.
+// Storage is one of two providers, chosen by whether Supabase credentials are present:
+//
+//   Supabase (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY set) -- a row per parcel.
+//   Netlify Blobs (otherwise)                               -- one JSON blob per tenant.
+//
+// Every function that touches a workspace goes through readState/writeState, so this pair is
+// the entire seam. Blobs stays the default so an existing deployment is unaffected until the
+// credentials are added, and stays working afterwards as the way back.
 function store() { return getStore({ name: "granite-workspaces", consistency: "strong" }); }
+
+export function storageProvider() { return supabaseConfigured() ? "supabase" : "blobs"; }
+
 export async function readState(tenant) {
+  if (supabaseConfigured()) return { ...EMPTY, ...(await sbReadState(tenant)) };
   const data = await store().get(tenant, { type: "json" });
   return data || { ...EMPTY };
 }
 export async function writeState(tenant, data) {
+  if (supabaseConfigured()) return sbWriteState(tenant, data);
   await store().setJSON(tenant, { ...data, updatedAt: new Date().toISOString() });
 }
 
@@ -174,6 +186,10 @@ export function renumberOrder(order, id) {
 // `build(state)` must return a fresh order numbered from the state it is given.
 // Returns { order, state, attempts, repaired, unverified }.
 export async function appendOrderWithRepair(tenant, build, attempts = 4) {
+  // On Supabase none of the below is needed: uid is the primary key and (tenant, id) is
+  // unique, so the two failures this function repairs after the fact are refused outright.
+  if (supabaseConfigured()) return sbAppendOrder(tenant, build, attempts + 1);
+
   let order = null;
   let repaired = 0;
 

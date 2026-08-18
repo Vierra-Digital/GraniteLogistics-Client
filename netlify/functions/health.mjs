@@ -8,7 +8,7 @@
 //
 // It reports booleans and counts only, never a value: this route is public, so it must
 // say whether a secret is configured without disclosing it or who holds it.
-import { json, tenants } from "./_lib.mjs";
+import { json, tenants, storageProvider } from "./_lib.mjs";
 import { adminEmails, roleMap, readGrants, grantedRole, OPS_ROLES } from "./_auth.mjs";
 import { emailConfigured } from "./_email.mjs";
 import { pushConfigured } from "./_push.mjs";
@@ -25,6 +25,8 @@ const KNOWN_VARS = [
   "GL_AUTH_SECRET", "GL_ADMIN_EMAILS", "GL_ROLES", "GL_TENANTS",
   "GL_BREVO_KEY", "GL_MAIL_FROM", "GL_VAPID_PUBLIC", "GL_VAPID_PRIVATE",
   "GL_UPS_CLIENT_ID", "GL_UPS_CLIENT_SECRET", "GL_FEDEX_CLIENT_ID", "GL_FEDEX_CLIENT_SECRET",
+  // Storage. Both set switches workspaces from Netlify Blobs to Supabase; neither is required.
+  "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY",
 ];
 
 // Read only outside the deployment -- GL_WEBHOOK_SECRET by server/server.js, GL_CHROME by the
@@ -37,7 +39,7 @@ const LOCAL_ONLY_VARS = ["GL_WEBHOOK_SECRET", "GL_CHROME"];
 function envDiagnostic() {
   const present = KNOWN_VARS.concat(LOCAL_ONLY_VARS).filter((k) => !!process.env[k]);
   const unrecognised = Object.keys(process.env)
-    .filter((k) => /^GL_/.test(k) && KNOWN_VARS.indexOf(k) < 0 && LOCAL_ONLY_VARS.indexOf(k) < 0)
+    .filter((k) => /^(GL_|SUPABASE_)/.test(k) && KNOWN_VARS.indexOf(k) < 0 && LOCAL_ONLY_VARS.indexOf(k) < 0)
     .sort();
   return {
     present,
@@ -45,8 +47,8 @@ function envDiagnostic() {
     // Anything here is set on the deployment but read by nothing: almost always a typo.
     unrecognised,
     hint: unrecognised.length
-      ? "These GL_ variables are set but this app reads none of them. Check the spelling against `present` and `missing`."
-      : "No unrecognised GL_ variables. A variable in `missing` is genuinely not visible to the deployed functions: confirm it is set for the Production context and that a deploy has happened since.",
+      ? "These variables are set but this app reads none of them. Check the spelling against `present` and `missing`."
+      : "No unrecognised GL_ / SUPABASE_ variables. A variable in `missing` is genuinely not visible to the deployed functions: confirm it is set for the Production context and that a deploy has happened since.",
   };
 }
 
@@ -80,6 +82,15 @@ async function readiness() {
       const live = configuredCarriers();
       return { ok: live.length > 0, detail: live.length ? live.join(", ") + " configured" : "no carrier credentials; tracking numbers and scans are generated locally" };
     })(),
+    // Which store a workspace lives in. Not a pass/fail -- both providers work -- but it is
+    // the one thing you cannot tell from outside during a migration, and getting it wrong
+    // means writing orders into a store nobody is reading.
+    workspaceStorage: (() => {
+      const p = storageProvider();
+      return { ok: true, detail: p === "supabase"
+        ? "Supabase (a row per parcel); condition photos in Storage behind expiring signed URLs"
+        : "Netlify Blobs (one JSON record per workspace); set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to switch" };
+    })(),
     // Optional: only needed for machine callers that read a workspace.
     machineApiKeys: { ok: true, detail: tenants() ? "GL_TENANTS configured; the public demo keys are disabled" : "using the public demo keys, which are valid for /api/orders ingest only" },
   };
@@ -94,7 +105,7 @@ export default async () =>
     ok: true,
     service: "granite-logistics",
     runtime: "netlify-functions",
-    storage: "netlify-blobs",
+    storage: storageProvider(),
     time: new Date().toISOString(),
     readiness: await readiness(),
     env: envDiagnostic(),

@@ -113,6 +113,10 @@ $$;
 -- today two of them per parcel puts a hard ceiling near 23 parcels on a device.
 -- ---------------------------------------------------------------------------
 create table if not exists public.packages (
+  -- This IS the order uid the client and appendOrderWithRepair already generate, not a
+  -- second identity. Making it the primary key is what retires the repair loop: two racing
+  -- inserts can no longer produce one row, and unique (tenant, id) below means they can no
+  -- longer share a GL-#### either. The default only covers rows created outside that path.
   uid             uuid primary key default gen_random_uuid(),
   tenant          text not null references public.tenants (slug),
   id              text not null,
@@ -129,6 +133,9 @@ create table if not exists public.packages (
   customer_email  text,                                   -- the join to a signed-in customer
   photo_pickup    text,                                   -- storage path, not a data URL
   photo_delivery  text,
+  load_unit       text,                                   -- which load unit holds it
+  sort_zone       text,                                   -- ZIP zone it was sorted into
+  presort_lane    text,
   promised_at     timestamptz,
   exception       jsonb,
   return_state    jsonb,
@@ -141,32 +148,70 @@ create index if not exists packages_tenant_status_idx on public.packages (tenant
 create index if not exists packages_customer_idx on public.packages (lower(customer_email));
 create index if not exists packages_tracking_idx on public.packages (tracking);
 
+-- The unique constraint is what makes a workspace push idempotent. An ops client pushes its
+-- whole local state, so the same custody entry arrives on every sync; without this, each push
+-- would append a duplicate copy of every stage the parcel has ever been through.
 create table if not exists public.package_events (
   id          bigserial primary key,
   package_uid uuid not null references public.packages (uid) on delete cascade,
   stage       text not null,
   note        text,
-  at          timestamptz not null default now()
+  at          timestamptz not null default now(),
+  unique (package_uid, stage, at)
 );
 create index if not exists package_events_pkg_idx on public.package_events (package_uid, at desc);
 
+-- packageIds is deliberately NOT stored: membership is packages.batch_id, so the two cannot
+-- disagree. The client rebuilds the array on read, exactly as it already does from local state.
 create table if not exists public.manifests (
   id          text not null,
   tenant      text not null references public.tenants (slug),
   carrier     text,
   lane        text,
+  transmitted boolean not null default false,
   created_at  timestamptz not null default now(),
   primary key (tenant, id)
 );
 
+-- Was zip_prefix/city/state, which the app never writes. It writes a ZIP sort zone, a
+-- pre-sort lane and a weight; parcel membership is packages.load_unit, same argument as
+-- manifests above.
 create table if not exists public.load_units (
   id          text not null,
   tenant      text not null references public.tenants (slug),
-  zip_prefix  text,
-  city        text,
-  state       text,
+  zone        text,
+  lane        text,
+  weight_lb   integer,
   created_at  timestamptz not null default now(),
   primary key (tenant, id)
+);
+
+-- The Activity Log. Distinct from package_events: those are custody stages on one parcel,
+-- these are workspace-level entries (an exception raised, a return requested) that the
+-- Activity view lists across parcels. Neither had a table before, so a pull returned an
+-- empty log and the client's own entries were dropped on the next push.
+create table if not exists public.activity_events (
+  id          bigserial primary key,
+  tenant      text not null references public.tenants (slug),
+  package_id  text,
+  kind        text,
+  who         text,
+  note        text,
+  at          timestamptz not null default now(),
+  unique (tenant, package_id, kind, at)
+);
+create index if not exists activity_tenant_idx on public.activity_events (tenant, at desc);
+
+-- Company name, default carrier and lane. Per workspace, one row.
+--
+-- The client's settings object also carries `cloud` (the sync URL and api key) and the
+-- per-device theme and role. Those are deliberately not stored: an api key has no business
+-- in the workspace record, and a theme is a property of a device, not of a business. The
+-- client already never applies settings from a server pull, so dropping them changes nothing.
+create table if not exists public.workspace_settings (
+  tenant      text primary key references public.tenants (slug),
+  settings    jsonb not null default '{}'::jsonb,
+  updated_at  timestamptz not null default now()
 );
 
 -- ---------------------------------------------------------------------------
@@ -216,6 +261,8 @@ alter table public.load_units        enable row level security;
 alter table public.profiles          enable row level security;
 alter table public.role_grants       enable row level security;
 alter table public.role_audit        enable row level security;
+alter table public.activity_events    enable row level security;
+alter table public.workspace_settings enable row level security;
 alter table public.push_subscriptions enable row level security;
 alter table public.bootstrap_admins  enable row level security;   -- no policies: service role only
 alter table public.auth_throttle     enable row level security;   -- no policies: service role only
@@ -246,6 +293,8 @@ create policy "events follow their package" on public.package_events
            or lower(p.customer_email) = lower(coalesce(auth.jwt() ->> 'email','')))
   ));
 
+create policy "activity ops read"   on public.activity_events for select using (tenant = public.my_tenant() and public.my_role() <> 'Customer');
+create policy "settings tenant read" on public.workspace_settings for select using (tenant = public.my_tenant());
 create policy "manifests ops read"  on public.manifests  for select using (tenant = public.my_tenant() and public.my_role() <> 'Customer');
 create policy "loadunits ops read"  on public.load_units for select using (tenant = public.my_tenant() and public.my_role() <> 'Customer');
 create policy "grants admin only"   on public.role_grants for all using (public.my_role() = 'Admin') with check (public.my_role() = 'Admin');

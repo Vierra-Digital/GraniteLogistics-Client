@@ -90,14 +90,15 @@ export function transform(ws, outRoot, tenant = TENANT) {
 
     sql.push(
       "insert into public.packages (tenant, id, status, source, order_ref, barcode, carrier, lane, " +
-      "batch_id, tracking, item, customer, customer_email, photo_pickup, photo_delivery, promised_at, " +
-      "exception, return_state, created_at) values (" +
+      "batch_id, tracking, item, customer, customer_email, photo_pickup, photo_delivery, " +
+      "load_unit, sort_zone, presort_lane, promised_at, exception, return_state, created_at) values (" +
       [
         lit(tenant), lit(p.id), lit(p.status), lit(p.source), lit(p.orderRef), lit(p.barcode),
         lit(p.carrier), lit(p.lane), lit(p.batchId), lit(p.tracking),
         jsonLit(p.item), jsonLit(cust), lit(p.customerEmail),
         pickup ? lit(pickup.path) : "null",
         delivery ? lit(delivery.path) : "null",
+        lit(p.loadUnit), lit(p.sortZone), lit(p.presortLane),
         tsLit(p.promisedTs), p.exception ? jsonLit(p.exception) : "null",
         p.return ? jsonLit(p.return) : "null",
         // The first history entry is the closest thing to a creation time.
@@ -119,19 +120,41 @@ export function transform(ws, outRoot, tenant = TENANT) {
   for (const m of manifests) {
     if (!m || !m.id) continue;
     sql.push(
-      "insert into public.manifests (tenant, id, carrier, lane, created_at) values (" +
-      [lit(tenant), lit(m.id), lit(m.carrier), lit(m.lane), tsLit(m.ts)].join(", ") +
+      "insert into public.manifests (tenant, id, carrier, lane, transmitted, created_at) values (" +
+      [lit(tenant), lit(m.id), lit(m.carrier), lit(m.lane), m.transmitted ? "true" : "false", tsLit(m.ts)].join(", ") +
       ") on conflict (tenant, id) do nothing;"
     );
   }
   for (const l of loadUnits) {
     if (!l || !l.id) continue;
     sql.push(
-      "insert into public.load_units (tenant, id, zip_prefix, city, state, created_at) values (" +
-      [lit(tenant), lit(l.id), lit(l.zip || l.zipPrefix), lit(l.city), lit(l.state), tsLit(l.ts)].join(", ") +
+      "insert into public.load_units (tenant, id, zone, lane, weight_lb, created_at) values (" +
+      [lit(tenant), lit(l.id), lit(l.zone), lit(l.lane),
+       Number.isFinite(l.weightLb) ? String(l.weightLb) : "null", tsLit(l.ts)].join(", ") +
       ") on conflict (tenant, id) do nothing;"
     );
   }
+
+  // The Activity Log, and the settings worth keeping. `cloud` carries an api key and theme
+  // and role are per-device, so they are dropped rather than migrated -- same rule the live
+  // data layer applies in settingsForStorage.
+  let activity = 0;
+  for (const e of (Array.isArray(ws.events) ? ws.events : [])) {
+    if (!e || !e.ts) continue;
+    activity++;
+    sql.push(
+      "insert into public.activity_events (tenant, package_id, kind, who, note, at) values (" +
+      [lit(tenant), lit(e.pkgId), lit(e.kind), lit(e.who), lit(e.note), tsLit(e.ts)].join(", ") +
+      ") on conflict do nothing;"
+    );
+  }
+  const settings = { ...(ws.settings || {}) };
+  for (const k of ["cloud", "theme", "role", "roleChosen"]) delete settings[k];
+  sql.push(
+    "insert into public.workspace_settings (tenant, settings) values (" +
+    [lit(tenant), jsonLit(settings)].join(", ") +
+    ") on conflict (tenant) do update set settings = excluded.settings;"
+  );
 
   sql.push("commit;");
 
@@ -140,7 +163,7 @@ export function transform(ws, outRoot, tenant = TENANT) {
     accounts: [...accounts.values()],
     counts: {
       packages: packages.length, events, manifests: manifests.length,
-      loadUnits: loadUnits.length, photos: photos.length,
+      loadUnits: loadUnits.length, photos: photos.length, activity,
       photoBytes: photos.reduce((a, p) => a + p.bytes, 0),
       // The number that motivates the whole exercise.
       recordChars: JSON.stringify(ws).length,

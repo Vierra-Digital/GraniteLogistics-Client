@@ -1625,3 +1625,34 @@ test("a password-reset token cannot be used to reach the ops workspace", async (
   const res = await stateFn(stateReq({ token: resetish }));
   assert.equal(res.status, 401);
 });
+
+// A migration's worst failure is invisible: orders written into a store nobody reads. The
+// only way to tell which store a live deployment is using is to ask it.
+test("health names the workspace store it is actually using", async () => {
+  const saved = { url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY };
+  const restore = () => {
+    if (saved.url === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = saved.url;
+    if (saved.key === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY = saved.key;
+  };
+  try {
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    let j = await body(await healthFn(new Request("https://x/api/health")));
+    assert.equal(j.storage, "blobs");
+    assert.match(j.readiness.checks.workspaceStorage.detail, /Netlify Blobs/);
+
+    // One credential is not a switch: a half-configured deployment must keep reading the
+    // store its data is actually in rather than an empty Supabase project.
+    process.env.SUPABASE_URL = "https://project.supabase.co";
+    j = await body(await healthFn(new Request("https://x/api/health")));
+    assert.equal(j.storage, "blobs");
+
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-key";
+    j = await body(await healthFn(new Request("https://x/api/health")));
+    assert.equal(j.storage, "supabase");
+    assert.match(j.readiness.checks.workspaceStorage.detail, /row per parcel/);
+    // Names only. The value must never appear in a public response.
+    assert.ok(!JSON.stringify(j).includes("service-key"), "health leaked a credential value");
+    assert.ok(j.env.present.includes("SUPABASE_SERVICE_ROLE_KEY"));
+  } finally { restore(); }
+});
