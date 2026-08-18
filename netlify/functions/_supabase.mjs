@@ -96,6 +96,31 @@ export function storagePathOf(signedUrl) {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
+// A caller holds whatever a read gave it: a signed URL. To delete the object it needs the path
+// back, and a path may also arrive directly (from a row, or from the migration transform).
+export function photoPathOf(value) {
+  if (typeof value !== "string" || !value) return null;
+  if (value.startsWith("data:")) return null;             // never stored
+  if (value.startsWith("http")) return storagePathOf(value);
+  return value;
+}
+
+// Storage has no garbage collection. Clearing photo_pickup leaves the bytes in the bucket, so
+// anything that promises a photo is gone has to remove the object as well as the reference.
+export async function deletePhotoObjects(paths) {
+  const wanted = [...new Set(paths.map(photoPathOf).filter(Boolean))];
+  if (!wanted.length) return { ok: true, removed: 0 };
+  const e = env();
+  const res = await fetch(e.url + "/storage/v1/object/" + PHOTO_BUCKET, {
+    method: "DELETE",
+    headers: { apikey: e.key, Authorization: "Bearer " + e.key, "Content-Type": "application/json" },
+    body: JSON.stringify({ prefixes: wanted }),
+  });
+  // Reported rather than thrown: a failed cleanup must not block closing an account, but it
+  // must not be mistaken for success either.
+  return { ok: res.ok, removed: res.ok ? wanted.length : 0, attempted: wanted.length };
+}
+
 // Signed in one batch rather than one request per photo: a 40-parcel workspace would
 // otherwise cost 80 round trips on every read.
 async function signPhotoPaths(paths) {

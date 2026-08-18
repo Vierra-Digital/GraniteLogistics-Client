@@ -176,6 +176,24 @@ create index if not exists packages_tenant_status_idx on public.packages (tenant
 create index if not exists packages_customer_idx on public.packages (lower(customer_email));
 create index if not exists packages_tracking_idx on public.packages (tracking);
 
+-- packages.updated_at defaulted to now() on insert and was never touched again, so a column
+-- documented as "when this row last changed" always reported when it was created. Two honest
+-- options: delete it, or make it true. It is worth keeping -- it is the first thing anybody
+-- asks when a sync looks wrong -- so a trigger maintains it rather than trusting every writer
+-- to remember, which the writer here did not.
+create or replace function public.touch_updated_at() returns trigger
+language plpgsql as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+drop trigger if exists packages_touch_updated_at on public.packages;
+create trigger packages_touch_updated_at
+  before update on public.packages
+  for each row execute function public.touch_updated_at();
+
 -- The unique constraint is what makes a workspace push idempotent. An ops client pushes its
 -- whole local state, so the same custody entry arrives on every sync; without this, each push
 -- would append a duplicate copy of every stage the parcel has ever been through.

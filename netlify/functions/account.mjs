@@ -21,7 +21,7 @@
 // push subscriptions, and rate-limit counters.
 import { getStore } from "@netlify/blobs";
 import { CORS, json, verifyToken, bearer, getUser, userStore, sessionSuperseded } from "./_auth.mjs";
-import { readState, writeState, soloTenant } from "./_lib.mjs";
+import { readState, writeState, soloTenant, forgetPhotos } from "./_lib.mjs";
 import { readSubscriptions } from "./_push.mjs";
 
 const HEADERS = { ...CORS, "Access-Control-Allow-Methods": "GET, DELETE, OPTIONS" };
@@ -95,6 +95,10 @@ export default async (req) => {
         });
       await writeState(soloTenant(), state);
 
+      // The bytes, not just the reference. Done after the write so a failure here cannot leave
+      // the record still pointing at a photo that has been deleted.
+      const photos = await forgetPhotos(mine.filter((p) => removeIds.has(p.id) || scrubIds.has(p.id)));
+
       // Everything that identifies the person rather than the parcel.
       await userStore().delete(who.email);
       try { await getStore({ name: "granite-push", consistency: "strong" }).delete(who.email); } catch (e) {}
@@ -107,7 +111,12 @@ export default async (req) => {
         closed: who.email,
         ordersRemoved: removeIds.size,
         ordersAnonymised: scrubIds.size,
-        note: "Your account and sign-in details are gone. Delivered shipments are kept as operational records with your name, address and photos removed.",
+        photosDeleted: photos.removed,
+        // Said only when it is true. A cleanup that failed leaves the reference gone and the
+        // object behind, which is exactly the case somebody would otherwise never find out about.
+        note: photos.ok
+          ? "Your account and sign-in details are gone. Delivered shipments are kept as operational records with your name, address and photos removed."
+          : "Your account and sign-in details are gone, and your details have been removed from delivered shipments. Some condition photos could not be deleted from storage; we have been notified and will remove them.",
       });
     }
 

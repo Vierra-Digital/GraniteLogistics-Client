@@ -98,6 +98,7 @@ function makeSupabase() {
   const violations = [];             // columns written that the schema does not declare
   let seq = 0;
   let failUploads = false;
+  let failDeletes = false;
   let conflictOnce = null;           // an id to reject once, to exercise the 409 path
 
   // Primary keys, per the schema. PostgREST resolves a conflict against the target named by
@@ -164,7 +165,26 @@ function makeSupabase() {
     // ---- Storage ----
     if (u.pathname.startsWith("/storage/v1/object/sign/")) {
       const paths = (body && body.paths) || [];
-      return ok(paths.map((p) => ({ path: p, signedURL: "/object/sign/condition-photos/" + p + "?token=t" + (++seq) })));
+      // A path with no object cannot be signed, which is how the real service answers and what
+      // makes "a deleted photo cannot be signed again" a meaningful check.
+      return ok(paths.map((p) => (bucket.has(p)
+        ? { path: p, signedURL: "/object/sign/condition-photos/" + p + "?token=t" + (++seq) }
+        : { path: p, error: "Object not found", signedURL: null })));
+    }
+    // Deletion takes a body of prefixes rather than a path in the URL. Modelled properly
+    // because it actually has to empty the bucket: a fake that returns 200 and keeps the bytes
+    // would report a privacy promise as kept while leaving the file exactly where it was.
+    if (method === "DELETE" && u.pathname === "/storage/v1/object/condition-photos") {
+      if (failDeletes) return new Response("storage unavailable", { status: 503 });
+      const prefixes = (body && body.prefixes) || [];
+      let removed = 0;
+      for (const key of [...bucket.keys()]) {
+        if (prefixes.some((p) => key === p || key.startsWith(p.replace(/\/?$/, "/")))) {
+          bucket.delete(key);
+          removed++;
+        }
+      }
+      return ok(prefixes.map((p) => ({ name: p })), removed || prefixes.length ? 200 : 200);
     }
     if (u.pathname.startsWith("/storage/v1/object/")) {
       if (failUploads) return new Response("nope", { status: 500 });
@@ -270,6 +290,7 @@ function makeSupabase() {
   return {
     rows, bucket, violations, fetchImpl,
     set failUploads(v) { failUploads = v; },
+    set failDeletes(v) { failDeletes = v; },
     set conflictOnce(v) { conflictOnce = v; },
   };
 }
@@ -623,10 +644,22 @@ test("the schema is safe to run twice", () => {
   }
 });
 
-test("dollar-quoted function bodies are balanced", () => {
-  // A lost $$ turns the rest of the file into one string literal and the error surfaces
-  // hundreds of lines later. It has already happened once here, to a JS replacement.
-  assert.equal((SQL.match(/\$\$/g) || []).length % 2, 0, "unbalanced $$ quoting");
+test("dollar-quoted function bodies are intact", () => {
+  // A lost $$ turns the rest of the file into one string literal, and Postgres reports it
+  // hundreds of lines away from the cause. It has happened three times in this project, every
+  // time to a JS string replacement, where $$ means an escaped $.
+  //
+  // Counting pairs for evenness is not enough and this test used to do exactly that: when a
+  // replacement eats BOTH dollars of a pair the count drops by two and stays even. That is the
+  // real failure mode -- `as $$ ... $$;` becoming `as $ ... $;` -- so check the shapes.
+  // Shapes, not counts. Counting where each body opens and closes is fragile -- one helper
+  // here opens and closes on a single line -- but a lone $ where a $$ belongs is unambiguous.
+  assert.ok(!/\bas \$(?!\$)/.test(SQL), "a function body opens with a single $ instead of $$");
+  assert.ok(!/(?<!\$)\$;/.test(SQL), "a function body closes with a single $ instead of $$");
+  assert.ok(!/\bdo \$(?!\$)/.test(SQL), "a DO block opens with a single $ instead of $$");
+  const opens = (SQL.match(/\$\$/g) || []).length;
+  assert.ok(opens >= 8, "dollar quoting was not found, so this proves nothing: " + opens);
+  assert.equal(opens % 2, 0, "unbalanced $$ quoting");
 });
 
 test("no unique constraint silently relies on NULLs comparing equal", () => {
@@ -792,4 +825,171 @@ test("custody history comes back oldest first, whatever order the rows arrive in
     assert.deepEqual(p.history.map((h) => h.ts), [...p.history.map((h) => h.ts)].sort((a, b) => a - b));
     assert.equal(p.history[0].note, "Order placed.", "the first entry is the oldest one");
   });
+});
+
+test("forgetting a parcel's photos removes the bytes, not just the reference", async () => {
+  // The migration turned a deletion into a dangling reference. Clearing photo_pickup used to BE
+  // the deletion, because the image was the data URL in the record; with Storage it only drops
+  // the pointer and the file stays in the bucket at a predictable path. account.mjs promises the
+  // photos are removed when somebody closes their account, so the objects have to go too.
+  await withSupabase(async (sb, fake) => {
+    const lib = await import("../netlify/functions/_lib.mjs");
+    const PNG = "data:image/png;base64," + Buffer.from("bytes").toString("base64");
+    await sb.sbWriteState("default", {
+      ...workspace(),
+      packages: [{ id: "GL-8001", status: "Delivered", item: {}, customer: {}, history: [],
+                   customerEmail: "closing@example.com", photos: { pickup: PNG, delivery: PNG } }],
+    });
+    assert.equal(fake.bucket.size, 2, "two objects should have been uploaded");
+
+    const pulled = await sb.sbReadState("default");
+    const parcel = pulled.packages[0];
+
+    // Clearing the columns alone leaves the bucket untouched -- the bug this covers.
+    await sb.sbWriteState("default", { ...pulled, packages: [{ ...parcel, photos: {} }] });
+    assert.equal(fake.bucket.size, 2, "clearing the reference should not have removed the bytes");
+
+    const r = await lib.forgetPhotos([parcel]);
+    assert.equal(r.provider, "supabase");
+    assert.equal(r.removed, 2, "reported: " + JSON.stringify(r));
+    assert.equal(fake.bucket.size, 0, "the objects are still in the bucket");
+  });
+});
+
+test("a signed URL round-trips to the path it was minted for", async () => {
+  const { photoPathOf, storagePathOf } = await import("../netlify/functions/_supabase.mjs");
+  // What a caller actually holds after a read is a signed URL, so deletion has to work from one.
+  const url = "https://p.supabase.co/storage/v1/object/sign/condition-photos/default/GL-1/pickup.webp?token=abc";
+  assert.equal(storagePathOf(url), "default/GL-1/pickup.webp");
+  assert.equal(photoPathOf(url), "default/GL-1/pickup.webp");
+  // A bare path passes through; a data URL was never stored and must not be mistaken for one.
+  assert.equal(photoPathOf("default/GL-1/pickup.webp"), "default/GL-1/pickup.webp");
+  assert.equal(photoPathOf("data:image/png;base64,AAAA"), null);
+  assert.equal(photoPathOf(""), null);
+  assert.equal(photoPathOf(undefined), null);
+  // A URL for some other bucket is not ours to delete.
+  assert.equal(photoPathOf("https://p.supabase.co/storage/v1/object/sign/other-bucket/x.webp?token=abc"), null);
+});
+
+test("forgetting photos on Netlify Blobs is a no-op, not an error", async () => {
+  const saved = { url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY };
+  delete process.env.SUPABASE_URL;
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  try {
+    const lib = await import("../netlify/functions/_lib.mjs");
+    const r = await lib.forgetPhotos([{ photos: { pickup: "data:image/png;base64,AAAA" } }]);
+    assert.equal(r.provider, "blobs");
+    assert.equal(r.ok, true);
+    assert.equal(r.removed, 0);
+  } finally {
+    if (saved.url !== undefined) process.env.SUPABASE_URL = saved.url;
+    if (saved.key !== undefined) process.env.SUPABASE_SERVICE_ROLE_KEY = saved.key;
+  }
+});
+
+test("a cleanup that fails is reported as failed, not as done", async () => {
+  // The response text differs on this: one version tells the customer their photos are removed.
+  // Saying that when the objects are still there is the kind of quiet inaccuracy nobody finds.
+  await withSupabase(async (sb, fake) => {
+    const lib = await import("../netlify/functions/_lib.mjs");
+    const PNG = "data:image/png;base64," + Buffer.from("bytes").toString("base64");
+    await sb.sbWriteState("default", {
+      ...workspace(),
+      packages: [{ id: "GL-8002", status: "Delivered", item: {}, customer: {}, history: [],
+                   photos: { pickup: PNG } }],
+    });
+    const parcel = (await sb.sbReadState("default")).packages[0];
+
+    fake.failDeletes = true;
+    const r = await lib.forgetPhotos([parcel]);
+    assert.equal(r.ok, false, "a 503 from storage was reported as success");
+    assert.equal(r.removed, 0);
+    assert.equal(r.attempted, 1, "it should say what it tried");
+    assert.equal(fake.bucket.size, 1, "the object is still there, which is the point");
+  });
+});
+
+// ---- account closure, in the shape production actually runs ----------------------------
+//
+// Auth on Netlify Blobs, workspaces on Supabase. Nothing else tests that combination, and it
+// is the only place the two providers have to cooperate: the closure reads the workspace from
+// Postgres, scrubs the recipient out of it, and then has to reach into Storage for the photos.
+test("closing an account deletes the condition photos from Storage", async () => {
+  const { mock } = await import("node:test");
+  const users = new Map();
+  const store = (name) => ({
+    async get(key, opts) {
+      const v = users.get(name + ":" + key);
+      return v === undefined ? null : (opts && opts.type === "json" ? JSON.parse(v) : v);
+    },
+    async setJSON(key, value) { users.set(name + ":" + key, JSON.stringify(value)); },
+    async set(key, value) { users.set(name + ":" + key, value); },
+    async delete(key) { users.delete(name + ":" + key); },
+    async list() { return { blobs: [], directories: [] }; },
+  });
+  mock.module("@netlify/blobs", { exports: { getStore: ({ name }) => store(name) } });
+
+  process.env.GL_AUTH_SECRET = "closure-test-secret";
+  const auth = await import("../netlify/functions/_auth.mjs");
+  const accountFn = (await import("../netlify/functions/account.mjs")).default;
+
+  await withSupabase(async (sb, fake) => {
+    const email = "closing@example.com";
+    await store("granite-users").setJSON(email, {
+      email, name: "Closing Customer", role: "Customer", salt: "s", hash: "h",
+      createdAt: new Date(1893400000000).toISOString(),
+    });
+
+    const PNG = "data:image/png;base64," + Buffer.from("doorway-photo").toString("base64");
+    await sb.sbWriteState("default", {
+      packages: [{
+        id: "GL-9001", status: "Delivered", item: { description: "Delivered parcel" },
+        customer: { name: "Closing Customer", address: "1 Doorway Ln", city: "Dayton", state: "OH", zip: "45402", phone: "937-555-0100" },
+        customerEmail: email,
+        photos: { pickup: PNG, delivery: PNG },
+        history: [{ stage: "Won", ts: 1893400000000 }, { stage: "Delivered", ts: 1893456000000 }],
+      }],
+      manifests: [], loadUnits: [], events: [], settings: {},
+    });
+    assert.equal(fake.bucket.size, 2, "two photos should be in the bucket to start");
+
+    const token = auth.sign({ email, name: "Closing Customer", role: "Customer", iat: Date.now(), exp: Date.now() + 60000 });
+    const res = await accountFn(new Request("https://x/api/account", {
+      method: "DELETE", headers: { authorization: "Bearer " + token },
+    }));
+    const j = await res.json();
+    assert.equal(res.status, 200, JSON.stringify(j));
+    assert.equal(j.ordersAnonymised, 1);
+    assert.equal(j.photosDeleted, 2, "the closure did not delete the photos: " + JSON.stringify(j));
+    assert.match(j.note, /photos removed/i);
+
+    // The bytes, not just the columns.
+    assert.equal(fake.bucket.size, 0, "the photos are still in the bucket after closing the account");
+    const after = await sb.sbReadState("default");
+    const parcel = after.packages[0];
+    assert.equal(parcel.customerEmail, undefined, "the parcel is still linked to the account");
+    assert.equal(parcel.customer.name, "(closed account)");
+    assert.equal(parcel.customer.address, "");
+    assert.equal(parcel.customer.city, "Dayton", "the lane should survive, it is not the person");
+    assert.deepEqual(parcel.photos, {}, "the photo references should be gone too");
+    // Asserted on the row, not only on the read: with the bytes deleted a dangling path yields
+    // no signed URL either way, so reading {} does not prove the column was cleared.
+    assert.equal(fake.rows.packages[0].photo_pickup, null, "the row still points at a deleted object");
+    assert.equal(fake.rows.packages[0].photo_delivery, null);
+    assert.equal(await store("granite-users").get(email), null, "the account should be deleted");
+  });
+});
+
+test("packages.updated_at is maintained by a trigger, not by hope", () => {
+  // The column defaulted to now() on insert and nothing ever touched it again, so a field
+  // documented as "when this row last changed" reported when it was created -- for every row,
+  // forever. A trigger rather than a line in rowFromPackage because the next writer will not
+  // know it has to remember.
+  assert.match(SQL, /create or replace function public\.touch_updated_at\(\) returns trigger/,
+    "no touch_updated_at function");
+  assert.match(SQL, /new\.updated_at := now\(\)/, "the trigger does not set updated_at");
+  assert.match(SQL, /drop trigger if exists packages_touch_updated_at on public\.packages;/,
+    "the trigger is not dropped first, so a re-run of the schema would fail");
+  assert.match(SQL, /create trigger packages_touch_updated_at\s+before update on public\.packages/,
+    "the trigger is not attached to packages before update");
 });

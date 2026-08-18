@@ -2,7 +2,8 @@
 // Storage = Netlify Blobs (built-in, free, no external DB or env vars).
 import { getStore } from "@netlify/blobs";
 import crypto from "node:crypto";
-import { supabaseConfigured, sbReadState, sbWriteState, sbAppendOrder, renumber } from "./_supabase.mjs";
+import { supabaseConfigured, sbReadState, sbWriteState, sbAppendOrder, renumber,
+         deletePhotoObjects } from "./_supabase.mjs";
 
 export const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -79,6 +80,21 @@ export async function readState(tenant) {
 export async function writeState(tenant, data) {
   if (supabaseConfigured()) return sbWriteState(tenant, data);
   await store().setJSON(tenant, { ...data, updatedAt: new Date().toISOString() });
+}
+
+// Forget the condition photos belonging to these parcels.
+//
+// On Blobs this is already done by whoever cleared the photos off the record, because the image
+// was the data URL in it. On Supabase the record only held a path, so the object in the bucket
+// outlives the reference unless something removes it -- and account closure promises otherwise.
+export async function forgetPhotos(packages) {
+  if (!supabaseConfigured()) return { provider: "blobs", removed: 0, attempted: 0, ok: true };
+  const values = [];
+  for (const p of packages || []) {
+    if (!p || !p.photos) continue;
+    values.push(p.photos.pickup, p.photos.delivery);
+  }
+  return { provider: "supabase", ...(await deletePhotoObjects(values)) };
 }
 
 // What a public tracking link is allowed to reveal.
