@@ -42,6 +42,21 @@ export function resolveKey(req) {
 }
 export function tenantOf(req) { return resolveKey(req).tenant; }
 
+// The tenant for requests that carry no api key: a customer order, a public tracking lookup,
+// an account deletion, a carrier scan. state.mjs resolves its tenant FROM the key, so these
+// four used to hardcode "default" and silently disagreed with it the moment GL_TENANTS named
+// anything else -- ops writing one workspace while customers wrote another.
+//
+// When GL_TENANTS defines exactly one tenant there is no ambiguity, so use it. A genuinely
+// multi-tenant deployment cannot be resolved from a request with no key, and falls back to
+// "default"; such a deployment has to keep a key mapped to "default" for these paths.
+export function soloTenant() {
+  const configured = tenants();
+  if (!configured) return "default";
+  const distinct = [...new Set(Object.values(configured))];
+  return distinct.length === 1 ? distinct[0] : "default";
+}
+
 export const EMPTY = { packages: [], manifests: [], loadUnits: [], events: [], settings: {} };
 
 // Storage is one of two providers, chosen by whether Supabase credentials are present:

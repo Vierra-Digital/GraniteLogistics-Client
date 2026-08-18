@@ -8,12 +8,11 @@
 //
 // With no carrier configured, POST reports exactly that and changes nothing, rather than
 // inventing scans. The whole point of this endpoint is to stop the app pretending.
-import { CORS, json, readState, writeState } from "./_lib.mjs";
+import { CORS, json, readState, writeState, soloTenant } from "./_lib.mjs";
 import { verifyToken, bearer, getUser, sessionSuperseded, effectiveRoleFor, WRITE_ROLES } from "./_auth.mjs";
 import { configuredCarriers, anyCarrierConfigured, fetchScans, applyScans, isForwardStep } from "./_carriers.mjs";
 import { notifyStatusChanges } from "./_notify.mjs";
 
-const TENANT = "default";
 const HEADERS = { ...CORS, "Access-Control-Allow-Methods": "GET, POST, OPTIONS" };
 
 // Only a parcel that is actually moving is worth asking a carrier about.
@@ -62,7 +61,7 @@ export default async (req) => {
   }
 
   try {
-    const state = await readState(TENANT);
+    const state = await readState(soloTenant());
     const before = (state.packages || []).map((p) => ({ ...p }));
     const targets = (state.packages || []).filter(inFlight);
 
@@ -90,11 +89,11 @@ export default async (req) => {
       }
     }
 
-    if (moved || failures.length < targets.length) await writeState(TENANT, state);
+    if (moved || failures.length < targets.length) await writeState(soloTenant(), state);
 
     // A carrier scan is a status change like any other, so it reaches the customer through
     // the same path an ops push does.
-    const notified = moved ? await notifyStatusChanges(TENANT, before, state.packages) : { sent: 0, pushed: 0 };
+    const notified = moved ? await notifyStatusChanges(soloTenant(), before, state.packages) : { sent: 0, pushed: 0 };
 
     return json({ ok: failures.length === 0, checked: targets.length, refreshed, moved, notified, failures });
   } catch (e) {

@@ -13,7 +13,7 @@
 // browser holding the anon key. The service key must never be sent to the client.
 import crypto from "node:crypto";
 
-export const PHOTO_BUCKET = "condition-photos";
+const PHOTO_BUCKET = "condition-photos";
 // Long enough for a driver to open a photo, short enough that a copied link is worthless by
 // the time it is shared. Minted server-side per request, including for public tracking.
 export const PHOTO_URL_TTL = 600;
@@ -98,7 +98,7 @@ export function storagePathOf(signedUrl) {
 
 // Signed in one batch rather than one request per photo: a 40-parcel workspace would
 // otherwise cost 80 round trips on every read.
-export async function signPhotoPaths(paths) {
+async function signPhotoPaths(paths) {
   const wanted = [...new Set(paths.filter(Boolean))];
   if (!wanted.length) return {};
   const e = env();
@@ -147,7 +147,7 @@ export function renumber(order, id) {
 
 // pendingSync and syncRejected are deliberately absent: they describe whether THIS device has
 // managed to reach the server, which is meaningless once stored on it.
-function rowFromPackage(tenant, p, photo) {
+function rowFromPackage(tenant, p, photo, syncToken) {
   return {
     uid: stableUid(tenant, p.id),
     tenant,
@@ -166,6 +166,7 @@ function rowFromPackage(tenant, p, photo) {
     customer_email: p.customerEmail || null,
     photo_pickup: photo.pickup || null,
     photo_delivery: photo.delivery || null,
+    sync_token: syncToken,
     load_unit: p.loadUnit || null,
     sort_zone: p.sortZone || null,
     presort_lane: p.presortLane || null,
@@ -195,11 +196,17 @@ function packageFromRow(r, events, signed) {
     item: r.item || {},
     customer: r.customer || {},
     photos,
-    history: (events[r.uid] || []).map((e) => {
-      const h = { stage: e.stage, ts: tsIn(e.at) };
-      if (e.note) h.note = e.note;
-      return h;
-    }),
+    // Sorted here rather than trusted from the query. An embedded resource comes back in no
+    // promised order, and the app reads this as a timeline: out of order it draws the custody
+    // chain backwards, and history[0].ts is what orderCreatedAt falls back to for rate
+    // limiting. Cheap at these lengths, and it cannot be undone by a query-string change.
+    history: (events[r.uid] || [])
+      .map((e) => {
+        const h = { stage: e.stage, ts: tsIn(e.at) };
+        if (e.note) h.note = e.note;
+        return h;
+      })
+      .sort((a, b) => a.ts - b.ts),
     promisedTs: tsIn(r.promised_at),
     exception: r.exception || null,
     createdAt: tsIn(r.created_at),
@@ -225,25 +232,40 @@ export function settingsForStorage(settings) {
 }
 
 // ---- read -----------------------------------------------------------------------------
+// Rows are fetched a page at a time. PostgREST caps a response at its configured max-rows, and
+// a workspace here runs to thousands of parcels, so reading in one request silently truncates.
+// Paging until a short page arrives is the only way to know the whole workspace was returned.
+const PAGE = 1000;
+async function page(path) {
+  const out = [];
+  for (let offset = 0; ; offset += PAGE) {
+    const batch = await sb(path + "&limit=" + PAGE + "&offset=" + offset) || [];
+    out.push(...batch);
+    if (batch.length < PAGE) return out;
+  }
+}
+
 export async function sbReadState(tenant) {
   const t = q(tenant);
-  const [rows, manifests, units, activity, settingsRows] = await Promise.all([
-    sb("/rest/v1/packages?tenant=eq." + t + "&deleted_at=is.null&select=*&order=created_at.asc"),
-    sb("/rest/v1/manifests?tenant=eq." + t + "&select=*&order=created_at.desc"),
-    sb("/rest/v1/load_units?tenant=eq." + t + "&select=*&order=created_at.desc"),
+  // Custody entries come back nested inside their parcel via the foreign key rather than as a
+  // second query keyed on every uid. That query put one 36-character uuid per parcel into the
+  // URL, which passed at a hundred parcels and failed outright at a few hundred -- roughly
+  // 18 KB of query string. Embedding is one request, constant length, and cannot truncate a
+  // parcel's history away from it.
+  const [pkgRows, manifests, units, activity, settingsRows] = await Promise.all([
+    page("/rest/v1/packages?tenant=eq." + t + "&deleted_at=is.null&order=created_at.asc" +
+         "&select=*,package_events(stage,note,at)"),
+    page("/rest/v1/manifests?tenant=eq." + t + "&select=*&order=created_at.desc"),
+    page("/rest/v1/load_units?tenant=eq." + t + "&select=*&order=created_at.desc"),
+    // Capped, and deliberately: the Activity view lists recent workspace entries, not an
+    // unbounded history, and the client re-pushes what it holds. The 500 newest are returned,
+    // so an entry older than that is readable in the database but not through a pull.
     sb("/rest/v1/activity_events?tenant=eq." + t + "&select=*&order=at.desc&limit=500"),
     sb("/rest/v1/workspace_settings?tenant=eq." + t + "&select=settings"),
   ]);
-  const pkgRows = Array.isArray(rows) ? rows : [];
 
-  const uids = pkgRows.map((r) => r.uid);
-  let eventRows = [];
-  if (uids.length) {
-    eventRows = await sb("/rest/v1/package_events?package_uid=in.(" + uids.map(q).join(",") +
-      ")&select=*&order=at.asc") || [];
-  }
   const events = {};
-  for (const e of eventRows) (events[e.package_uid] = events[e.package_uid] || []).push(e);
+  for (const r of pkgRows) events[r.uid] = r.package_events || [];
 
   const signed = await signPhotoPaths(pkgRows.flatMap((r) => [r.photo_pickup, r.photo_delivery]));
   const packages = pkgRows.map((r) => packageFromRow(r, events, signed));
@@ -279,23 +301,37 @@ export async function sbReadState(tenant) {
 // nothing when the list is empty. `merge` overwrites the stored row (the client is the
 // authority on a parcel's current state); `ignore` keeps the first write and drops repeats,
 // which is what makes an append-only table survive the same push arriving twice.
-function upsert(table, conflict, resolution, rows) {
-  if (!rows.length) return Promise.resolve();
-  return sb("/rest/v1/" + table + "?on_conflict=" + conflict, {
-    method: "POST", body: rows, prefer: "resolution=" + resolution + "-duplicates,return=minimal",
+// Sent in chunks: 3000 parcels is ~12,000 custody rows, and one request carrying all of them
+// is a multi-megabyte body against a function with a payload limit. Chunks also mean a failure
+// reports which slice failed instead of losing the whole push.
+//
+// Chunks go out a few at a time. Serially, a 3000-parcel push took 4.9s of a 10s function
+// budget; the work is latency-bound, not database-bound. LANES is deliberately small -- the
+// point is to stop waiting on one round trip at a time, not to open thirty connections against
+// a pooler shared with every other request the deployment is serving.
+const CHUNK = 500;
+const LANES = 4;
+async function upsert(table, conflict, resolution, rows) {
+  const chunks = [];
+  for (let i = 0; i < rows.length; i += CHUNK) chunks.push(rows.slice(i, i + CHUNK));
+  const send = (body) => sb("/rest/v1/" + table + "?on_conflict=" + conflict, {
+    method: "POST", body, prefer: "resolution=" + resolution + "-duplicates,return=minimal",
   });
+  for (let i = 0; i < chunks.length; i += LANES) {
+    await Promise.all(chunks.slice(i, i + LANES).map(send));
+  }
 }
 const ensureTenant = (tenant) => upsert("tenants", "slug", "ignore", [{ slug: tenant }]);
 
 // Photos are uploaded before the row is written, so a row can never point at bytes that
 // failed to arrive. Shared by the whole-workspace push and the single-order append.
-async function rowWithPhotos(tenant, p) {
+async function rowWithPhotos(tenant, p, syncToken) {
   const photos = p.photos || {};
   const [pickup, delivery] = await Promise.all([
     photos.pickup ? uploadPhoto(tenant, p.id, "pickup", photos.pickup) : null,
     photos.delivery ? uploadPhoto(tenant, p.id, "delivery", photos.delivery) : null,
   ]);
-  return rowFromPackage(tenant, p, { pickup, delivery });
+  return rowFromPackage(tenant, p, { pickup, delivery }, syncToken);
 }
 
 const custodyRows = (uid, history, fallbackAt) =>
@@ -306,25 +342,29 @@ const custodyRows = (uid, history, fallbackAt) =>
 export async function sbWriteState(tenant, data) {
   await ensureTenant(tenant);
 
+  const pushedAt = new Date().toISOString();
+  // Identifies this push. Not a timestamp: see sync_token in the schema.
+  const token = crypto.randomUUID();
   const packages = Array.isArray(data.packages) ? data.packages.filter((p) => p && p.id) : [];
-  const rows = [];
-  for (const p of packages) rows.push(await rowWithPhotos(tenant, p));
+  // Photos in parallel rather than one parcel at a time. Uploading is the only part of a push
+  // that touches Storage, and a serial loop made a first sync of forty photographed parcels
+  // forty sequential round trips.
+  const rows = await Promise.all(packages.map((p) => rowWithPhotos(tenant, p, token)));
 
   await upsert("packages", "uid", "merge", rows);
   await upsert("package_events", "package_uid,stage,at", "ignore",
     rows.flatMap((r, i) => custodyRows(r.uid, packages[i].history, r.created_at)));
 
-  // Anything stored for this tenant and absent from the push is a deletion, recorded as
+  // Anything stored for this tenant and absent from this push is a deletion, recorded as
   // deleted_at rather than removed so a later pull cannot resurrect it and an audit still has
   // it. This is what retires the client's tombstone array.
-  const keep = new Set(rows.map((r) => r.uid));
-  const existing = await sb("/rest/v1/packages?tenant=eq." + q(tenant) + "&deleted_at=is.null&select=uid") || [];
-  const gone = existing.filter((r) => !keep.has(r.uid)).map((r) => r.uid);
-  if (gone.length) {
-    await sb("/rest/v1/packages?uid=in.(" + gone.map(q).join(",") + ")", {
-      method: "PATCH", body: { deleted_at: new Date().toISOString() }, prefer: "return=minimal",
-    });
-  }
+  //
+  // Identified by token, not by listing what to keep: every row above carries this push's
+  // token, so a row without it was not in the push. Listing uids instead would put a uuid per
+  // parcel into the URL, which is the bug that made reads fail at a few hundred parcels.
+  await sb("/rest/v1/packages?tenant=eq." + q(tenant) + "&deleted_at=is.null&sync_token=neq." + q(token), {
+    method: "PATCH", body: { deleted_at: pushedAt }, prefer: "return=minimal",
+  });
 
   const now = () => new Date().toISOString();
   await upsert("manifests", "tenant,id", "merge",

@@ -8,10 +8,9 @@
 // read or change their own rows out of the shared state.
 import { getStore } from "@netlify/blobs";
 import { CORS, json, verifyToken, bearer } from "./_auth.mjs";
-import { readState, writeState, nextId, orderRateLimit, appendOrderWithRepair } from "./_lib.mjs";
+import { readState, writeState, nextId, orderRateLimit, appendOrderWithRepair, soloTenant } from "./_lib.mjs";
 
 // Single-company platform for now, so every customer order lands in one workspace.
-const TENANT = "default";
 const S = (v) => (v == null ? "" : String(v)).trim();
 
 function makeCustomerOrder(d, owner, state) {
@@ -63,13 +62,13 @@ export default async (req) => {
   const p = verifyToken(bearer(req));
   if (!p || !p.email) return json({ ok: false, error: "Sign in required." }, 401);
 
-  const state = await readState(TENANT);
+  const state = await readState(soloTenant());
   if (!Array.isArray(state.packages)) state.packages = [];
   const migrated = await migrateLegacyOrders(p.email, state);
   const mine = () => state.packages.filter((o) => o.customerEmail === p.email);
 
   if (req.method === "GET") {
-    if (migrated) await writeState(TENANT, state);
+    if (migrated) await writeState(soloTenant(), state);
     return json({ ok: true, orders: mine() });
   }
 
@@ -90,7 +89,7 @@ export default async (req) => {
     // Append-and-verify rather than a plain read-modify-write: two customers ordering at
     // the same moment could otherwise lose one order, or be handed the same tracking
     // number. See appendOrderWithRepair.
-    const result = await appendOrderWithRepair(TENANT, (fresh) =>
+    const result = await appendOrderWithRepair(soloTenant(), (fresh) =>
       makeCustomerOrder(d, { email: p.email, name: p.name }, fresh));
 
     if (result.unverified) {
@@ -115,7 +114,7 @@ export default async (req) => {
       return json({ ok: false, error: "This order is already on its way and can no longer be cancelled." }, 409);
     }
     state.packages = state.packages.filter((o) => o.id !== id);
-    await writeState(TENANT, state);
+    await writeState(soloTenant(), state);
     return json({ ok: true, cancelled: id, orders: mine() });
   }
 

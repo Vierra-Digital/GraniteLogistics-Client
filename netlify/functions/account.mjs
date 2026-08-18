@@ -21,10 +21,9 @@
 // push subscriptions, and rate-limit counters.
 import { getStore } from "@netlify/blobs";
 import { CORS, json, verifyToken, bearer, getUser, userStore, sessionSuperseded } from "./_auth.mjs";
-import { readState, writeState } from "./_lib.mjs";
+import { readState, writeState, soloTenant } from "./_lib.mjs";
 import { readSubscriptions } from "./_push.mjs";
 
-const TENANT = "default";
 const HEADERS = { ...CORS, "Access-Control-Allow-Methods": "GET, DELETE, OPTIONS" };
 
 // Between collection and delivery the parcel is in our custody and its address is needed
@@ -47,7 +46,7 @@ export default async (req) => {
   if (who.err) return who.err;
 
   try {
-    const state = await readState(TENANT);
+    const state = await readState(soloTenant());
     const mine = (state.packages || []).filter((p) => p && String(p.customerEmail || "").toLowerCase() === who.email);
 
     if (req.method === "GET") {
@@ -94,7 +93,7 @@ export default async (req) => {
             photos: {},          // condition photos can show a doorway or a street number
           };
         });
-      await writeState(TENANT, state);
+      await writeState(soloTenant(), state);
 
       // Everything that identifies the person rather than the parcel.
       await userStore().delete(who.email);

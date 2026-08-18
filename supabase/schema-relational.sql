@@ -111,7 +111,10 @@ language sql stable as $$ select public.effective_role(coalesce(auth.jwt() ->> '
 
 create or replace function public.my_tenant() returns text
 language sql stable as $$
-  select coalesce((select tenant from public.profiles where id = auth.uid()), 'default');
+  select case
+    when auth.uid() is null then null
+    else coalesce((select tenant from public.profiles where id = auth.uid()), 'default')
+  end;
 $$;
 
 -- ---------------------------------------------------------------------------
@@ -160,6 +163,12 @@ create table if not exists public.packages (
   return_state    jsonb,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now(),
+  -- Which whole-workspace push last contained this row. A row not carrying the token of the
+  -- push in progress was absent from it, which is how a deletion is detected without listing
+  -- every surviving uid in a URL. A token rather than a timestamp because two pushes inside
+  -- one millisecond produce identical timestamps, and a "last seen before now" comparison then
+  -- silently misses the deletion.
+  sync_token      text not null default '',
   deleted_at      timestamptz,                            -- replaces the tombstone array
   unique (tenant, id)
 );
@@ -319,7 +328,7 @@ create policy "events follow their package" on public.package_events
 drop policy if exists "activity ops read" on public.activity_events;
 create policy "activity ops read"   on public.activity_events for select using (tenant = public.my_tenant() and public.my_role() <> 'Customer');
 drop policy if exists "settings tenant read" on public.workspace_settings;
-create policy "settings tenant read" on public.workspace_settings for select using (tenant = public.my_tenant());
+create policy "settings tenant read" on public.workspace_settings for select using (tenant = public.my_tenant() and public.my_role() <> 'Customer');
 drop policy if exists "manifests ops read" on public.manifests;
 create policy "manifests ops read"  on public.manifests  for select using (tenant = public.my_tenant() and public.my_role() <> 'Customer');
 drop policy if exists "loadunits ops read" on public.load_units;

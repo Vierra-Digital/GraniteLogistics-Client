@@ -4,9 +4,8 @@
 // Because the endpoint is open and tracking numbers are sequential, the response is
 // deliberately minimal (see publicTrackingView): status, dates, destination city, and
 // carrier only. Nothing that identifies the recipient or the contents.
-import { CORS, json, readState, publicTrackingView } from "./_lib.mjs";
+import { CORS, json, readState, publicTrackingView, soloTenant } from "./_lib.mjs";
 
-const TENANT = "default";
 const norm = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 
 export default async (req) => {
@@ -17,7 +16,7 @@ export default async (req) => {
   if (!q) return json({ ok: false, error: "A tracking number is required." }, 400);
 
   try {
-    const state = await readState(TENANT);
+    const state = await readState(soloTenant());
     const hit = (state.packages || []).find(
       (p) => p && (norm(p.id) === q || norm(p.barcode) === q || norm(p.tracking) === q)
     );

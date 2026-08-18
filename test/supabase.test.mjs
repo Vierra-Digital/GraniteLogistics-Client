@@ -129,12 +129,22 @@ function makeSupabase() {
   // Only the filter forms this code actually uses.
   const matches = (row, params) => {
     for (const [key, val] of params) {
-      if (["select", "order", "limit", "on_conflict"].includes(key)) continue;
+      if (["select", "order", "limit", "offset", "on_conflict"].includes(key)) continue;
       if (val.startsWith("eq.")) { if (String(row[key]) !== val.slice(3)) return false; continue; }
       if (val === "is.null") { if (row[key] !== null && row[key] !== undefined) return false; continue; }
       if (val.startsWith("in.(")) {
         const set = val.slice(4, -1).split(",").map(decodeURIComponent);
         if (!set.includes(String(row[key]))) return false;
+        continue;
+      }
+      if (val.startsWith("neq.")) { if (String(row[key]) === decodeURIComponent(val.slice(4))) return false; continue; }
+      // Timestamp comparisons, kept for any future range filter.
+      if (val.startsWith("lt.") || val.startsWith("gte.")) {
+        const bound = decodeURIComponent(val.replace(/^(lt|gte)\./, ""));
+        const mine = row[key];
+        if (mine === null || mine === undefined) return false;
+        const cmp = String(mine) < String(bound);
+        if (val.startsWith("lt.") ? !cmp : cmp) return false;
         continue;
       }
       throw new Error("fake PostgREST cannot evaluate filter " + key + "=" + val);
@@ -175,7 +185,32 @@ function makeSupabase() {
         out = out.slice().sort((a, b) => (String(a[col]) < String(b[col]) ? -1 : 1));
         if (dir === "desc") out.reverse();
       }
+      // Embedded resources: select=*,package_events(stage,note,at) nests the children of each
+      // row via the foreign key, which is what replaced a uid-per-parcel URL filter.
+      const select = u.searchParams.get("select") || "*";
+      const embed = /(\w+)\(([^)]*)\)/.exec(select);
+      if (embed) {
+        const [, child, colList] = embed;
+        const fk = Object.entries(FOREIGN_KEYS[child] || {}).find(([, [t]]) => t === table);
+        if (!fk) throw new Error("fake cannot embed " + child + " in " + table + ": no foreign key");
+        const [fkCol, [, parentCol]] = fk;
+        const cols = colList.split(",").map((c) => c.trim()).filter(Boolean);
+        // Reversed deliberately. PostgREST promises no order for an embedded resource, and
+        // returning them in insertion order let a real bug through: custody history came back
+        // newest-first and the timeline drew backwards. A fake that is kinder than the service
+        // is a fake that hides things.
+        out = out.map((r) => ({
+          ...r,
+          [child]: rows[child]
+            .filter((c) => String(c[fkCol]) === String(r[parentCol]))
+            .map((c) => (cols.length ? Object.fromEntries(cols.map((k) => [k, c[k]])) : c))
+            .reverse(),
+        }));
+      }
+
+      const offset = +(u.searchParams.get("offset") || 0);
       const limit = u.searchParams.get("limit");
+      if (offset) out = out.slice(offset);
       if (limit) out = out.slice(0, +limit);
       return ok(out);
     }
@@ -712,5 +747,49 @@ test("the tenant row exists before anything references it", async () => {
       history: [{ stage: "Won", ts: 1893400000000 }],
     }));
     assert.ok(fake.rows.tenants.some((t) => t.slug === "globex"), "an order created a parcel with no tenant row");
+  });
+});
+
+test("two pushes inside one millisecond still record the deletion", async () => {
+  // This started as a flaky test. The deletion was found by comparing timestamps, so when two
+  // pushes landed in the same millisecond the surviving rows carried a stamp equal to -- not
+  // less than -- the push in progress, and the removed parcel quietly stayed alive. A per-push
+  // token has no granularity to lose.
+  await withSupabase(async (sb, fake) => {
+    const two = { ...workspace(), packages: [
+      { id: "GL-3001", status: "Won", item: {}, customer: {}, photos: {}, history: [] },
+      { id: "GL-3002", status: "Won", item: {}, customer: {}, photos: {}, history: [] },
+    ] };
+    const one = { ...two, packages: two.packages.slice(0, 1) };
+
+    // Same tick: no await between them that could advance the clock.
+    await Promise.all([sb.sbWriteState("default", two), sb.sbWriteState("default", two)]);
+    await sb.sbWriteState("default", one);
+
+    const after = await sb.sbReadState("default");
+    assert.deepEqual(after.packages.map((p) => p.id), ["GL-3001"], "the removed parcel survived");
+    const gone = fake.rows.packages.find((r) => r.id === "GL-3002");
+    assert.ok(gone.deleted_at, "GL-3002 was not soft-deleted");
+  });
+});
+
+test("custody history comes back oldest first, whatever order the rows arrive in", async () => {
+  // The app draws this as a timeline and orderCreatedAt falls back to history[0].ts, so the
+  // order is load-bearing. The fake hands embedded rows back reversed, matching the fact that
+  // PostgREST promises nothing about their order.
+  await withSupabase(async (sb) => {
+    await sb.sbWriteState("default", { ...workspace(), packages: [{
+      id: "GL-4001", status: "Delivered", item: {}, customer: {}, photos: {},
+      history: [
+        { stage: "Won", ts: 1893400000000, note: "Order placed." },
+        { stage: "Intake", ts: 1893410000000 },
+        { stage: "PickedUp", ts: 1893420000000 },
+        { stage: "Delivered", ts: 1893456000000, note: "Delivered." },
+      ],
+    }] });
+    const p = (await sb.sbReadState("default")).packages[0];
+    assert.deepEqual(p.history.map((h) => h.stage), ["Won", "Intake", "PickedUp", "Delivered"]);
+    assert.deepEqual(p.history.map((h) => h.ts), [...p.history.map((h) => h.ts)].sort((a, b) => a - b));
+    assert.equal(p.history[0].note, "Order placed.", "the first entry is the oldest one");
   });
 });

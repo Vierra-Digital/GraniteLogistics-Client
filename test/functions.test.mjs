@@ -782,3 +782,29 @@ test("the migration transform quotes its input and extracts photos as files", as
 
   rmSync(out, { recursive: true, force: true });
 });
+
+// ---- the tenant for requests that carry no api key ----
+test("soloTenant agrees with the key-resolved tenant when there is only one", async () => {
+  const { soloTenant } = await import("../netlify/functions/_lib.mjs");
+  const saved = process.env.GL_TENANTS;
+  try {
+    // Unconfigured: the demo keys all sit under "default".
+    delete process.env.GL_TENANTS;
+    assert.equal(soloTenant(), "default");
+
+    // One tenant under several keys is unambiguous, and used to be the case that broke:
+    // state.mjs wrote to "acme" while customer orders and public tracking read "default".
+    process.env.GL_TENANTS = JSON.stringify({ live: "acme", backup: "acme" });
+    assert.equal(soloTenant(), "acme");
+
+    // Genuinely multi-tenant cannot be resolved from a keyless request.
+    process.env.GL_TENANTS = JSON.stringify({ a: "acme", g: "globex" });
+    assert.equal(soloTenant(), "default");
+
+    // Malformed config must not throw here; resolveKey already treats it as unset.
+    process.env.GL_TENANTS = "{not json";
+    assert.equal(soloTenant(), "default");
+  } finally {
+    if (saved === undefined) delete process.env.GL_TENANTS; else process.env.GL_TENANTS = saved;
+  }
+});
